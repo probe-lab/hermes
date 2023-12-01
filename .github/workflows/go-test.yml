@@ -17,4 +17,4 @@ jobs:
   go-test:
     uses: pl-strflt/uci/.github/workflows/go-test.yml@v0.0
     with:
-      go-versions: '["this", "next"]'
+      go-versions: '["this"]'

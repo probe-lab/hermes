@@ -137,7 +137,7 @@ func doListenEth(cc *cli.Context) error {
 		case eth.BeaconBlockTopicBase:
 			msgHandler = ethMsgHandler.BeaconBlockMessageHandler
 		default:
-			slog.Error("untraceable gossipsub topic", "topic", top)
+			slog.Error("no handler defined for gossipsub topic", "topic", top)
 			continue
 		}
 		topic := eth.ComposeTopic(forkDigest, top)
