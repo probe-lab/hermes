@@ -10,8 +10,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/urfave/cli/v2"
 
-	"github.com/plprobelab/hermes/eth"
-	"github.com/plprobelab/hermes/node"
+	"github.com/probe-lab/hermes/eth"
+	"github.com/probe-lab/hermes/node"
 )
 
 var listenEthCmd = &cli.Command{

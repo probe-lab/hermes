@@ -18,7 +18,7 @@ import (
 	"github.com/protolambda/zrnt/eth2/configs"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/plprobelab/hermes/node"
+	"github.com/probe-lab/hermes/node"
 )
 
 var (

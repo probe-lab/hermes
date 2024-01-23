@@ -10,7 +10,7 @@ import (
 	"github.com/protolambda/ztyp/tree"
 	"github.com/protolambda/ztyp/view"
 
-	"github.com/plprobelab/hermes/eth/rpc/reqresp"
+	"github.com/probe-lab/hermes/eth/rpc/reqresp"
 )
 
 // instead of parsing the whole body, we can just leave it as bytes.

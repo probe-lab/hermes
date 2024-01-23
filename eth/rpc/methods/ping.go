@@ -3,7 +3,7 @@ package methods
 import (
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 
-	"github.com/plprobelab/hermes/eth/rpc/reqresp"
+	"github.com/probe-lab/hermes/eth/rpc/reqresp"
 )
 
 var PingRPCv1 = reqresp.RPCMethod{

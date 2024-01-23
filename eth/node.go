@@ -21,8 +21,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/plprobelab/hermes/eth/rpc/methods"
-	"github.com/plprobelab/hermes/eth/rpc/reqresp"
+	"github.com/probe-lab/hermes/eth/rpc/methods"
+	"github.com/probe-lab/hermes/eth/rpc/reqresp"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 )
 
