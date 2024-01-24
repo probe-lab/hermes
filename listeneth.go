@@ -18,7 +18,7 @@ var listenEthCmd = &cli.Command{
 	Name:   "eth",
 	Usage:  "listen to gossipsub topics on the Ethereum network",
 	Action: doListenEth,
-	Flags: mergeFlags(loggingFlags, []cli.Flag{
+	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:  "private-key",
 			Usage: "base64 private key identity for the libp2p host",
@@ -53,12 +53,11 @@ var listenEthCmd = &cli.Command{
 			Name:  "max-peers",
 			Value: 30,
 		},
-	}),
+	},
 }
 
 func doListenEth(cc *cli.Context) error {
 	ctx := cc.Context
-	setupLogging(cc)
 
 	privKeyStr := cc.String("private-key")
 	forkDigest := cc.String("fork-digest")
