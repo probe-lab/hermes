@@ -8,20 +8,24 @@ import (
 
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/urfave/cli/v2"
-
 	"github.com/plprobelab/hermes/pkg/eth"
+	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v4/config/params"
+	"github.com/urfave/cli/v2"
 )
 
 var defaultEthConfig = ethConfig{
 	Bootstrappers: *cli.NewStringSlice(eth.DefaultBootstrappers...),
-	ForkDigest:    string(eth.ForkDigestPhase0),
-	PrivateKeyStr: "",                 // unset means it'll be generated
-	Attnets:       "ffffffffffffffff", // subscribed to all attnets. TODO: is that true?
+	PrivateKeyStr: "", // unset means it'll be generated
+	Chain:         "mainnet",
+	Fork:          "current",
+	Topics:        *cli.NewStringSlice(p2p.GossipBlockMessage),
+	Attnets:       "ffffffffffffffff", // subscribed to all attnets. TODO: is that right?
 	Devp2pHost:    "127.0.0.1",
 	Devp2pPort:    0,
 	Libp2pHost:    "127.0.0.1",
 	Libp2pPort:    0,
+	MaxPeers:      30, // arbitrary
 }
 
 var cmdEth = &cli.Command{
@@ -39,20 +43,34 @@ var cmdEth = &cli.Command{
 			DefaultText: "consensus layer",
 		},
 		&cli.StringFlag{
-			Name:        "fork-digest",
-			Aliases:     []string{"f"},
-			EnvVars:     []string{"HERMES_ETH_FORK_DIGEST"},
-			Usage:       "The fork digest to advertise.",
-			Value:       defaultEthConfig.ForkDigest,
-			Destination: &defaultEthConfig.ForkDigest,
-		},
-		&cli.StringFlag{
 			Name:        "private-key",
 			Aliases:     []string{"k"},
 			EnvVars:     []string{"HERMES_ETH_PRIVATE_KEY"},
 			Usage:       "The private key for the ethereum node.",
 			Value:       defaultEthConfig.PrivateKeyStr,
 			Destination: &defaultEthConfig.PrivateKeyStr,
+		},
+		&cli.StringFlag{
+			Name:        "fork",
+			EnvVars:     []string{"HERMES_ETH_FORK"},
+			Usage:       "The beacon chain fork to participate in (current, phase0, altair, bellatrix, capella, deneb)",
+			Value:       defaultEthConfig.Fork,
+			Destination: &defaultEthConfig.Fork,
+		},
+		&cli.StringFlag{
+			Name:        "chain",
+			EnvVars:     []string{"HERMES_ETH_CHAIN"},
+			Usage:       "The beacon chain network to participate in",
+			Value:       defaultEthConfig.Chain,
+			Destination: &defaultEthConfig.Chain,
+		},
+		&cli.StringSliceFlag{
+			Name:        "topics",
+			Aliases:     []string{"t"},
+			EnvVars:     []string{"HERMES_ETH_TOPICS"},
+			Usage:       "The list of gossipsub topics to subscribe to.",
+			Value:       cli.NewStringSlice(defaultEthConfig.Topics.Value()...),
+			Destination: &defaultEthConfig.Topics,
 		},
 		&cli.StringFlag{
 			Name:        "attnets",
@@ -90,8 +108,18 @@ var cmdEth = &cli.Command{
 			Value:       defaultEthConfig.Libp2pPort,
 			Destination: &defaultEthConfig.Libp2pPort,
 		},
+		&cli.IntFlag{
+			Name:        "max-peers",
+			EnvVars:     []string{"HERMES_ETH_MAX_PEERS"},
+			Usage:       "The maximum number of peers we want to be connected with",
+			Value:       defaultEthConfig.MaxPeers,
+			Destination: &defaultEthConfig.MaxPeers,
+		},
 	},
 	Action: actionEth,
+	Subcommands: []*cli.Command{
+		cmdEthChains,
+	},
 }
 
 func actionEth(c *cli.Context) error {
@@ -113,29 +141,38 @@ func actionEth(c *cli.Context) error {
 		slog.Debug(fmt.Sprintf("  [%d] %s", i, info.PeerID), "maddrs", info.Maddrs, "forkDigest", info.ForkDigest, "attnets", info.Attnets)
 	}
 
+	chainCfg, err := params.ByName(defaultEthConfig.Chain)
+	if err != nil {
+		return fmt.Errorf("unknown chain %s", defaultEthConfig.Chain)
+	}
+
+	// parse private key information or generate a new one
+	var privKey *ecdsa.PrivateKey
+	if defaultEthConfig.PrivateKeyStr == "" {
+		privKey, err = ecdsa.GenerateKey(gcrypto.S256(), rand.Reader)
+		if err != nil {
+			return fmt.Errorf("generate ecdsa private key: %w", err)
+		}
+	} else {
+		privKey, err = gcrypto.HexToECDSA(defaultEthConfig.PrivateKeyStr)
+		if err != nil {
+			return fmt.Errorf("parse ecdsa private key: %w", err)
+		}
+	}
+
 	// construct ethereum host configuration
 	hostCfg := &eth.HostConfig{
 		Bootstrappers: bootstrappers,
-		ForkDigest:    eth.ForkDigest(defaultEthConfig.ForkDigest),
-		PrivKey:       nil, // set below
+		PrivKey:       privKey,
+		Fork:          defaultEthConfig.Fork,
+		Topics:        defaultEthConfig.Topics.Value(),
+		ChainCfg:      chainCfg,
 		Attnets:       defaultEthConfig.Attnets,
 		Devp2pHost:    defaultEthConfig.Devp2pHost,
 		Devp2pPort:    defaultEthConfig.Devp2pPort,
 		Libp2pHost:    defaultEthConfig.Libp2pHost,
 		Libp2pPort:    defaultEthConfig.Libp2pPort,
-	}
-
-	// parse private key information or generate a new one
-	if defaultEthConfig.PrivateKeyStr == "" {
-		hostCfg.PrivKey, err = ecdsa.GenerateKey(gcrypto.S256(), rand.Reader)
-		if err != nil {
-			return fmt.Errorf("generate ecdsa private key: %w", err)
-		}
-	} else {
-		hostCfg.PrivKey, err = gcrypto.HexToECDSA(defaultEthConfig.PrivateKeyStr)
-		if err != nil {
-			return fmt.Errorf("parse ecdsa private key: %w", err)
-		}
+		MaxPeers:      defaultEthConfig.MaxPeers,
 	}
 
 	// construct the ethereum host and start it
@@ -155,13 +192,16 @@ func actionEth(c *cli.Context) error {
 
 type ethConfig struct {
 	Bootstrappers cli.StringSlice
-	ForkDigest    string
 	PrivateKeyStr string
+	Fork          string
+	Chain         string
+	Topics        cli.StringSlice
 	Attnets       string
 	Devp2pHost    string
 	Devp2pPort    int
 	Libp2pHost    string
 	Libp2pPort    int
+	MaxPeers      int
 }
 
 func (c *ethConfig) BootstrapperEnodes() ([]*enode.Node, error) {

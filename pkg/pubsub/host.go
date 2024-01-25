@@ -4,38 +4,43 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 )
 
-type Config struct {
-	UserAgent      string
-	Host           string
-	Port           int
-	PrivateKey     *crypto.Secp256k1PrivateKey
-	BootstrapPeers []peer.ID
+type MessageHandler func(*pubsub.Message) error
+
+type HostConfig struct {
+	UserAgent  string
+	Host       string
+	Port       int
+	PrivateKey *crypto.Secp256k1PrivateKey
 }
 
-func (c *Config) Validate() error {
+func (c *HostConfig) Validate() error {
+	if c.UserAgent == "" {
+		return fmt.Errorf("user agent must not be empty")
+	}
+
 	return nil
 }
 
 type Host struct {
 	host.Host
 
-	cfg *Config
+	cfg *HostConfig
+	// subs map[string]*Subscription
 }
 
-func NewHost(cfg *Config) (*Host, error) {
+func NewHost(cfg *HostConfig) (*Host, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("host config: %w", err)
 	}
@@ -78,13 +83,47 @@ func NewHost(cfg *Config) (*Host, error) {
 	return psHost, nil
 }
 
-func (h *Host) Start(ctx context.Context) error {
-	gs, err := pubsub.NewGossipSub(ctx, h)
+type RunConfig struct {
+	PubSubOptions []pubsub.Option
+	TopicHandlers map[string]MessageHandler
+}
+
+func (c *RunConfig) Validate() error {
+	return nil
+}
+
+func (h *Host) Run(ctx context.Context, cfg *RunConfig) error {
+	gs, err := pubsub.NewGossipSub(ctx, h, cfg.PubSubOptions...)
 	if err != nil {
 		return fmt.Errorf("new gossipsub: %w", err)
 	}
 
-	_ = gs
+	var wg sync.WaitGroup
+	for topic, handler := range cfg.TopicHandlers {
+		psTopic, err := gs.Join(topic)
+		if err != nil {
+			return fmt.Errorf("join topic %s: %w", topic, err)
+		}
+
+		psSub, err := psTopic.Subscribe()
+		if err != nil {
+			return fmt.Errorf("subscribe to topic %s: %w", topic, err)
+		}
+
+		sub := &Subscription{
+			topic:   psTopic,
+			sub:     psSub,
+			handler: handler,
+		}
+
+		wg.Add(1)
+		go func() {
+			sub.ReadMessages(ctx, h.ID())
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
 
 	return nil
 }

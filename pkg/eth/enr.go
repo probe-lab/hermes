@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"math/bits"
 
 	"github.com/ethereum/go-ethereum/p2p/enr"
@@ -24,27 +25,13 @@ type ENREntryAttnets struct {
 	raw        []byte
 }
 
-type ENREntrySyncCommsSubnet struct {
-	SyncNets string
-}
-
-// ENREntryOpStack from https://github.com/ethereum-optimism/optimism/blob/85d932810bafc9084613b978d42cd770bc044eb4/op-node/p2p/discovery.go#L172
-type ENREntryOpStack struct {
-	ChainID uint64
-	Version uint64
-}
-
 var (
 	_ enr.Entry = (*ENREntryEth2)(nil)
 	_ enr.Entry = (*ENREntryAttnets)(nil)
-	_ enr.Entry = (*ENREntrySyncCommsSubnet)(nil)
-	_ enr.Entry = (*ENREntryOpStack)(nil)
 )
 
-func (e *ENREntryEth2) ENRKey() string            { return "eth2" }
-func (e *ENREntryAttnets) ENRKey() string         { return "attnets" }
-func (e *ENREntrySyncCommsSubnet) ENRKey() string { return "syncnets" }
-func (e *ENREntryOpStack) ENRKey() string         { return "opstack" }
+func (e *ENREntryEth2) ENRKey() string    { return "eth2" }
+func (e *ENREntryAttnets) ENRKey() string { return "attnets" }
 
 func NewENREntryEth2(in string) (*ENREntryEth2, error) {
 	forkDigest := beacon.ForkDigest{}
@@ -52,19 +39,29 @@ func NewENREntryEth2(in string) (*ENREntryEth2, error) {
 		return nil, fmt.Errorf("unmarshal fork digest")
 	}
 
+	// TODO: could calculate next fork version/epoch:
+	// https://github.com/prysmaticlabs/prysm/blob/c4c28e4825031480450c481aaa6560bf615a5fd3/beacon-chain/p2p/fork.go#L96
+
 	return &ENREntryEth2{
 		Eth2Data: beacon.Eth2Data{
-			ForkDigest:      forkDigest,
-			NextForkVersion: beacon.Version{}, // TODO: set?
-			NextForkEpoch:   0,                // TODO: set?
+			ForkDigest:    forkDigest,
+			NextForkEpoch: math.MaxUint64,
 		},
 	}, nil
 }
 
 func (e *ENREntryEth2) EncodeRLP(w io.Writer) error {
-	_, err := w.Write(e.Eth2Data.ForkDigest[:])
-	// TODO: next fork
-	// TODO: next epoch
+	var b bytes.Buffer
+	if err := e.Eth2Data.Serialize(codec.NewEncodingWriter(&b)); err != nil {
+		return err
+	}
+
+	enc, err := rlp.EncodeToBytes(b.Bytes())
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+
 	return err
 }
 
@@ -103,7 +100,12 @@ func NewENREntryAttnets(in string) (*ENREntryAttnets, error) {
 }
 
 func (e *ENREntryAttnets) EncodeRLP(w io.Writer) error {
-	_, err := w.Write(e.raw[:])
+	enc, err := rlp.EncodeToBytes(e.raw[:])
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+
 	return err
 }
 
@@ -117,38 +119,5 @@ func (e *ENREntryAttnets) DecodeRLP(s *rlp.Stream) error {
 	e.Attnets = "0x" + hex.EncodeToString(b)
 	e.raw = b
 
-	return nil
-}
-
-func (e *ENREntrySyncCommsSubnet) DecodeRLP(s *rlp.Stream) error {
-	b, err := s.Bytes()
-	if err != nil {
-		return fmt.Errorf("failed to get bytes for syncnets ENR entry: %w", err)
-	}
-
-	// check out https://github.com/prysmaticlabs/prysm/blob/203dc5f63b060821c2706f03a17d66b3813c860c/beacon-chain/p2p/subnets.go#L221
-	e.SyncNets = "0x" + hex.EncodeToString(b)
-
-	return nil
-}
-
-func (e *ENREntryOpStack) DecodeRLP(s *rlp.Stream) error {
-	b, err := s.Bytes()
-	if err != nil {
-		return fmt.Errorf("failed to decode outer ENR entry: %w", err)
-	}
-	// We don't check the byte length: the below readers are limited, and the ENR itself has size limits.
-	// Future "opstack" entries may contain additional data, and will be tagged with a newer Version etc.
-	r := bytes.NewReader(b)
-	chainID, err := binary.ReadUvarint(r)
-	if err != nil {
-		return fmt.Errorf("failed to read chain ID var int: %w", err)
-	}
-	version, err := binary.ReadUvarint(r)
-	if err != nil {
-		return fmt.Errorf("failed to read Version var int: %w", err)
-	}
-	e.ChainID = chainID
-	e.Version = version
 	return nil
 }
