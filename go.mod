@@ -1,4 +1,4 @@
-module github.com/plprobelab/hermes
+module github.com/probe-lab/hermes
 
 go 1.21
 
