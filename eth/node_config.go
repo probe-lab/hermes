@@ -6,39 +6,47 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/prysmaticlabs/go-bitfield"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
 	"github.com/prysmaticlabs/prysm/v4/network/forks"
 	pb "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/prysmaticlabs/prysm/v4/time/slots"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	gcrypto "github.com/ethereum/go-ethereum/crypto"
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/probe-lab/hermes/host"
 )
 
 type NodeConfig struct {
-	GenesisConfig *GenesisConfig
-	NetworkConfig *params.NetworkConfig
-	BeaconConfig  *params.BeaconChainConfig
-	PrivateKeyStr string
-	privateKey    *crypto.Secp256k1PrivateKey
-	FullNodeAddr  string
-	FullNodePort  int
-	Devp2pAddr    string
-	Devp2pPort    int
-	Libp2pAddr    string
-	Libp2pPort    int
+	GenesisConfig    *GenesisConfig
+	NetworkConfig    *params.NetworkConfig
+	BeaconConfig     *params.BeaconChainConfig
+	PrivateKeyStr    string
+	privateKey       *crypto.Secp256k1PrivateKey
+	FullNodeAddr     string
+	FullNodePort     int
+	Devp2pAddr       string
+	Devp2pPort       int
+	Libp2pAddr       string
+	Libp2pPort       int
+	DelegateAddrInfo *peer.AddrInfo
+	Tracer           trace.Tracer
+	Meter            metric.Meter
 }
 
 // Validate validates the Node configuration.
@@ -53,6 +61,14 @@ func (n *NodeConfig) Validate() error {
 
 	if _, err := n.PrivateKey(); err != nil {
 		return err
+	}
+
+	if n.Tracer == nil {
+		return fmt.Errorf("tracer must not be nil")
+	}
+
+	if n.Meter == nil {
+		return fmt.Errorf("meter must not be nil")
 	}
 
 	return nil
@@ -95,6 +111,10 @@ func (n *NodeConfig) PrivateKey() (*crypto.Secp256k1PrivateKey, error) {
 	return n.privateKey, nil
 }
 
+// ECDSAPrivateKey returns the ECDSA private key associated with the NodeConfig.
+// It retrieves the private key using the PrivateKey method and then converts it
+// to ECDSA format. If there is an error retrieving the private key or
+// converting it to ECDSA format, an error is returned.
 func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	privKey, err := n.PrivateKey()
 	if err != nil {
@@ -108,6 +128,12 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	return gcrypto.ToECDSA(data)
 }
 
+// libp2pOptions returns the options to configure the libp2p node. It retrieves
+// the private key, constructs the libp2p listen multiaddr based on the node
+// configuration. The options include setting the identity with the private key,
+// adding the listen address, setting the user agent to "hermes",
+// using only the TCP transport, enabling the Mplex multiplexer explicitly (this
+// is required by the specs).
 func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	privKey, err := n.PrivateKey()
 	if err != nil {
@@ -145,6 +171,38 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	return opts, nil
 }
 
+func (n *NodeConfig) delegateAPI() (string, int, error) {
+	if n.DelegateAddrInfo == nil {
+		return "", 0, fmt.Errorf("no delegated addr info configured")
+	}
+
+	maddr := n.DelegateAddrInfo.Addrs[0]
+	ip, err := maddr.ValueForProtocol(ma.P_IP4)
+	if err != nil {
+		ip, err = maddr.ValueForProtocol(ma.P_IP6)
+		if err != nil {
+			return "", 0, fmt.Errorf("no ip4 or ip6 configured in %s", maddr.String())
+		}
+	}
+
+	portStr, err := maddr.ValueForProtocol(ma.P_TCP)
+	if err != nil {
+		return "", 0, fmt.Errorf("no tcp port configured in %s", maddr.String())
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to convert port %s to int: %w", portStr, err)
+	}
+
+	return ip, port, nil
+}
+
+// enrEth2Entry generates an Ethereum 2.0 entry for the Ethereum Node Record
+// (ENR) in the discovery protocol. It calculates the current fork digest and
+// the next fork version and epoch, and then marshals them into an SSZ encoded
+// byte slice. Finally, it returns an ENR entry with the eth2 key and the
+// encoded fork information.
 func (n *NodeConfig) enrEth2Entry() (enr.Entry, error) {
 	genesisRoot := n.GenesisConfig.GenesisValidatorRoot
 	genesisTime := n.GenesisConfig.GenesisTime
@@ -206,7 +264,7 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *params.NetworkConfig,
 	}
 }
 
-var GenesisConfigs map[string]*GenesisConfig = map[string]*GenesisConfig{
+var GenesisConfigs = map[string]*GenesisConfig{
 	params.MainnetName: {
 		GenesisValidatorRoot: hexToBytes("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
 		GenesisTime:          time.Unix(0, 1606824023*int64(time.Millisecond)),

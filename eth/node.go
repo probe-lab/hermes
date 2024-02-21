@@ -3,19 +3,21 @@ package eth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
-
-	"github.com/libp2p/go-libp2p/core/event"
 
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/probe-lab/hermes/host"
+	"github.com/probe-lab/hermes/tele"
 )
 
 type Node struct {
 	cfg *NodeConfig
 	h   *host.Host
+	pc  IPrysmClient
 }
 
 func NewNode(cfg *NodeConfig) (*Node, error) {
@@ -32,29 +34,69 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
+	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()))
 
 	n := &Node{
 		cfg: cfg,
 		h:   h,
 	}
 
+	if cfg.DelegateAddrInfo != nil {
+		addr, port, err := cfg.delegateAPI()
+		if err != nil {
+			return nil, fmt.Errorf("extract delegate api information: %w", err)
+		}
+
+		slog.Info("Init Prysm JSON RPC client", "addr", addr, "port", port)
+		pc := NewPrysmClient(addr, port)
+		pc.tracer = cfg.Tracer
+
+		n.pc = pc
+	} else {
+		slog.Info("Using no-op prysm client")
+		n.pc = NoopPrysmClient{}
+	}
+
 	return n, nil
 }
 
 func (n *Node) Start(ctx context.Context) error {
-	sub, err := n.h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to EvtLocalAddressesUpdated events: %w", err)
+	self := peer.AddrInfo{
+		ID:    n.h.ID(),
+		Addrs: n.h.Addrs(),
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case evt := <-sub.Out():
-			fmt.Println(evt)
-		}
+	slog.Info("Adding ourself as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "addr", self.Addrs[0].String())
+	if err := n.pc.AddTrustedPeer(ctx, self); err != nil {
+		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 	}
+	defer func() {
+		slog.Info("Removing ourself as a trusted peer from Prysm", tele.LogAttrPeerID(self.ID))
+		if err := n.pc.RemoveTrustedPeer(ctx, n.h.ID()); err != nil {
+			slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
+		}
+	}()
+
+	slog.Info("Done!")
+
+	//sub, err := n.h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
+	//if err != nil {
+	//	return fmt.Errorf("failed to subscribe to EvtLocalAddressesUpdated events: %w", err)
+	//}
+	//
+	//for {
+	//	select {
+	//	case <-ctx.Done():
+	//		return ctx.Err()
+	//	case evt := <-sub.Out():
+	//		fmt.Println(evt)
+	//	}
+	//}
+	return nil
+}
+
+func (n *Node) Shutdown(ctx context.Context) error {
+	return nil
 }
 
 func buildDiscoveryNode(cfg *NodeConfig) (*enode.LocalNode, *net.UDPConn, error) {

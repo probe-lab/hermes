@@ -17,5 +17,5 @@ func LogAttrError(err error) slog.Attr {
 }
 
 func LogAttrPeerID(pid peer.ID) slog.Attr {
-	return slog.String(AttrKeyPeerID, pid.ShortString())
+	return slog.String(AttrKeyPeerID, pid.String())
 }

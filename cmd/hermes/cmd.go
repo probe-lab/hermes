@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,7 +37,8 @@ var rootConfig = struct {
 	TracingAddr    string
 	TracingPort    int
 
-	// a function that shuts down the metrics server and blocks until it's done
+	// Functions that shut down the telemetry providers.
+	// Both block until they're done
 	metricsShutdownFunc func(ctx context.Context) error
 	tracerShutdownFunc  func(ctx context.Context) error
 }{
@@ -51,6 +53,9 @@ var rootConfig = struct {
 	TracingEnabled: false,
 	TracingAddr:    "localhost",
 	TracingPort:    4317,
+
+	tracerShutdownFunc:  nil,
+	metricsShutdownFunc: nil,
 }
 
 var app = &cli.App{
@@ -171,7 +176,7 @@ func main() {
 		}
 	}()
 
-	if err := app.RunContext(ctx, os.Args); err != nil {
+	if err := app.RunContext(ctx, os.Args); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("terminated abnormally", slog.String("err", err.Error()))
 		os.Exit(1)
 	}

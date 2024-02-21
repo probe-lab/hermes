@@ -2,27 +2,32 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/prysmaticlabs/prysm/v4/config/params"
 	"github.com/urfave/cli/v2"
+	"go.opentelemetry.io/otel"
 
 	"github.com/probe-lab/hermes/eth"
-	"github.com/prysmaticlabs/prysm/v4/config/params"
+	"github.com/probe-lab/hermes/tele"
 )
 
 var ethConfig = &struct {
-	PrivateKeyStr string
-	Fork          string
-	Chain         string
-	Attnets       string
-	FullNodeAddr  string
-	FullNodePort  int
-	Devp2pAddr    string
-	Devp2pPort    int
-	Libp2pAddr    string
-	Libp2pPort    int
-	MaxPeers      int
+	PrivateKeyStr    string
+	Fork             string
+	Chain            string
+	Attnets          string
+	FullNodeAddr     string
+	FullNodePort     int
+	Devp2pAddr       string
+	Devp2pPort       int
+	Libp2pAddr       string
+	Libp2pPort       int
+	DelegateAddrInfo string
+	MaxPeers         int
 }{
 	PrivateKeyStr: "", // unset means it'll be generated
 	Chain:         params.MainnetName,
@@ -121,6 +126,13 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.Libp2pPort,
 		Destination: &ethConfig.Libp2pPort,
 	},
+	&cli.StringFlag{
+		Name:        "delegate.addrinfo",
+		EnvVars:     []string{"HERMES_ETH_DELEGATE_ADDRINFO"},
+		Usage:       "The Multiaddress of the beacon node we delegate block/blob requests to. (example: \"/ip4/$IP/tcp/$PORT/p2p/$PEER_ID\")",
+		Destination: &ethConfig.DelegateAddrInfo,
+		Action:      validateDelegateAddrInfoFlag,
+	},
 	&cli.IntFlag{
 		Name:        "max-peers",
 		EnvVars:     []string{"HERMES_ETH_MAX_PEERS"},
@@ -131,25 +143,35 @@ var cmdEthFlags = []cli.Flag{
 }
 
 func cmdEthAction(c *cli.Context) error {
-	slog.Info("Starting to listen on Ethereum's GossipSub network...")
-	defer slog.Info("Stopped to listen Ethereum's GossipSub network.")
+	slog.Info("Starting Hermes for Ethereum...")
+	defer slog.Info("Stopped Hermes for Ethereum.")
+
+	// Print hermes configuration for debugging purposes
+	printEthConfig()
 
 	genConfig, netConfig, beaConfig, err := eth.GetConfigsByNetworkName(ethConfig.Chain)
 	if err != nil {
 		return fmt.Errorf("get config for %s: %w", ethConfig.Chain, err)
 	}
 
+	// we ignore the error because Hermes can also operate without a
+	// delegate beacon node
+	addrInfo, _ := peer.AddrInfoFromString(ethConfig.DelegateAddrInfo)
+
 	cfg := &eth.NodeConfig{
-		GenesisConfig: genConfig,
-		NetworkConfig: netConfig,
-		BeaconConfig:  beaConfig,
-		PrivateKeyStr: ethConfig.PrivateKeyStr,
-		FullNodeAddr:  ethConfig.FullNodeAddr,
-		FullNodePort:  ethConfig.FullNodePort,
-		Devp2pAddr:    ethConfig.Devp2pAddr,
-		Devp2pPort:    ethConfig.Devp2pPort,
-		Libp2pAddr:    ethConfig.Libp2pAddr,
-		Libp2pPort:    ethConfig.Libp2pPort,
+		GenesisConfig:    genConfig,
+		NetworkConfig:    netConfig,
+		BeaconConfig:     beaConfig,
+		PrivateKeyStr:    ethConfig.PrivateKeyStr,
+		FullNodeAddr:     ethConfig.FullNodeAddr,
+		FullNodePort:     ethConfig.FullNodePort,
+		Devp2pAddr:       ethConfig.Devp2pAddr,
+		Devp2pPort:       ethConfig.Devp2pPort,
+		Libp2pAddr:       ethConfig.Libp2pAddr,
+		Libp2pPort:       ethConfig.Libp2pPort,
+		DelegateAddrInfo: addrInfo,
+		Tracer:           otel.GetTracerProvider().Tracer("hermes"),
+		Meter:            otel.GetMeterProvider().Meter("hermes"),
 	}
 
 	n, err := eth.NewNode(cfg)
@@ -172,4 +194,34 @@ func validateKeyFlag(c *cli.Context, s string) error {
 	}
 
 	return nil
+}
+
+// validateKeyFlag verifies that if a addrinfo multi address was given, that it
+// has the correct format
+func validateDelegateAddrInfoFlag(c *cli.Context, s string) error {
+	if s == "" {
+		return nil
+	}
+
+	if _, err := peer.AddrInfoFromString(s); err != nil {
+		return fmt.Errorf("invalid delegate addrinfo: %w", err)
+	}
+
+	return nil
+}
+
+func printEthConfig() {
+	cfgCopy := *ethConfig
+	if cfgCopy.PrivateKeyStr != "" {
+		cfgCopy.PrivateKeyStr = "***"
+	}
+
+	dat, err := json.MarshalIndent(cfgCopy, "", "  ")
+	if err != nil {
+		slog.Warn("Failed marshalling eth config struct", tele.LogAttrError(err))
+		return
+	}
+
+	slog.Info("Config:")
+	slog.Info(string(dat))
 }
