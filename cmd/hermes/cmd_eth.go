@@ -11,7 +11,7 @@ import (
 	"github.com/prysmaticlabs/prysm/v4/config/params"
 )
 
-var ethConfig = struct {
+var ethConfig = &struct {
 	PrivateKeyStr string
 	Fork          string
 	Chain         string
