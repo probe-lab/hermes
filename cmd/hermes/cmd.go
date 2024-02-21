@@ -183,14 +183,17 @@ func rootBefore(c *cli.Context) error {
 		return nil
 	}
 
+	// read CLI args and configure the global logger
 	if err := configureLogger(c); err != nil {
 		return err
 	}
 
+	// read CLI args and configure the global meter provider
 	if err := configureMetrics(c); err != nil {
 		return err
 	}
 
+	// read CLI args and configure the global tracer provider
 	if err := configureTracing(c); err != nil {
 		return err
 	}
@@ -220,6 +223,12 @@ func rootAfter(c *cli.Context) error {
 	return nil
 }
 
+// configureLogger configures the global logger based on the provided CLI
+// context. It sets the log level based on the "--log-level" flag or the
+// "--verbose" flag. The log format is determined by the "--log.format" flag.
+// The function returns an error if the log level or log format is not supported.
+// Possible log formats include "tint", "hlog", "text", and "json". The default
+// logger is overwritten with the configured logger.
 func configureLogger(c *cli.Context) error {
 	// set default log level
 	logLevel := slog.LevelInfo
@@ -276,6 +285,12 @@ func configureLogger(c *cli.Context) error {
 	return nil
 }
 
+// configureMetrics configures the prometheus metrics export based on the provided CLI context.
+// If metrics are not enabled, it uses a no-op meter provider
+// ([tele.NoopMeterProvider]) and does not serve an endpoint. If metrics are
+// enabled, it sets up the Prometheus meter provider ([tele.PromMeterProvider]).
+// The function returns an error if there is an issue with creating the meter
+// provider.
 func configureMetrics(c *cli.Context) error {
 	// if metrics aren't enabled, use a no-op meter provider and don't serve an endpoint
 	if !rootConfig.MetricsEnabled {
@@ -300,6 +315,13 @@ func configureMetrics(c *cli.Context) error {
 	return nil
 }
 
+// configureTracing configures tracing based on the provided CLI context.
+// If tracing is not enabled, it uses a no-op tracer provider
+// [tele.NoopTracerProvider]. If tracing is enabled, it establishes a connection
+// to the OpenTelemetry collector and sets up an exporter. It also sets the
+// configured tracer provider as the global tracer provider
+// (otel.SetTracerProvider()). The function returns an error if there is an
+// issue with creating the tracer provider or establishing the connection.
 func configureTracing(c *cli.Context) error {
 	// if tracing isn't enabled, use a no-op tracer provider
 	if !rootConfig.TracingEnabled {
