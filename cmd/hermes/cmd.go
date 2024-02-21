@@ -36,54 +36,55 @@ var defaultRootConfig = rootConfig{
 }
 
 var app = &cli.App{
-	Name:  "hermes",
-	Usage: "a gossipsub listener",
-	Flags: []cli.Flag{
-		&cli.BoolFlag{
-			Name:        "verbose",
-			Aliases:     []string{"v"},
-			EnvVars:     []string{"HERMES_VERBOSE"},
-			Usage:       "Set logging level more verbose to include debug level logs",
-			Value:       defaultRootConfig.Verbose,
-			Destination: &defaultRootConfig.Verbose,
-			Category:    flagCategoryDebugging,
-		},
-		&cli.StringFlag{
-			Name:        "log-level",
-			Aliases:     []string{"ll"},
-			EnvVars:     []string{"HERMES_LOG_LEVEL"},
-			Usage:       "Sets an explicity logging level: debug, info, warn, error. Takes precedence over the verbose flag.",
-			Destination: &defaultRootConfig.LogLevel,
-			Value:       defaultRootConfig.LogLevel,
-			Category:    flagCategoryDebugging,
-		},
-		&cli.StringFlag{
-			Name:        "log-format",
-			EnvVars:     []string{"HERMES_LOG_FORMAT"},
-			Usage:       "Sets the format to output the log statements in: text, json, hlog, tint",
-			Destination: &defaultRootConfig.LogFormat,
-			Value:       defaultRootConfig.LogFormat,
-			Category:    flagCategoryDebugging,
-		},
-		&cli.BoolFlag{
-			Name:        "log-source",
-			EnvVars:     []string{"HERMES_LOG_SOURCE"},
-			Usage:       "Compute the source code position of a log statement and add a SourceKey attribute to the output. Only text and json formats.",
-			Destination: &defaultRootConfig.LogSource,
-			Value:       defaultRootConfig.LogSource,
-			Category:    flagCategoryDebugging,
-		},
-		&cli.BoolFlag{
-			Name:        "log-no-color",
-			EnvVars:     []string{"HERMES_LOG_NO_COLOR"},
-			Usage:       "Whether to prevent the logger from outputting colored log statements",
-			Destination: &defaultRootConfig.LogNoColor,
-			Value:       defaultRootConfig.LogNoColor,
-			Category:    flagCategoryDebugging,
-		},
-	},
+	Name:     "hermes",
+	Usage:    "a gossipsub listener",
+	Flags:    rootFlags,
 	Before:   rootBefore,
-	Commands: []*cli.Command{cmdEth, cmdFil},
+	Commands: []*cli.Command{cmdEth},
+}
+
+var rootFlags = []cli.Flag{
+	&cli.BoolFlag{
+		Name:        "verbose",
+		Aliases:     []string{"v"},
+		EnvVars:     []string{"HERMES_VERBOSE"},
+		Usage:       "Set logging level more verbose to include debug level logs",
+		Value:       defaultRootConfig.Verbose,
+		Destination: &defaultRootConfig.Verbose,
+		Category:    flagCategoryDebugging,
+	},
+	&cli.StringFlag{
+		Name:        "log.level",
+		EnvVars:     []string{"HERMES_LOG_LEVEL"},
+		Usage:       "Sets an explicity logging level: debug, info, warn, error. Takes precedence over the verbose flag.",
+		Destination: &defaultRootConfig.LogLevel,
+		Value:       defaultRootConfig.LogLevel,
+		Category:    flagCategoryDebugging,
+	},
+	&cli.StringFlag{
+		Name:        "log.format",
+		EnvVars:     []string{"HERMES_LOG_FORMAT"},
+		Usage:       "Sets the format to output the log statements in: text, json, hlog, tint",
+		Destination: &defaultRootConfig.LogFormat,
+		Value:       defaultRootConfig.LogFormat,
+		Category:    flagCategoryDebugging,
+	},
+	&cli.BoolFlag{
+		Name:        "log.source",
+		EnvVars:     []string{"HERMES_LOG_SOURCE"},
+		Usage:       "Compute the source code position of a log statement and add a SourceKey attribute to the output. Only text and json formats.",
+		Destination: &defaultRootConfig.LogSource,
+		Value:       defaultRootConfig.LogSource,
+		Category:    flagCategoryDebugging,
+	},
+	&cli.BoolFlag{
+		Name:        "log.nocolor",
+		EnvVars:     []string{"HERMES_LOG_NO_COLOR"},
+		Usage:       "Whether to prevent the logger from outputting colored log statements",
+		Destination: &defaultRootConfig.LogNoColor,
+		Value:       defaultRootConfig.LogNoColor,
+		Category:    flagCategoryDebugging,
+	},
 }
 
 func main() {
@@ -93,10 +94,14 @@ func main() {
 
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	go func() {
-		sig := <-sigs
-		slog.Warn("Received termination signal - Stopping...", slog.String("signal", sig.String()))
-		signal.Stop(sigs)
-		cancel()
+		defer cancel()
+		defer signal.Stop(sigs)
+
+		select {
+		case <-ctx.Done():
+		case sig := <-sigs:
+			slog.Info("Received termination signal - Stopping...", slog.String("signal", sig.String()))
+		}
 	}()
 
 	if err := app.RunContext(ctx, os.Args); err != nil {

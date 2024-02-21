@@ -5,63 +5,65 @@ import (
 	"log/slog"
 	"math"
 
-	"github.com/prysmaticlabs/prysm/v4/consensus-types/primitives"
-
-	"github.com/plprobelab/hermes/pkg/eth"
-	"github.com/prysmaticlabs/prysm/v4/network/forks"
-
+	"github.com/prysmaticlabs/prysm/v4/beacon-chain/core/signing"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
-
 	"github.com/urfave/cli/v2"
+
+	"github.com/probe-lab/hermes/eth"
 )
 
 var cmdEthChains = &cli.Command{
 	Name:   "chains",
 	Usage:  "List all supported chains",
-	Action: actionEthForks,
+	Action: cmdEthChainsAction,
 }
 
-func actionEthForks(c *cli.Context) error {
-	configs := []*params.BeaconChainConfig{
-		params.MainnetConfig(),
-		params.PraterConfig(),
-		params.HoleskyConfig(),
-		params.SepoliaConfig(),
+func cmdEthChainsAction(c *cli.Context) error {
+	chains := []string{
+		params.MainnetName,
+		params.SepoliaName,
+		params.PraterName,
+		params.HoleskyName,
 	}
 
 	slog.Info("Supported chains:")
-	for i, cfg := range configs {
-		params.OverrideBeaconConfig(cfg)
+	for _, chain := range chains {
 
-		genValRoot, err := eth.GenesisValidatorsRootByName(cfg.ConfigName)
+		genConfig, _, beaConfig, err := eth.GetConfigsByNetworkName(chain)
 		if err != nil {
-			slog.Warn("unsupported " + cfg.ConfigName)
-			continue
+			return fmt.Errorf("get config for %s: %w", chain, err)
+		}
+		slog.Info(fmt.Sprintf("%s", chain))
+
+		forkVersions := [][]byte{
+			beaConfig.GenesisForkVersion,
+			beaConfig.AltairForkVersion,
+			beaConfig.BellatrixForkVersion,
+			beaConfig.CapellaForkVersion,
+			beaConfig.DenebForkVersion,
 		}
 
-		slog.Info(fmt.Sprintf("[%d] %s", i, cfg.ConfigName))
-		combinations := []struct {
-			fork  string
-			epoch primitives.Epoch
-		}{
-			{fork: "phase0", epoch: primitives.Epoch(0)},
-			{fork: "altair", epoch: cfg.AltairForkEpoch},
-			{fork: "bellatrix", epoch: cfg.BellatrixForkEpoch},
-			{fork: "capella", epoch: cfg.CapellaForkEpoch},
-			{fork: "deneb", epoch: cfg.DenebForkEpoch},
-		}
+		for _, forkVersion := range forkVersions {
+			epoch, found := beaConfig.ForkVersionSchedule[[4]byte(forkVersion)]
+			if !found {
+				return fmt.Errorf("fork version schedule not found for %x", forkVersion)
+			}
 
-		for _, combination := range combinations {
-			if combination.epoch == math.MaxUint64 {
+			forkName, found := beaConfig.ForkVersionNames[[4]byte(forkVersion)]
+			if !found {
+				return fmt.Errorf("fork version name not found for %x", forkVersion)
+			}
+
+			if epoch == math.MaxUint64 {
 				continue
 			}
 
-			digest, err := forks.ForkDigestFromEpoch(combination.epoch, genValRoot)
+			digest, err := signing.ComputeForkDigest(forkVersion, genConfig.GenesisValidatorRoot)
 			if err != nil {
 				return err
 			}
 
-			slog.Info(fmt.Sprintf("    - %s: 0x%x (epoch %d)", combination.fork, digest, combination.epoch))
+			slog.Info(fmt.Sprintf("- %s: 0x%x (epoch %d)", forkName, digest, epoch))
 		}
 	}
 	return nil
