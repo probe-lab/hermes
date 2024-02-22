@@ -4,20 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
 
 type Node struct {
-	cfg    *NodeConfig
-	host   *host.Host
-	peerer TrustedPeerer
+	cfg        *NodeConfig
+	host       *host.Host
+	supervisor *suture.Supervisor
+	pool       *Pool
+
+	// services
+	peerer *Peerer
+	disc   *Discovery
 }
 
 func NewNode(cfg *NodeConfig) (*Node, error) {
@@ -37,9 +39,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()))
 
-	// initialize peerer that we'll use to register this Hermes node as a
+	// initialize peerer client that we'll use to register this Hermes node as a
 	// trusted peer with the beacon client that we delegate requests to.
-	var peerer TrustedPeerer
+	var tpc PeererClient
 	if cfg.BeaconType == BeaconTypePrysm {
 		addr, port, err := cfg.BeaconHostPort()
 		if err != nil {
@@ -49,114 +51,93 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		slog.Info("Init Prysm JSON RPC client", "addr", addr, "port", port)
 		client := NewPrysmClient(addr, port)
 		client.tracer = cfg.Tracer
-		peerer = client
+		tpc = client
 	} else {
-		slog.Info("Using no-op peerer")
-		peerer = NoopTrustedPeerer{}
+		slog.Info("Using no-op trusted peerer client")
+		tpc = NoopPeererClient{}
+	}
+
+	// initialize ethereum node
+	privKey, err := cfg.ECDSAPrivateKey()
+	if err != nil {
+		return nil, fmt.Errorf("extract ecdsa private key: %w", err)
+	}
+
+	disc, err := NewDiscovery(privKey, &DiscoveryConfig{
+		GenesisConfig: cfg.GenesisConfig,
+		NetworkConfig: cfg.NetworkConfig,
+		Addr:          cfg.Devp2pAddr,
+		UDPPort:       cfg.Devp2pPort,
+		TCPPort:       cfg.Libp2pPort,
+		Tracer:        cfg.Tracer,
+		Meter:         cfg.Meter,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new discovery service: %w", err)
 	}
 
 	// finally, initialize hermes node
 	n := &Node{
-		cfg:    cfg,
-		host:   h,
-		peerer: peerer,
+		cfg:        cfg,
+		host:       h,
+		supervisor: suture.NewSimple("eth"),
+		pool:       NewPool(),
+		peerer:     NewPeerer(h, tpc),
+		disc:       disc,
 	}
+
+	// register the node itself as the notifiee for network connection events
+	n.host.Network().Notify(n)
 
 	return n, nil
 }
 
 func (n *Node) Start(ctx context.Context) error {
-	self := peer.AddrInfo{
-		ID:    n.host.ID(),
-		Addrs: n.host.Addrs(),
-	}
+	// start peerer service that takes care of becoming a trusted peer
+	// with our beacon node
+	n.supervisor.Add(n.peerer)
 
-	slog.Info("Adding ourself as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "addr", self.Addrs[0].String())
-	if err := n.peerer.AddTrustedPeer(ctx, self); err != nil {
-		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
-	}
-	defer func() {
-		slog.Info("Removing ourself as a trusted peer from Prysm", tele.LogAttrPeerID(self.ID))
-		if err := n.peerer.RemoveTrustedPeer(ctx, n.host.ID()); err != nil {
-			slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
+	// start the discovery service to find peers in the discv5 DHT
+	n.supervisor.Add(n.disc)
+
+	// start the peer dialers, that consume the discovered peers from
+	// the discovery service up until MaxPeers.
+	for i := 0; i < n.cfg.DialerCount; i++ {
+		cs := &PeerDialer{
+			host:     n.host,
+			pool:     n.pool,
+			peerChan: n.disc.out,
+			maxPeers: n.cfg.MaxPeers,
 		}
-	}()
+		n.supervisor.Add(cs)
+	}
 
-	slog.Info("Done!")
+	return n.supervisor.Serve(ctx)
+}
 
-	//sub, err := n.host.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
-	//if err != nil {
-	//	return fmt.Errorf("failed to subscribe to EvtLocalAddressesUpdated events: %w", err)
-	//}
-	//
-	//for {
-	//	select {
-	//	case <-ctx.Done():
-	//		return ctx.Err()
-	//	case evt := <-sub.Out():
-	//		fmt.Println(evt)
-	//	}
-	//}
+// logDeferErr executes the given function and logs the given error message
+// in case of an error.
+func logDeferErr(fn func() error, onErrMsg string) {
+	if err := fn(); err != nil {
+		slog.Warn(onErrMsg, tele.LogAttrError(err))
+	}
+}
+
+// terminateSupervisorTreeOnErr can be used like
+//
+//	defer func() { err = terminateSupervisorTreeOnErr(err) }()
+//
+// to instruct the suture supervisor to terminate the supervisor tree if
+// the surrounding function returns an error.
+func terminateSupervisorTreeOnErr(err error) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", err, suture.ErrTerminateSupervisorTree)
+	}
 	return nil
 }
 
-func (n *Node) Shutdown(ctx context.Context) error {
-	return nil
-}
-
-func buildDiscoveryNode(cfg *NodeConfig) (*enode.LocalNode, *net.UDPConn, error) {
-	ip := net.ParseIP(cfg.Devp2pAddr)
-
-	var bindIP net.IP
-	var networkVersion string
-	switch {
-	case ip == nil:
-		return nil, nil, fmt.Errorf("invalid IP address provided: %s", cfg.Devp2pAddr)
-	case ip.To4() != nil:
-		bindIP = net.IPv4zero
-		networkVersion = "udp4"
-	case ip.To16() != nil:
-		bindIP = net.IPv6zero
-		networkVersion = "udp6"
-	default:
-		return nil, nil, fmt.Errorf("invalid IP address provided: %s", cfg.Devp2pAddr)
-	}
-
-	udpAddr := &net.UDPAddr{
-		IP:   bindIP,
-		Port: cfg.Devp2pPort,
-	}
-
-	conn, err := net.ListenUDP(networkVersion, udpAddr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to listen on %s:%d: %w", bindIP, cfg.Devp2pPort, err)
-	}
-
-	db, err := enode.OpenDB("") // in memory db
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not open node's peer database: %w", err)
-	}
-
-	privKey, err := cfg.ECDSAPrivateKey()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get ecdsa private key: %w", err)
-	}
-	localNode := enode.NewLocalNode(db, privKey)
-
-	localNode.Set(enr.IP(cfg.Devp2pAddr))
-	localNode.Set(enr.UDP(cfg.Devp2pPort))
-	localNode.Set(enr.TCP(cfg.Libp2pPort))
-	localNode.Set(cfg.enrAttnetsEntry())
-	localNode.Set(cfg.enrSyncnetsEntry())
-	localNode.SetFallbackIP(ip)
-	localNode.SetFallbackUDP(cfg.Libp2pPort)
-
-	enrEth2Entry, err := cfg.enrEth2Entry()
-	if err != nil {
-		return nil, nil, fmt.Errorf("build enr fork entry: %w", err)
-	}
-
-	localNode.Set(enrEth2Entry)
-
-	return localNode, conn, nil
+// wrapTermSupTree can be used to wrap a [suture.ErrTerminateSupervisorTree]
+// error in the given error.
+func wrapTermSupTree(err error) error {
+	return fmt.Errorf("%s: %w", err, suture.ErrTerminateSupervisorTree)
 }

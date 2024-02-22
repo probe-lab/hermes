@@ -11,7 +11,6 @@ import (
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -21,11 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/go-bitfield"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
-	"github.com/prysmaticlabs/prysm/v4/network/forks"
-	pb "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v4/time/slots"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
@@ -71,6 +66,8 @@ type NodeConfig struct {
 	Libp2pPort     int
 	BeaconAddrInfo *peer.AddrInfo
 	BeaconType     BeaconType
+	MaxPeers       int
+	DialerCount    int
 	Tracer         trace.Tracer
 	Meter          metric.Meter
 }
@@ -224,52 +221,6 @@ func (n *NodeConfig) BeaconHostPort() (string, int, error) {
 	}
 
 	return ip, port, nil
-}
-
-// enrEth2Entry generates an Ethereum 2.0 entry for the Ethereum Node Record
-// (ENR) in the discovery protocol. It calculates the current fork digest and
-// the next fork version and epoch, and then marshals them into an SSZ encoded
-// byte slice. Finally, it returns an ENR entry with the eth2 key and the
-// encoded fork information.
-func (n *NodeConfig) enrEth2Entry() (enr.Entry, error) {
-	genesisRoot := n.GenesisConfig.GenesisValidatorRoot
-	genesisTime := n.GenesisConfig.GenesisTime
-
-	digest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
-	if err != nil {
-		return nil, fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
-	}
-
-	currentSlot := slots.Since(genesisTime)
-	currentEpoch := slots.ToEpoch(currentSlot)
-
-	nextForkVersion, nextForkEpoch, err := forks.NextForkData(currentEpoch)
-	if err != nil {
-		return nil, fmt.Errorf("calculate next fork data: %w", err)
-	}
-
-	enrForkID := &pb.ENRForkID{
-		CurrentForkDigest: digest[:],
-		NextForkVersion:   nextForkVersion[:],
-		NextForkEpoch:     nextForkEpoch,
-	}
-
-	enc, err := enrForkID.MarshalSSZ()
-	if err != nil {
-		return nil, fmt.Errorf("marshal enr fork id: %w", err)
-	}
-
-	return enr.WithEntry(n.NetworkConfig.ETH2Key, enc), nil
-}
-
-func (n *NodeConfig) enrAttnetsEntry() enr.Entry {
-	bitV := bitfield.NewBitvector64()
-	return enr.WithEntry(n.NetworkConfig.AttSubnetKey, bitV.Bytes())
-}
-
-func (n *NodeConfig) enrSyncnetsEntry() enr.Entry {
-	bitV := bitfield.Bitvector4{byte(0x00)}
-	return enr.WithEntry(n.NetworkConfig.SyncCommsSubnetKey, bitV.Bytes())
 }
 
 type GenesisConfig struct {

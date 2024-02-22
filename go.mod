@@ -14,6 +14,7 @@ require (
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/prysmaticlabs/prysm/v4 v4.2.1
 	github.com/stretchr/testify v1.8.4
+	github.com/thejerf/suture/v4 v4.0.2
 	github.com/urfave/cli/v2 v2.27.1
 	go.opentelemetry.io/otel v1.23.1
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.23.1
@@ -23,6 +24,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.23.1
 	go.opentelemetry.io/otel/trace v1.23.1
 	google.golang.org/grpc v1.61.0
+	gopkg.in/errgo.v2 v2.1.0
 )
 
 require (

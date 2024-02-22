@@ -160,6 +160,8 @@ func cmdEthAction(c *cli.Context) error {
 		Libp2pPort:     ethConfig.Libp2pPort,
 		BeaconAddrInfo: beaconAddrInfo,
 		BeaconType:     beaconType,
+		MaxPeers:       ethConfig.MaxPeers,
+		DialerCount:    16,
 		Tracer:         otel.GetTracerProvider().Tracer("hermes"),
 		Meter:          otel.GetMeterProvider().Meter("hermes"),
 	}
@@ -244,6 +246,6 @@ func printEthConfig() {
 		return
 	}
 
-	slog.Info("Config:")
-	slog.Info(string(dat))
+	slog.Debug("Config:")
+	slog.Debug(string(dat))
 }

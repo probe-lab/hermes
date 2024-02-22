@@ -44,7 +44,7 @@ var rootConfig = struct {
 }{
 	Verbose:        false,
 	LogLevel:       "info",
-	LogFormat:      "tint",
+	LogFormat:      "hlog",
 	LogSource:      false,
 	LogNoColor:     false,
 	MetricsEnabled: false,
