@@ -16,6 +16,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// Discovery is a suture service that periodically queries the discv5 DHT
+// for random peers and publishes the discovered peers on the `out` channel.
+// Users of this Discovery service are required to read from the channel.
+// Otherwise, the discovery will block forever.
 type Discovery struct {
 	cfg  *DiscoveryConfig
 	pk   *ecdsa.PrivateKey
@@ -124,6 +128,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to start discv5 listener: %w", err)
 	}
+	defer listener.Close()
 
 	iterator := listener.RandomNodes()
 
@@ -164,7 +169,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		// Update metrics
 		d.MeterDiscoveredPeers.Add(ctx, 1)
 
-		slog.Info("Discovered peer", tele.LogAttrPeerID(addrInfo.ID))
+		slog.Debug("Discovered peer", tele.LogAttrPeerID(addrInfo.ID))
 		select {
 		case d.out <- *addrInfo:
 		case <-ctx.Done():

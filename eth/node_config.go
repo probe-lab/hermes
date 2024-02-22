@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -14,12 +13,10 @@ import (
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -55,21 +52,22 @@ func BeaconTypeFrom(s string) (BeaconType, error) {
 }
 
 type NodeConfig struct {
-	GenesisConfig  *GenesisConfig
-	NetworkConfig  *params.NetworkConfig
-	BeaconConfig   *params.BeaconChainConfig
-	PrivateKeyStr  string
-	privateKey     *crypto.Secp256k1PrivateKey
-	Devp2pAddr     string
-	Devp2pPort     int
-	Libp2pAddr     string
-	Libp2pPort     int
-	BeaconAddrInfo *peer.AddrInfo
-	BeaconType     BeaconType
-	MaxPeers       int
-	DialerCount    int
-	Tracer         trace.Tracer
-	Meter          metric.Meter
+	GenesisConfig *GenesisConfig
+	NetworkConfig *params.NetworkConfig
+	BeaconConfig  *params.BeaconChainConfig
+	PrivateKeyStr string
+	privateKey    *crypto.Secp256k1PrivateKey
+	Devp2pHost    string
+	Devp2pPort    int
+	Libp2pHost    string
+	Libp2pPort    int
+	BeaconHost    string
+	BeaconPort    int
+	BeaconType    BeaconType
+	MaxPeers      int
+	DialerCount   int
+	Tracer        trace.Tracer
+	Meter         metric.Meter
 }
 
 // Validate validates the Node configuration.
@@ -163,7 +161,7 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		return nil, fmt.Errorf("get private key: %w", err)
 	}
 
-	listenMaddr, err := host.MaddrFrom(n.Libp2pAddr, uint(n.Libp2pPort))
+	listenMaddr, err := host.MaddrFrom(n.Libp2pHost, uint(n.Libp2pPort))
 	if err != nil {
 		return nil, fmt.Errorf("construct libp2p listen maddr: %w", err)
 	}
@@ -192,35 +190,6 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	}
 
 	return opts, nil
-}
-
-// BeaconHostPort returns the host and port information of the JSON RPC API of the
-// Prysm Beacon Node.
-func (n *NodeConfig) BeaconHostPort() (string, int, error) {
-	if n.BeaconAddrInfo == nil {
-		return "", 0, fmt.Errorf("no delegated addr info configured")
-	}
-
-	maddr := n.BeaconAddrInfo.Addrs[0]
-	ip, err := maddr.ValueForProtocol(ma.P_IP4)
-	if err != nil {
-		ip, err = maddr.ValueForProtocol(ma.P_IP6)
-		if err != nil {
-			return "", 0, fmt.Errorf("no ip4 or ip6 configured in %s", maddr.String())
-		}
-	}
-
-	portStr, err := maddr.ValueForProtocol(ma.P_TCP)
-	if err != nil {
-		return "", 0, fmt.Errorf("no tcp port configured in %s", maddr.String())
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to convert port %s to int: %w", portStr, err)
-	}
-
-	return ip, port, nil
 }
 
 type GenesisConfig struct {

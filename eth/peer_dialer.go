@@ -24,8 +24,8 @@ type PeerDialer struct {
 var _ suture.Service = (*PeerDialer)(nil)
 
 func (p *PeerDialer) Serve(ctx context.Context) error {
-	slog.Debug("Started Peer Consumer Service")
-	defer slog.Debug("Stopped Peer Consumer Service")
+	slog.Debug("Started Peer Dialer Service")
+	defer slog.Debug("Stopped Peer Dialer Service")
 
 	for {
 		// if we're at capacity, don't look for more peers

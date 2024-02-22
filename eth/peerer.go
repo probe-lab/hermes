@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/thejerf/suture/v4"
@@ -11,17 +12,6 @@ import (
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
-
-// PeererClient defines the two relevant endpoints that we call to register
-// ourselves as a trusted peer. This is done because Hermes can be run without
-// a Prysm node in the back. In that case, to avoid nil checks everywhere, we
-// just inject a no-op prysm client, that does nothing. That no-op client also
-// implements this interface.The remaining code just operates with this
-// interface.
-type PeererClient interface {
-	AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) (err error)
-	RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err error)
-}
 
 // Peerer is a suture service that ensures Hermes' registration as a trusted
 // peer with the beacon node. Based on the type of beacon node, different
@@ -51,12 +41,12 @@ func (p *Peerer) Serve(ctx context.Context) (err error) {
 	defer func() { err = terminateSupervisorTreeOnErr(err) }() // if the registration fails, we stop the whole process.
 
 	// give the libp2p host 1 minute to figure out its public addresses
-	//timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	//defer cancel()
-	//
-	//if err := p.host.WaitForPublicAddress(timeoutCtx); err != nil {
-	//	return fmt.Errorf("failed waiting for public addresses: %w", err)
-	//}
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	if err := p.host.WaitForPublicAddress(timeoutCtx); err != nil {
+		return fmt.Errorf("failed waiting for public addresses: %w", err)
+	}
 
 	// construct our own addr info
 	self := peer.AddrInfo{
@@ -77,19 +67,5 @@ func (p *Peerer) Serve(ctx context.Context) (err error) {
 		slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
 	}
 
-	return nil
-}
-
-// NoopPeererClient doesn't do anything. See documentation of [PeererClient]
-// for the rationale.
-type NoopPeererClient struct{}
-
-var _ PeererClient = (*NoopPeererClient)(nil)
-
-func (n NoopPeererClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) error {
-	return nil
-}
-
-func (n NoopPeererClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) error {
 	return nil
 }

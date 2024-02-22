@@ -74,7 +74,9 @@ func (h *Host) WaitForPublicAddress(ctx context.Context) error {
 				case event.Removed:
 					slog.Info("Removed own address", "addr", update.Address.String(), "isPublic", manet.IsPublicAddr(update.Address))
 				case event.Unknown:
+					// pass
 				case event.Maintained:
+					// pass
 				}
 
 				if manet.IsPublicAddr(update.Address) {

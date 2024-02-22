@@ -23,10 +23,23 @@ import (
 	"github.com/probe-lab/hermes/tele"
 )
 
+// PeererClient defines the two relevant endpoints that we call to register
+// ourselves as a trusted peer. This is done because Hermes can be run without
+// a Prysm node in the back. In that case, to avoid nil checks everywhere, we
+// just inject a no-op prysm client, that does nothing. That no-op client also
+// implements this interface.The remaining code just operates with this
+// interface.
+type PeererClient interface {
+	AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) (err error)
+	RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err error)
+}
+
 // PrysmClient is an HTTP client for Prysm's JSON RPC API.
 type PrysmClient struct {
+	BeaconClient
 	host    string
 	port    int
+	bc      BeaconClient
 	timeout time.Duration
 	tracer  trace.Tracer
 }
@@ -34,11 +47,22 @@ type PrysmClient struct {
 var _ PeererClient = (*PrysmClient)(nil)
 
 func NewPrysmClient(host string, port int) *PrysmClient {
-	return &PrysmClient{
+	tracer := otel.GetTracerProvider().Tracer("prysm_client")
+	timeout := 5 * time.Second
+
+	bc := &BeaconAPIClient{
 		host:    host,
 		port:    port,
-		timeout: 5 * time.Second,
-		tracer:  otel.GetTracerProvider().Tracer("prysm_client"),
+		timeout: timeout,
+		tracer:  tracer,
+	}
+
+	return &PrysmClient{
+		BeaconClient: bc,
+		host:         host,
+		port:         port,
+		timeout:      timeout,
+		tracer:       tracer,
 	}
 }
 
@@ -56,7 +80,7 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 		return fmt.Errorf("trusted peer has %d addresses, expected exactly 1", len(addrInfo.Addrs))
 	}
 
-	slog.Info("Adding trusted peer", tele.LogAttrPeerID(addrInfo.ID), "addr", addrInfo.Addrs[0].String())
+	slog.Info("Adding trusted peer to prysm", tele.LogAttrPeerID(addrInfo.ID), "addr", addrInfo.Addrs[0].String())
 
 	maddrs, err := peer.AddrInfoToP2pAddrs(&addrInfo)
 	if err != nil {
@@ -93,11 +117,7 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 	if err != nil {
 		return fmt.Errorf("add trusted peer http post failed: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("Failed closing body", tele.LogAttrError(err))
-		}
-	}()
+	defer logDeferErr(resp.Body.Close, "Failed closing body")
 
 	if resp.StatusCode != http.StatusOK {
 		errResp := &httputil.DefaultJsonError{}
@@ -125,7 +145,7 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 		}
 		span.End()
 	}()
-	slog.Info("Removing trusted peer", tele.LogAttrPeerID(pid))
+	slog.Info("Removing trusted peer from prysm", tele.LogAttrPeerID(pid))
 
 	u := url.URL{
 		Scheme: "http",
@@ -145,11 +165,7 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 	if err != nil {
 		return fmt.Errorf("remove trusted peer http delete failed: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("Failed closing body", tele.LogAttrError(err))
-		}
-	}()
+	defer logDeferErr(resp.Body.Close, "Failed closing body")
 
 	if resp.StatusCode != http.StatusOK {
 		errResp := &httputil.DefaultJsonError{}
@@ -165,5 +181,19 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 		return errResp
 	}
 
+	return nil
+}
+
+// NoopPeererClient doesn't do anything. See documentation of [PeererClient]
+// for the rationale.
+type NoopPeererClient struct{}
+
+var _ PeererClient = (*NoopPeererClient)(nil)
+
+func (n NoopPeererClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) error {
+	return nil
+}
+
+func (n NoopPeererClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) error {
 	return nil
 }
