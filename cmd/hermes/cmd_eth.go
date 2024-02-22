@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
@@ -16,28 +17,27 @@ import (
 )
 
 var ethConfig = &struct {
-	PrivateKeyStr    string
-	Fork             string
-	Chain            string
-	Attnets          string
-	FullNodeAddr     string
-	FullNodePort     int
-	Devp2pAddr       string
-	Devp2pPort       int
-	Libp2pAddr       string
-	Libp2pPort       int
-	DelegateAddrInfo string
-	MaxPeers         int
+	PrivateKeyStr  string
+	Chain          string
+	Attnets        string
+	Devp2pAddr     string
+	Devp2pPort     int
+	Libp2pAddr     string
+	Libp2pPort     int
+	BeaconAddrInfo string
+	BeaconType     string
+	MaxPeers       int
 }{
-	PrivateKeyStr: "", // unset means it'll be generated
-	Chain:         params.MainnetName,
-	Fork:          "current",
-	Attnets:       "ffffffffffffffff", // subscribed to all attnets.
-	Devp2pAddr:    "127.0.0.1",
-	Devp2pPort:    0,
-	Libp2pAddr:    "127.0.0.1",
-	Libp2pPort:    0,
-	MaxPeers:      30, // arbitrary
+	PrivateKeyStr:  "", // unset means it'll be generated
+	Chain:          params.MainnetName,
+	Attnets:        "ffffffffffffffff", // subscribed to all attnets.
+	Devp2pAddr:     "127.0.0.1",
+	Devp2pPort:     0,
+	Libp2pAddr:     "127.0.0.1",
+	Libp2pPort:     0,
+	BeaconAddrInfo: "",
+	BeaconType:     string(eth.BeaconTypeNone),
+	MaxPeers:       30, // arbitrary
 }
 
 var cmdEth = &cli.Command{
@@ -57,22 +57,15 @@ var cmdEthFlags = []cli.Flag{
 		Name:        "key",
 		Aliases:     []string{"k"},
 		EnvVars:     []string{"HERMES_ETH_KEY"},
-		Usage:       "The private key for the ethereum node in hex format.",
+		Usage:       "The private key for the hermes libp2p/ethereum node in hex format.",
 		Value:       ethConfig.PrivateKeyStr,
 		Destination: &ethConfig.PrivateKeyStr,
 		Action:      validateKeyFlag,
 	},
 	&cli.StringFlag{
-		Name:        "fork",
-		EnvVars:     []string{"HERMES_ETH_FORK"},
-		Usage:       "The beacon chain fork to participate in (current, phase0, altair, bellatrix, capella, deneb)",
-		Value:       ethConfig.Fork,
-		Destination: &ethConfig.Fork,
-	},
-	&cli.StringFlag{
 		Name:        "chain",
 		EnvVars:     []string{"HERMES_ETH_CHAIN"},
-		Usage:       "The beacon chain to participate in",
+		Usage:       "The beacon chain to participate in.",
 		Value:       ethConfig.Chain,
 		Destination: &ethConfig.Chain,
 	},
@@ -83,20 +76,6 @@ var cmdEthFlags = []cli.Flag{
 		Usage:       "The attestation network digest.",
 		Value:       ethConfig.Attnets,
 		Destination: &ethConfig.Attnets,
-	},
-	&cli.StringFlag{
-		Name:        "fullnode.addr",
-		EnvVars:     []string{"HERMES_ETH_FULL_NODE_ADDR"},
-		Usage:       "The network address of the full node to serve P2P RPC calls",
-		Value:       ethConfig.FullNodeAddr,
-		Destination: &ethConfig.FullNodeAddr,
-	},
-	&cli.IntFlag{
-		Name:        "fullnode.port",
-		EnvVars:     []string{"HERMES_ETH_FULL_NODE_PORT"},
-		Usage:       "The port of the full node to serve P2P RPC calls",
-		Value:       ethConfig.FullNodePort,
-		Destination: &ethConfig.FullNodePort,
 	},
 	&cli.StringFlag{
 		Name:        "devp2p.addr",
@@ -111,6 +90,7 @@ var cmdEthFlags = []cli.Flag{
 		Usage:       "On which port should devp2p (disv5) listen",
 		Value:       ethConfig.Devp2pPort,
 		Destination: &ethConfig.Devp2pPort,
+		DefaultText: "random",
 	},
 	&cli.StringFlag{
 		Name:        "libp2p.addr",
@@ -125,13 +105,21 @@ var cmdEthFlags = []cli.Flag{
 		Usage:       "On which port should libp2p (disv5) listen",
 		Value:       ethConfig.Libp2pPort,
 		Destination: &ethConfig.Libp2pPort,
+		DefaultText: "random",
 	},
 	&cli.StringFlag{
-		Name:        "delegate.addrinfo",
-		EnvVars:     []string{"HERMES_ETH_DELEGATE_ADDRINFO"},
-		Usage:       "The Multiaddress of the beacon node we delegate block/blob requests to. (example: \"/ip4/$IP/tcp/$PORT/p2p/$PEER_ID\")",
-		Destination: &ethConfig.DelegateAddrInfo,
-		Action:      validateDelegateAddrInfoFlag,
+		Name:        "beacon.addrinfo",
+		EnvVars:     []string{"HERMES_ETH_BEACON_ADDRINFO"},
+		Usage:       "The Multiaddress of the beacon node we delegate block/blob requests to. (example: \"/ipX/$IP/tcp/$PORT/p2p/$PEER_ID\")",
+		Destination: &ethConfig.BeaconAddrInfo,
+		Action:      validateBeaconAddrInfoFlag,
+	},
+	&cli.StringFlag{
+		Name:        "beacon.type",
+		EnvVars:     []string{"HERMES_ETH_BEACON_TYPE"},
+		Usage:       "What is the Beacon node implementation we delegate block/blob requests to. (none, prysm, other)",
+		Value:       ethConfig.BeaconType,
+		Destination: &ethConfig.BeaconType,
 	},
 	&cli.IntFlag{
 		Name:        "max-peers",
@@ -149,29 +137,31 @@ func cmdEthAction(c *cli.Context) error {
 	// Print hermes configuration for debugging purposes
 	printEthConfig()
 
+	// Extract chain configuration parameters based on the given chain name
 	genConfig, netConfig, beaConfig, err := eth.GetConfigsByNetworkName(ethConfig.Chain)
 	if err != nil {
 		return fmt.Errorf("get config for %s: %w", ethConfig.Chain, err)
 	}
 
-	// we ignore the error because Hermes can also operate without a
-	// delegate beacon node
-	addrInfo, _ := peer.AddrInfoFromString(ethConfig.DelegateAddrInfo)
+	// Parse beacon argument information
+	beaconType, beaconAddrInfo, err := parseBeaconArgs(c.IsSet("beacon.type"), ethConfig.BeaconType, c.IsSet("beacon.addrinfo"), ethConfig.BeaconAddrInfo)
+	if err != nil {
+		return fmt.Errorf("parse beacon args: %w", err)
+	}
 
 	cfg := &eth.NodeConfig{
-		GenesisConfig:    genConfig,
-		NetworkConfig:    netConfig,
-		BeaconConfig:     beaConfig,
-		PrivateKeyStr:    ethConfig.PrivateKeyStr,
-		FullNodeAddr:     ethConfig.FullNodeAddr,
-		FullNodePort:     ethConfig.FullNodePort,
-		Devp2pAddr:       ethConfig.Devp2pAddr,
-		Devp2pPort:       ethConfig.Devp2pPort,
-		Libp2pAddr:       ethConfig.Libp2pAddr,
-		Libp2pPort:       ethConfig.Libp2pPort,
-		DelegateAddrInfo: addrInfo,
-		Tracer:           otel.GetTracerProvider().Tracer("hermes"),
-		Meter:            otel.GetMeterProvider().Meter("hermes"),
+		GenesisConfig:  genConfig,
+		NetworkConfig:  netConfig,
+		BeaconConfig:   beaConfig,
+		PrivateKeyStr:  ethConfig.PrivateKeyStr,
+		Devp2pAddr:     ethConfig.Devp2pAddr,
+		Devp2pPort:     ethConfig.Devp2pPort,
+		Libp2pAddr:     ethConfig.Libp2pAddr,
+		Libp2pPort:     ethConfig.Libp2pPort,
+		BeaconAddrInfo: beaconAddrInfo,
+		BeaconType:     beaconType,
+		Tracer:         otel.GetTracerProvider().Tracer("hermes"),
+		Meter:          otel.GetMeterProvider().Meter("hermes"),
 	}
 
 	n, err := eth.NewNode(cfg)
@@ -196,9 +186,9 @@ func validateKeyFlag(c *cli.Context, s string) error {
 	return nil
 }
 
-// validateKeyFlag verifies that if a addrinfo multi address was given, that it
-// has the correct format
-func validateDelegateAddrInfoFlag(c *cli.Context, s string) error {
+// validateBeaconAddrInfoFlag verifies that if a addrinfo multi address was
+// given, that it has the correct format
+func validateBeaconAddrInfoFlag(c *cli.Context, s string) error {
 	if s == "" {
 		return nil
 	}
@@ -208,6 +198,38 @@ func validateDelegateAddrInfoFlag(c *cli.Context, s string) error {
 	}
 
 	return nil
+}
+
+// parseBeaconArgs parses the beacon node related command line arguments and
+// checks them for validity.
+func parseBeaconArgs(isTypeSet bool, typeStr string, isAddrInfoSet bool, addrInfoStr string) (eth.BeaconType, *peer.AddrInfo, error) {
+	typeStr = strings.ToLower(typeStr)
+
+	addrInfo, err := peer.AddrInfoFromString(addrInfoStr)
+	if err != nil && isAddrInfoSet {
+		return "", nil, fmt.Errorf("invalid beacon addr info %s: %w", addrInfoStr, err)
+	}
+
+	if isTypeSet {
+		if typeStr != string(eth.BeaconTypeNone) && addrInfo == nil {
+			return "", nil, fmt.Errorf("beacon type %s specified without addr info", typeStr)
+		} else if typeStr == string(eth.BeaconTypeNone) && addrInfo != nil {
+			return "", nil, fmt.Errorf("beacon type explicitly set to none but addrinfo specified")
+		}
+
+		beaconType, err := eth.BeaconTypeFrom(typeStr)
+		if err != nil {
+			return "", nil, err
+		}
+
+		return beaconType, addrInfo, nil
+	}
+
+	if addrInfo != nil {
+		return eth.BeaconTypeOther, addrInfo, nil
+	}
+
+	return eth.BeaconTypeNone, nil, nil
 }
 
 func printEthConfig() {

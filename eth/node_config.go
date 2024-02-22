@@ -32,21 +32,47 @@ import (
 	"github.com/probe-lab/hermes/host"
 )
 
+// BeaconType defines what kind of beacon node we use to delegate RPCs to.
+// This is relevant because, e.g., Prysm allows us to dynamically register
+// ourselves as a trusted peer while other beacon nodes like, e.g., lighthouse
+// only allows this to be configured at boot time. So if the beacon node that
+// Hermes works with is configured to be prysm, Hermes will attempt to register
+// itself as a trusted node.
+type BeaconType string
+
+const (
+	BeaconTypeNone  BeaconType = "none"
+	BeaconTypePrysm BeaconType = "prysm"
+	BeaconTypeOther BeaconType = "other"
+)
+
+func BeaconTypeFrom(s string) (BeaconType, error) {
+	switch s {
+	case string(BeaconTypeNone):
+		return BeaconTypeNone, nil
+	case string(BeaconTypePrysm):
+		return BeaconTypePrysm, nil
+	case string(BeaconTypeOther):
+		return BeaconTypeOther, nil
+	default:
+		return "", fmt.Errorf("invalid beacon type: %s", s)
+	}
+}
+
 type NodeConfig struct {
-	GenesisConfig    *GenesisConfig
-	NetworkConfig    *params.NetworkConfig
-	BeaconConfig     *params.BeaconChainConfig
-	PrivateKeyStr    string
-	privateKey       *crypto.Secp256k1PrivateKey
-	FullNodeAddr     string
-	FullNodePort     int
-	Devp2pAddr       string
-	Devp2pPort       int
-	Libp2pAddr       string
-	Libp2pPort       int
-	DelegateAddrInfo *peer.AddrInfo
-	Tracer           trace.Tracer
-	Meter            metric.Meter
+	GenesisConfig  *GenesisConfig
+	NetworkConfig  *params.NetworkConfig
+	BeaconConfig   *params.BeaconChainConfig
+	PrivateKeyStr  string
+	privateKey     *crypto.Secp256k1PrivateKey
+	Devp2pAddr     string
+	Devp2pPort     int
+	Libp2pAddr     string
+	Libp2pPort     int
+	BeaconAddrInfo *peer.AddrInfo
+	BeaconType     BeaconType
+	Tracer         trace.Tracer
+	Meter          metric.Meter
 }
 
 // Validate validates the Node configuration.
@@ -171,12 +197,14 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	return opts, nil
 }
 
-func (n *NodeConfig) delegateAPI() (string, int, error) {
-	if n.DelegateAddrInfo == nil {
+// BeaconHostPort returns the host and port information of the JSON RPC API of the
+// Prysm Beacon Node.
+func (n *NodeConfig) BeaconHostPort() (string, int, error) {
+	if n.BeaconAddrInfo == nil {
 		return "", 0, fmt.Errorf("no delegated addr info configured")
 	}
 
-	maddr := n.DelegateAddrInfo.Addrs[0]
+	maddr := n.BeaconAddrInfo.Addrs[0]
 	ip, err := maddr.ValueForProtocol(ma.P_IP4)
 	if err != nil {
 		ip, err = maddr.ValueForProtocol(ma.P_IP6)

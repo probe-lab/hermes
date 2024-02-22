@@ -15,9 +15,9 @@ import (
 )
 
 type Node struct {
-	cfg *NodeConfig
-	h   *host.Host
-	pc  IPrysmClient
+	cfg    *NodeConfig
+	host   *host.Host
+	peerer TrustedPeerer
 }
 
 func NewNode(cfg *NodeConfig) (*Node, error) {
@@ -25,6 +25,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
 
+	// initialize libp2p host
 	opts, err := cfg.libp2pOptions()
 	if err != nil {
 		return nil, fmt.Errorf("build libp2p options: %w", err)
@@ -36,25 +37,29 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()))
 
-	n := &Node{
-		cfg: cfg,
-		h:   h,
-	}
-
-	if cfg.DelegateAddrInfo != nil {
-		addr, port, err := cfg.delegateAPI()
+	// initialize peerer that we'll use to register this Hermes node as a
+	// trusted peer with the beacon client that we delegate requests to.
+	var peerer TrustedPeerer
+	if cfg.BeaconType == BeaconTypePrysm {
+		addr, port, err := cfg.BeaconHostPort()
 		if err != nil {
-			return nil, fmt.Errorf("extract delegate api information: %w", err)
+			return nil, fmt.Errorf("extract prysm api host and port: %w", err)
 		}
 
 		slog.Info("Init Prysm JSON RPC client", "addr", addr, "port", port)
-		pc := NewPrysmClient(addr, port)
-		pc.tracer = cfg.Tracer
-
-		n.pc = pc
+		client := NewPrysmClient(addr, port)
+		client.tracer = cfg.Tracer
+		peerer = client
 	} else {
-		slog.Info("Using no-op prysm client")
-		n.pc = NoopPrysmClient{}
+		slog.Info("Using no-op peerer")
+		peerer = NoopTrustedPeerer{}
+	}
+
+	// finally, initialize hermes node
+	n := &Node{
+		cfg:    cfg,
+		host:   h,
+		peerer: peerer,
 	}
 
 	return n, nil
@@ -62,24 +67,24 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 func (n *Node) Start(ctx context.Context) error {
 	self := peer.AddrInfo{
-		ID:    n.h.ID(),
-		Addrs: n.h.Addrs(),
+		ID:    n.host.ID(),
+		Addrs: n.host.Addrs(),
 	}
 
 	slog.Info("Adding ourself as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "addr", self.Addrs[0].String())
-	if err := n.pc.AddTrustedPeer(ctx, self); err != nil {
+	if err := n.peerer.AddTrustedPeer(ctx, self); err != nil {
 		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 	}
 	defer func() {
 		slog.Info("Removing ourself as a trusted peer from Prysm", tele.LogAttrPeerID(self.ID))
-		if err := n.pc.RemoveTrustedPeer(ctx, n.h.ID()); err != nil {
+		if err := n.peerer.RemoveTrustedPeer(ctx, n.host.ID()); err != nil {
 			slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
 		}
 	}()
 
 	slog.Info("Done!")
 
-	//sub, err := n.h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
+	//sub, err := n.host.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
 	//if err != nil {
 	//	return fmt.Errorf("failed to subscribe to EvtLocalAddressesUpdated events: %w", err)
 	//}

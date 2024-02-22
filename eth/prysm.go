@@ -23,7 +23,13 @@ import (
 	"github.com/probe-lab/hermes/tele"
 )
 
-type IPrysmClient interface {
+// TrustedPeerer defines the two relevant endpoints that we call to register
+// ourselves as a trusted peer. This is done because Hermes can be run without
+// a Prysm node in the back. In that case, to avoid nil checks everywhere, we
+// just inject a no-op prysm client, that does nothing. That no-op client also
+// implements this interface.The remaining code just operates with this
+// interface.
+type TrustedPeerer interface {
 	AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) (err error)
 	RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err error)
 }
@@ -36,7 +42,7 @@ type PrysmClient struct {
 	tracer  trace.Tracer
 }
 
-var _ IPrysmClient = (*PrysmClient)(nil)
+var _ TrustedPeerer = (*PrysmClient)(nil)
 
 func NewPrysmClient(host string, port int) *PrysmClient {
 	return &PrysmClient{
@@ -61,8 +67,13 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 		return fmt.Errorf("trusted peer has %d addresses, expected exactly 1", len(addrInfo.Addrs))
 	}
 
+	maddrs, err := peer.AddrInfoToP2pAddrs(&addrInfo)
+	if err != nil {
+		return fmt.Errorf("failed to construct p2p addr from addrinfo: %w", err)
+	}
+
 	payload := node.AddrRequest{
-		Addr: fmt.Sprintf("%s/p2p/%s", addrInfo.Addrs[0].String(), addrInfo.ID.String()),
+		Addr: maddrs[0].String(), // save because we checked the length above
 	}
 
 	u := url.URL{
@@ -165,15 +176,16 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 	return nil
 }
 
-// NoopPrysmClient doesn't do anything
-type NoopPrysmClient struct{}
+// NoopTrustedPeerer doesn't do anything. See documentation of [TrustedPeerer]
+// for the rationale.
+type NoopTrustedPeerer struct{}
 
-var _ IPrysmClient = (*NoopPrysmClient)(nil)
+var _ TrustedPeerer = (*NoopTrustedPeerer)(nil)
 
-func (n NoopPrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) (err error) {
+func (n NoopTrustedPeerer) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) error {
 	return nil
 }
 
-func (n NoopPrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err error) {
+func (n NoopTrustedPeerer) RemoveTrustedPeer(ctx context.Context, pid peer.ID) error {
 	return nil
 }
