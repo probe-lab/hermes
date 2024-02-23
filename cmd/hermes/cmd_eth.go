@@ -23,9 +23,8 @@ var ethConfig = &struct {
 	Devp2pPort    int
 	Libp2pHost    string
 	Libp2pPort    int
-	BeaconHost    string
-	BeaconPort    int
-	BeaconType    string
+	PrysmHost     string
+	PrysmPort     int
 	MaxPeers      int
 }{
 	PrivateKeyStr: "", // unset means it'll be generated
@@ -35,9 +34,8 @@ var ethConfig = &struct {
 	Devp2pPort:    0,
 	Libp2pHost:    "127.0.0.1",
 	Libp2pPort:    0,
-	BeaconHost:    "",
-	BeaconPort:    0,
-	BeaconType:    string(eth.BeaconTypeNone),
+	PrysmHost:     "",
+	PrysmPort:     0,
 	MaxPeers:      30, // arbitrary
 }
 
@@ -109,25 +107,18 @@ var cmdEthFlags = []cli.Flag{
 		DefaultText: "random",
 	},
 	&cli.StringFlag{
-		Name:        "beacon.host",
-		EnvVars:     []string{"HERMES_ETH_BEACON_HOST"},
-		Usage:       "The host where the beacon node's beacon API is accessible",
-		Value:       ethConfig.BeaconHost,
-		Destination: &ethConfig.BeaconHost,
+		Name:        "prysm.host",
+		EnvVars:     []string{"HERMES_ETH_PRYSM_HOST"},
+		Usage:       "The host ip/name where Prysm's (beacon) API is accessible",
+		Value:       ethConfig.PrysmHost,
+		Destination: &ethConfig.PrysmHost,
 	},
 	&cli.IntFlag{
-		Name:        "beacon.port",
-		EnvVars:     []string{"HERMES_ETH_BEACON_PORT"},
-		Usage:       "The port the beacon API is listening on",
-		Value:       ethConfig.BeaconPort,
-		Destination: &ethConfig.BeaconPort,
-	},
-	&cli.StringFlag{
-		Name:        "beacon.type",
-		EnvVars:     []string{"HERMES_ETH_BEACON_TYPE"},
-		Usage:       "What is the Beacon node implementation we delegate block/blob requests to. (none, prysm, other)",
-		Value:       ethConfig.BeaconType,
-		Destination: &ethConfig.BeaconType,
+		Name:        "prysm.port",
+		EnvVars:     []string{"HERMES_ETH_PRYSM_PORT"},
+		Usage:       "The port on which Prysm's (beacon) API is listening on",
+		Value:       ethConfig.PrysmPort,
+		Destination: &ethConfig.PrysmPort,
 	},
 	&cli.IntFlag{
 		Name:        "max-peers",
@@ -151,14 +142,10 @@ func cmdEthAction(c *cli.Context) error {
 		return fmt.Errorf("get config for %s: %w", ethConfig.Chain, err)
 	}
 
+	// Overriding configuration so that functions like ComputForkDigest take the
+	// correct input data from the global configuration.
 	params.OverrideBeaconConfig(beaConfig)
 	params.OverrideBeaconNetworkConfig(netConfig)
-
-	// Parse beacon type
-	beaconType, err := eth.BeaconTypeFrom(ethConfig.BeaconType)
-	if err != nil {
-		return fmt.Errorf("get beacon type: %w", err)
-	}
 
 	cfg := &eth.NodeConfig{
 		GenesisConfig: genConfig,
@@ -169,9 +156,8 @@ func cmdEthAction(c *cli.Context) error {
 		Devp2pPort:    ethConfig.Devp2pPort,
 		Libp2pHost:    ethConfig.Libp2pHost,
 		Libp2pPort:    ethConfig.Libp2pPort,
-		BeaconHost:    ethConfig.BeaconHost,
-		BeaconPort:    ethConfig.BeaconPort,
-		BeaconType:    beaconType,
+		PrysmHost:     ethConfig.PrysmHost,
+		PrysmPort:     ethConfig.PrysmPort,
 		MaxPeers:      ethConfig.MaxPeers,
 		DialerCount:   16,
 		Tracer:        otel.GetTracerProvider().Tracer("hermes"),

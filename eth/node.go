@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/prysmaticlabs/prysm/v4/network/forks"
 	"github.com/prysmaticlabs/prysm/v4/time/slots"
 	"github.com/thejerf/suture/v4"
@@ -27,8 +26,7 @@ type Node struct {
 
 	// clients
 	p2pClient *P2PClient
-	prrClient PeererClient
-	beaClient BeaconClient
+	pryClient *PrysmClient
 
 	// services
 	disc *Discovery
@@ -50,29 +48,6 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()))
-
-	// initialize peerer client that we'll use to register this Hermes node as a
-	// trusted peer with the beacon client that we delegate requests to.
-	var prrClient PeererClient
-	var beaClient BeaconClient
-	switch cfg.BeaconType {
-	case BeaconTypePrysm:
-		slog.Info("Using Prysm trusted peerer client", "addr", cfg.BeaconHost, "port", cfg.BeaconPort)
-		client := NewPrysmClient(cfg.BeaconHost, cfg.BeaconPort)
-		client.tracer = cfg.Tracer
-		prrClient = client
-		beaClient = client
-	case BeaconTypeOther:
-		slog.Info("Using no-op trusted peerer client")
-		prrClient = NoopPeererClient{}
-		slog.Info("Using generic beacon api client", "addr", cfg.BeaconHost, "port", cfg.BeaconPort)
-		beaClient = NewBeaconAPIClient(cfg.BeaconHost, cfg.BeaconPort)
-	case BeaconTypeNone:
-		slog.Info("Using no-op trusted peerer client")
-		prrClient = NoopPeererClient{}
-		slog.Info("Using no-op beacon api client")
-		beaClient = NoopBeaconClient{}
-	}
 
 	// initialize ethereum node
 	privKey, err := cfg.ECDSAPrivateKey()
@@ -107,9 +82,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		host:       h,
 		supervisor: suture.NewSimple("eth"),
 		pool:       NewPool(),
-		beaClient:  beaClient,
-		prrClient:  prrClient,
 		p2pClient:  p2pClient,
+		pryClient:  NewPrysmClient(cfg.PrysmHost, cfg.PrysmPort),
 		disc:       disc,
 	}
 
@@ -122,52 +96,60 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 func (n *Node) Start(ctx context.Context) error {
 	defer logDeferErr(n.host.Close, "Failed closing libp2p host")
 
-	// give the libp2p host 1 minute to figure out its public addresses
-	//timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	//defer cancel()
-	//
-	//_ = timeoutCtx
-	//if err := n.host.WaitForPublicAddress(timeoutCtx); err != nil {
-	//	return fmt.Errorf("failed waiting for public addresses: %w", err)
-	//}
-
-	// construct our own addr info
-	self := peer.AddrInfo{
-		ID:    n.host.ID(),
-		Addrs: n.host.Addrs(),
+	// identify the beacon node. We only have the host/port of the Beacon API
+	// endpoint. If we want to establish a P2P connection, we need its peer ID
+	// and dedicated p2p port. We call the identity endpoint to get this information
+	slog.Info("Getting Prysm P2P Identity")
+	addrInfo, err := n.pryClient.AddrInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("get prysm node p2p addr info: %w", err)
 	}
 
+	slog.Info("Prysm P2P Identity:", tele.LogAttrPeerID(addrInfo.ID))
+	for i, maddr := range addrInfo.Addrs {
+		slog.Info(fmt.Sprintf("[%d] %s", i, maddr.String()))
+	}
+
+	// cache the address information on the node
+	n.beaconAddrInfo = addrInfo
+
+	// Create a connection signal that fires when the Prysm node has connected
+	// to us. Prysm will try this periodically AFTER we have registered ourselves
+	// as a trusted peer. Therefore, we register the signal first and only
+	// aftewards add ourselves as a trusted peer to not miss the signal
+	// https://github.com/prysmaticlabs/prysm/issues/13659
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	connSignal := n.host.ConnSignal(timeoutCtx, addrInfo.ID)
+
 	// register ourselves as a trusted peer
-	if err := n.prrClient.AddTrustedPeer(ctx, self); err != nil {
+	self := peer.AddrInfo{ID: n.host.ID(), Addrs: n.host.Addrs()}
+	slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "addr", self.Addrs)
+	if err := n.pryClient.AddTrustedPeer(ctx, self); err != nil {
 		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// unregister ourselves from the beacon node
-		if err := n.prrClient.RemoveTrustedPeer(shutdownCtx, n.host.ID()); err != nil { // use new context
+		// unregister ourselves as a trusted peer from prysm. Context timeout
+		// is not necessary because the pryClient applies a 5s timeout to each API call
+		slog.Info("Removing ourselves as a trusted peer from Prysm", tele.LogAttrPeerID(self.ID))
+		if err := n.pryClient.RemoveTrustedPeer(context.Background(), n.host.ID()); err != nil { // use new context, as the old one is likely cancelled
 			slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
 		}
 	}()
 
-	// connect to the beacon node
-	if n.cfg.BeaconType != BeaconTypeNone {
-		addrInfo, err := n.beaconNodeAddrInfo(ctx)
-		if err != nil {
-			return fmt.Errorf("get beacon node p2p addr info: %w", err)
-		}
-		n.beaconAddrInfo = addrInfo
-
-		slog.Info("Establishing connection to beacon node", tele.LogAttrPeerID(addrInfo.ID), "maddr", addrInfo.Addrs[0])
-		if err := n.host.Connect(ctx, *addrInfo); err != nil {
-			return fmt.Errorf("could not connect to beacon node: %w", err)
-		}
-		slog.Info("Connected to beacon node!", tele.LogAttrPeerID(addrInfo.ID), "maddr", addrInfo.Addrs[0])
+	slog.Info("Proactively trying to connect to Prysm", tele.LogAttrPeerID(addrInfo.ID), "maddrs", addrInfo.Addrs)
+	if err := n.host.Connect(ctx, *addrInfo); err != nil {
+		slog.Info("Connection to beacon node failed", tele.LogAttrError(err))
+		slog.Info("Waiting for dialback from Prysm node")
 	}
 
+	if err := <-connSignal; err != nil {
+		return fmt.Errorf("failed waiting for Prysm dialback: %w", err)
+	}
+	slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
+
 	// start the discovery service to find peers in the discv5 DHT
-	n.supervisor.Add(n.disc)
+	// n.supervisor.Add(n.disc)
 
 	// start the peer dialers, that consume the discovered peers from
 	// the discovery service up until MaxPeers.
@@ -183,36 +165,6 @@ func (n *Node) Start(ctx context.Context) error {
 
 	// start all long-running services
 	return n.supervisor.Serve(ctx)
-}
-
-// beaconNodeAddrInfo calls the beaconAPI /eth/v1/node/identity endpoint
-// and extracts the beacon node addr info object.
-func (n *Node) beaconNodeAddrInfo(ctx context.Context) (*peer.AddrInfo, error) {
-	beaIdentity, err := n.beaClient.Identity(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to contact beacon node: %w", err)
-	}
-
-	beaAddrInfo := &peer.AddrInfo{Addrs: []ma.Multiaddr{}}
-	for _, p2pMaddr := range beaIdentity.Data.P2PAddresses {
-		maddr, err := ma.NewMultiaddr(p2pMaddr)
-		if err != nil {
-			return nil, fmt.Errorf("parse beacon node identity multiaddress: %w", err)
-		}
-		addrInfo, err := peer.AddrInfoFromP2pAddr(maddr)
-		if err != nil {
-			return nil, fmt.Errorf("parse beacon node identity p2p maddr: %w", err)
-		}
-
-		if beaAddrInfo.ID.Size() != 0 && beaAddrInfo.ID != addrInfo.ID {
-			return nil, fmt.Errorf("received inconsistend beacon node identity peer IDs %s != %s", beaAddrInfo.ID, addrInfo.ID)
-		}
-
-		beaAddrInfo.ID = addrInfo.ID
-		beaAddrInfo.Addrs = append(beaAddrInfo.Addrs, addrInfo.Addrs...)
-	}
-
-	return beaAddrInfo, nil
 }
 
 // logDeferErr executes the given function and logs the given error message

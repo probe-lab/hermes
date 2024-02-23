@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/probe-lab/hermes/tele"
@@ -87,6 +90,39 @@ func (h *Host) WaitForPublicAddress(ctx context.Context) error {
 			// nope, no public address, wait for another update
 		}
 	}
+}
+
+// ConnSignal signals the incoming connection of the given peer on the returned
+// channel by just closing it. Alternatively, if the context has a deadline
+// that's exceeded, the channel will emit the context error and then be closed.
+func (h *Host) ConnSignal(ctx context.Context, pid peer.ID) chan error {
+	isClosed := atomic.Bool{}
+	signal := make(chan error)
+
+	notifiee := &network.NotifyBundle{
+		ConnectedF: func(net network.Network, c network.Conn) {
+			if c.RemotePeer() == pid && !isClosed.Swap(true) {
+				close(signal)
+			}
+		},
+	}
+
+	h.Network().Notify(notifiee)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			signal <- ctx.Err()
+		case <-signal:
+		}
+		h.Network().StopNotify(notifiee)
+
+		if !isClosed.Swap(true) {
+			close(signal)
+		}
+	}()
+
+	return signal
 }
 
 // MaddrFrom takes in an ip address string and port to produce a go multiaddr format.

@@ -11,6 +11,8 @@ import (
 	"github.com/probe-lab/hermes/tele"
 )
 
+// The Hermes Ethereum [Node] implements the [network.Notifiee] interface.
+// This means it will be notified about new connections.
 var _ network.Notifiee = (*Node)(nil)
 
 func (n *Node) Connected(net network.Network, c network.Conn) {
@@ -29,7 +31,9 @@ func (n *Node) Disconnected(net network.Network, c network.Conn) {
 	n.pool.RemovePeer(c.RemotePeer())
 }
 
-func (n *Node) Listen(net network.Network, maddr ma.Multiaddr) {}
+func (n *Node) Listen(net network.Network, maddr ma.Multiaddr) {
+	slog.Debug("Listen on", "maddr", maddr.String(), "total", len(n.host.Network().Peers()))
+}
 
 func (n *Node) ListenClose(net network.Network, maddr ma.Multiaddr) {}
 

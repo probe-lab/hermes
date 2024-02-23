@@ -24,50 +24,49 @@ import (
 	"github.com/probe-lab/hermes/host"
 )
 
-// BeaconType defines what kind of beacon node we use to delegate RPCs to.
-// This is relevant because, e.g., Prysm allows us to dynamically register
-// ourselves as a trusted peer while other beacon nodes like, e.g., lighthouse
-// only allows this to be configured at boot time. So if the beacon node that
-// Hermes works with is configured to be prysm, Hermes will attempt to register
-// itself as a trusted node.
-type BeaconType string
-
-const (
-	BeaconTypeNone  BeaconType = "none"
-	BeaconTypePrysm BeaconType = "prysm"
-	BeaconTypeOther BeaconType = "other"
-)
-
-func BeaconTypeFrom(s string) (BeaconType, error) {
-	switch s {
-	case string(BeaconTypeNone):
-		return BeaconTypeNone, nil
-	case string(BeaconTypePrysm):
-		return BeaconTypePrysm, nil
-	case string(BeaconTypeOther):
-		return BeaconTypeOther, nil
-	default:
-		return "", fmt.Errorf("invalid beacon type: %s", s)
-	}
-}
-
 type NodeConfig struct {
+	// A custom struct that holds information about the GenesisTime and GenesisValidatorRoot hash
 	GenesisConfig *GenesisConfig
+
+	// The beacon network config which holds, e.g., information about certain
+	// ENR keys and the list of bootstrap nodes
 	NetworkConfig *params.NetworkConfig
-	BeaconConfig  *params.BeaconChainConfig
+
+	// The beacon chain configuration that holds tons of information. Check out its definition
+	BeaconConfig *params.BeaconChainConfig
+
+	// The private key for the libp2p host and local enode in hex format
 	PrivateKeyStr string
-	privateKey    *crypto.Secp256k1PrivateKey
-	Devp2pHost    string
-	Devp2pPort    int
-	Libp2pHost    string
-	Libp2pPort    int
-	BeaconHost    string
-	BeaconPort    int
-	BeaconType    BeaconType
-	MaxPeers      int
-	DialerCount   int
-	Tracer        trace.Tracer
-	Meter         metric.Meter
+
+	// The parsed private key as an unexported field. This is used to cache the
+	// parsing result, so that [PrivateKey] can be called multiple times without
+	// regenerating the key over and over again.
+	privateKey *crypto.Secp256k1PrivateKey
+
+	// The address information of the local ethereuem [enode.Node].
+	Devp2pHost string
+	Devp2pPort int
+
+	// The address information of the local libp2p host
+	Libp2pHost string
+	Libp2pPort int
+
+	// The address information where the Beacon API or Prysm's custom API is accessible at
+	PrysmHost string
+	PrysmPort int
+
+	// The maximum number of peers our libp2p host can be connected to.
+	MaxPeers int
+
+	// Limits the number of concurrent connection establishment routines. When
+	// we discover peers over discv5 and are not at our MaxPeers limit we try
+	// to establish a connection to a peer. However, we limit the concurrency to
+	// this DialerCount value.
+	DialerCount int
+
+	// Telemetry accessors
+	Tracer trace.Tracer
+	Meter  metric.Meter
 }
 
 // Validate validates the Node configuration.

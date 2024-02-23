@@ -31,14 +31,26 @@ func (p *PeerDialer) Serve(ctx context.Context) error {
 		// if we're at capacity, don't look for more peers
 		if len(p.host.Network().Peers()) >= p.maxPeers {
 			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(time.Second):
+				// pass
+			}
 			continue
 		}
 
-		// channel will be closed when context is cancelled, so no
-		// select on the context necessary here
-		addrInfo, more := <-p.peerChan
-		if !more {
+		var (
+			more     bool
+			addrInfo peer.AddrInfo
+		)
+		select {
+		case <-ctx.Done():
 			return nil
+		case addrInfo, more = <-p.peerChan:
+			if !more {
+				return nil
+			}
 		}
 
 		// don't connect with ourselves
