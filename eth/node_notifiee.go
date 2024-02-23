@@ -3,6 +3,7 @@ package eth
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -16,7 +17,7 @@ import (
 var _ network.Notifiee = (*Node)(nil)
 
 func (n *Node) Connected(net network.Network, c network.Conn) {
-	slog.Debug("Connected with peer", tele.LogAttrPeerID(c.RemotePeer()), "total", len(n.host.Network().Peers()))
+	slog.Debug("Connected with peer", tele.LogAttrPeerID(c.RemotePeer()), "total", len(n.host.Network().Peers()), "dir", c.Stat().Direction)
 
 	// handle the new connection by validating the peer. Needs to happen in a
 	// go routine because Connected is called synchronously.
@@ -24,7 +25,7 @@ func (n *Node) Connected(net network.Network, c network.Conn) {
 }
 
 func (n *Node) Disconnected(net network.Network, c network.Conn) {
-	if n.beaconAddrInfo != nil && c.RemotePeer() == n.beaconAddrInfo.ID { // TODO: beaconAddrInfo access is racy
+	if n.prysmAddrInfo != nil && c.RemotePeer() == n.prysmAddrInfo.ID { // TODO: beaconAddrInfo access is racy
 		slog.Warn("Beacon node disconnected")
 	}
 
@@ -43,8 +44,11 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	// before we add the peer to our pool, we'll perform a handshake
 
 	valid := true
-	s, err := n.p2pClient.Status(context.Background(), pid)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s, err := n.reqResp.Status(ctx, pid)
 	if err != nil {
+		slog.Debug("Did status handshake", tele.LogAttrError(err))
 		valid = false
 	}
 	_ = s

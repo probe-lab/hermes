@@ -1,6 +1,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/probe-lab/hermes/tele"
+	"github.com/prysmaticlabs/prysm/v4/network/forks"
+	pb "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -86,6 +89,14 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 	defer slog.Info("Stopped disv5 Discovery Service")
 	defer func() { err = terminateSupervisorTreeOnErr(err) }()
 
+	genesisRoot := d.cfg.GenesisConfig.GenesisValidatorRoot
+	genesisTime := d.cfg.GenesisConfig.GenesisTime
+
+	digest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
+	if err != nil {
+		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
+	}
+
 	ip := net.ParseIP(d.cfg.Addr)
 
 	var bindIP net.IP
@@ -112,7 +123,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s:%d: %w", bindIP, d.cfg.UDPPort, err)
 	}
-	defer logDeferErr(conn.Close, "Failed to close discovery UDP connection")
+	defer logDeferErr(conn.Close, "failed to close discovery UDP connection")
 
 	enodes, err := d.cfg.BootstrapNodes()
 	if err != nil {
@@ -156,6 +167,23 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 
 		// Skip peer if it is only privately reachable
 		if node.IP().IsPrivate() {
+			continue
+		}
+		sszEncodedForkEntry := make([]byte, 16)
+		entry := enr.WithEntry(d.cfg.NetworkConfig.ETH2Key, &sszEncodedForkEntry)
+		if err = node.Record().Load(entry); err != nil {
+			// failed reading eth2 enr entry, likely because it doesn't exist
+			continue
+		}
+
+		forkEntry := &pb.ENRForkID{}
+		if err = forkEntry.UnmarshalSSZ(sszEncodedForkEntry); err != nil {
+			slog.Debug("failed unmarshalling eth2 enr entry", tele.LogAttrError(err))
+			continue
+		}
+
+		if bytes.Compare(forkEntry.CurrentForkDigest, digest[:]) != 0 {
+			// irrelevant network
 			continue
 		}
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v4/network/forks"
-	"github.com/prysmaticlabs/prysm/v4/time/slots"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
@@ -21,12 +20,14 @@ type Node struct {
 	supervisor *suture.Supervisor
 	pool       *Pool
 
-	// only set if we know it
-	beaconAddrInfo *peer.AddrInfo
+	// The addr info of Prysm's p2p endpoint
+	prysmAddrInfo *peer.AddrInfo
 
 	// clients
-	p2pClient *P2PClient
 	pryClient *PrysmClient
+
+	// servers
+	reqResp *ReqResp
 
 	// services
 	disc *Discovery
@@ -68,13 +69,26 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new discovery service: %w", err)
 	}
 
-	epoch := slots.EpochsSinceGenesis(cfg.GenesisConfig.GenesisTime)
-	forkDigest, err := forks.ForkDigestFromEpoch(epoch, cfg.GenesisConfig.GenesisValidatorRoot)
+	genesisRoot := cfg.GenesisConfig.GenesisValidatorRoot
+	genesisTime := cfg.GenesisConfig.GenesisTime
+
+	digest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
 	}
 
-	p2pClient := NewP2PClient(h, forkDigest)
+	reqRespCfg := &ReqRespConfig{
+		ForkDigest:   digest,
+		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
+		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
+		Tracer:       cfg.Tracer,
+		Meter:        cfg.Meter,
+	}
+
+	reqResp, err := NewReqResp(h, reqRespCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new p2p server: %w", err)
+	}
 
 	// finally, initialize hermes node
 	n := &Node{
@@ -82,13 +96,10 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		host:       h,
 		supervisor: suture.NewSimple("eth"),
 		pool:       NewPool(),
-		p2pClient:  p2pClient,
+		reqResp:    reqResp,
 		pryClient:  NewPrysmClient(cfg.PrysmHost, cfg.PrysmPort),
 		disc:       disc,
 	}
-
-	// register the node itself as the notifiee for network connection events
-	n.host.Network().Notify(n)
 
 	return n, nil
 }
@@ -111,7 +122,10 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 
 	// cache the address information on the node
-	n.beaconAddrInfo = addrInfo
+	n.prysmAddrInfo = addrInfo
+
+	// Set stream handlers on our libp2p host
+	n.reqResp.RegisterHandlers(ctx)
 
 	// Create a connection signal that fires when the Prysm node has connected
 	// to us. Prysm will try this periodically AFTER we have registered ourselves
@@ -137,6 +151,9 @@ func (n *Node) Start(ctx context.Context) error {
 		}
 	}()
 
+	// register the node itself as the notifiee for network connection events
+	n.host.Network().Notify(n)
+
 	slog.Info("Proactively trying to connect to Prysm", tele.LogAttrPeerID(addrInfo.ID), "maddrs", addrInfo.Addrs)
 	if err := n.host.Connect(ctx, *addrInfo); err != nil {
 		slog.Info("Connection to beacon node failed", tele.LogAttrError(err))
@@ -148,8 +165,27 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 	slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
 
+	slog.Info("Wait for first status information from Prysm")
+
+LOOP:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.Tick(time.Second):
+			slog.Info("Check if status is there")
+			n.reqResp.statusMu.RLock()
+			isInit := n.reqResp.status != nil
+			n.reqResp.statusMu.RUnlock()
+			if isInit {
+				break LOOP
+			}
+		}
+	}
+	slog.Info("Found valid status")
+
 	// start the discovery service to find peers in the discv5 DHT
-	// n.supervisor.Add(n.disc)
+	n.supervisor.Add(n.disc)
 
 	// start the peer dialers, that consume the discovered peers from
 	// the discovery service up until MaxPeers.
