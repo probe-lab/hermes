@@ -31,7 +31,6 @@ func (p *PeerDialer) Serve(ctx context.Context) error {
 	for {
 		// if we're at capacity, don't look for more peers
 		if len(p.host.Network().Peers()) >= p.maxPeers {
-			time.Sleep(time.Second)
 			select {
 			case <-ctx.Done():
 				return nil
