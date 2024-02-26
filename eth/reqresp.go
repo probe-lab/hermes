@@ -75,7 +75,7 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	}
 
 	// fake to support all attnets
-	for i := uint64(0); i < 64; i++ {
+	for i := uint64(0); i < md.Attnets.Len(); i++ {
 		md.Attnets.SetBitAt(i, true)
 	}
 
@@ -204,7 +204,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 		// time the request handling
 		start := time.Now()
 		if err := handler(ctx, s); err != nil {
-			slog.Debug("failed handling rpc", "protocol", s.Protocol(), tele.LogAttrError(err), tele.LogAttrPeerID(s.Conn().RemotePeer()))
+			slog.Debug("failed handling rpc", "protocol", s.Protocol(), tele.LogAttrError(err), tele.LogAttrPeerID(s.Conn().RemotePeer()), "agent", agentVersion)
 		}
 		end := time.Now()
 
@@ -471,6 +471,71 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 	resp := &eth.Status{}
 	if err := r.readResponse(ctx, stream, resp); err != nil {
 		return nil, fmt.Errorf("read status response: %w", err)
+	}
+
+	// we have the data that we want, so ignore error here
+	_ = stream.Close() // (both sides should actually be already closed)
+
+	return resp, nil
+}
+
+func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
+	defer func() {
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "ping"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	slog.Debug("Perform ping request", tele.LogAttrPeerID(pid))
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCPingTopicV1))
+	if err != nil {
+		return fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCPingTopicV1, pid, err)
+	}
+	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
+
+	r.metaDataMu.RLock()
+	seqNum := r.metaData.SeqNumber
+	r.metaDataMu.RUnlock()
+
+	req := primitives.SSZUint64(seqNum)
+	if err := r.writeRequest(ctx, stream, &req); err != nil {
+		return fmt.Errorf("write ping request: %w", err)
+	}
+
+	// read and decode status response
+	resp := new(primitives.SSZUint64)
+	if err := r.readResponse(ctx, stream, resp); err != nil {
+		return fmt.Errorf("read ping response: %w", err)
+	}
+
+	// we have the data that we want, so ignore error here
+	_ = stream.Close() // (both sides should actually be already closed)
+
+	return nil
+}
+
+func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV1, err error) {
+	defer func() {
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "meta_data"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	slog.Debug("Perform metadata request", tele.LogAttrPeerID(pid))
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCMetaDataTopicV2))
+	if err != nil {
+		return resp, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
+	}
+	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
+
+	// read and decode status response
+	resp = &eth.MetaDataV1{}
+	if err := r.readResponse(ctx, stream, resp); err != nil {
+		return resp, fmt.Errorf("read ping response: %w", err)
 	}
 
 	// we have the data that we want, so ignore error here

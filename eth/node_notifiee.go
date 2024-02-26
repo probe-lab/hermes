@@ -2,6 +2,7 @@ package eth
 
 import (
 	"context"
+	"encoding/hex"
 	"log/slog"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -24,16 +25,14 @@ func (n *Node) Connected(net network.Network, c network.Conn) {
 }
 
 func (n *Node) Disconnected(net network.Network, c network.Conn) {
-	if n.prysmAddrInfo != nil && c.RemotePeer() == n.prysmAddrInfo.ID { // TODO: beaconAddrInfo access is racy
+	if n.prysmAddrInfo != nil && c.RemotePeer() == n.prysmAddrInfo.ID {
 		slog.Warn("Beacon node disconnected")
 	}
 
 	n.pool.RemovePeer(c.RemotePeer())
 }
 
-func (n *Node) Listen(net network.Network, maddr ma.Multiaddr) {
-	slog.Debug("Listen on", "maddr", maddr.String(), "total", len(n.host.Network().Peers()))
-}
+func (n *Node) Listen(net network.Network, maddr ma.Multiaddr) {}
 
 func (n *Node) ListenClose(net network.Network, maddr ma.Multiaddr) {}
 
@@ -46,19 +45,35 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	defer cancel()
 
 	valid := true
-	s, err := n.reqResp.Status(ctx, pid)
+	_, err := n.reqResp.Status(ctx, pid)
 	if err != nil {
-		slog.Debug("Did status handshake", tele.LogAttrError(err))
 		valid = false
 	} else {
-		slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid))
+		if err := n.reqResp.Ping(ctx, pid); err != nil {
+			valid = false
+		} else {
+			md, err := n.reqResp.MetaData(ctx, pid)
+			if err != nil {
+				valid = false
+			} else {
+				rawVal, err := n.host.Peerstore().Get(pid, "AgentVersion")
+
+				agentVersion := "n.a."
+				if err == nil {
+					if av, ok := rawVal.(string); ok {
+						agentVersion = av
+					}
+				}
+
+				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", agentVersion)
+			}
+		}
 	}
-	_ = s
 
 	if !valid {
 		// the handshake failed, we disconnect and remove it from our pool
 		n.host.Peerstore().RemovePeer(pid)
-		n.host.Network().ClosePeer(pid)
+		_ = n.host.Network().ClosePeer(pid)
 		n.pool.RemovePeer(pid)
 	} else {
 		// handshake succeeded, add this peer to our pool
