@@ -120,6 +120,7 @@ func (n *Node) Start(ctx context.Context) error {
 
 	// cache the address information on the node
 	n.prysmAddrInfo = addrInfo
+	n.reqResp.delegate = addrInfo.ID
 
 	// Now we have the beacon node's identity. The next thing we need is its
 	// current status. The status consists of the ForkDigest, FinalizedRoot,
