@@ -206,7 +206,6 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		// Update metrics
 		d.MeterDiscoveredPeers.Add(ctx, 1)
 
-		slog.Debug("Discovered peer", tele.LogAttrPeerID(pi.AddrInfo.ID))
 		select {
 		case d.out <- pi.AddrInfo:
 		case <-ctx.Done():

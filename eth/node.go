@@ -2,35 +2,43 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
 
 type Node struct {
-	cfg        *NodeConfig
-	host       *host.Host
-	supervisor *suture.Supervisor
-	pool       *Pool
+	cfg  *NodeConfig
+	host *host.Host
+	sup  *suture.Supervisor
+	pool *Pool
 
 	// The addr info of Prysm's p2p endpoint
-	prysmAddrInfo *peer.AddrInfo
+	pryInfo *peer.AddrInfo
 
 	// clients
 	pryClient *PrysmClient
 
 	// servers
 	reqResp *ReqResp
+	pubSub  *PubSub
 
 	// services
 	disc *Discovery
+
+	// meters
+	connCount   metric.Int64ObservableGauge
+	connDurHist metric.Float64Histogram
 }
 
 func NewNode(cfg *NodeConfig) (*Node, error) {
@@ -71,6 +79,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	reqRespCfg := &ReqRespConfig{
 		ForkDigest:   cfg.ForkDigest,
+		Encoder:      encoder.SszNetworkEncoder{},
 		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
 		Tracer:       cfg.Tracer,
@@ -82,6 +91,13 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new p2p server: %w", err)
 	}
 
+	pubSubConfig := &PubSubConfig{
+		ForkDigest: cfg.ForkDigest,
+		Encoder:    encoder.SszNetworkEncoder{},
+	}
+
+	pubSub := NewPubSub(h, pubSubConfig)
+
 	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("new prysm client")
@@ -89,16 +105,46 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// finally, initialize hermes node
 	n := &Node{
-		cfg:        cfg,
-		host:       h,
-		supervisor: suture.NewSimple("eth"),
-		pool:       NewPool(),
-		reqResp:    reqResp,
-		pryClient:  pryClient,
-		disc:       disc,
+		cfg:       cfg,
+		host:      h,
+		sup:       suture.NewSimple("eth"),
+		pool:      NewPool(),
+		reqResp:   reqResp,
+		pubSub:    pubSub,
+		pryClient: pryClient,
+		disc:      disc,
+	}
+
+	if err := n.initMetrics(cfg); err != nil {
+		return nil, fmt.Errorf("init metrics: %w", err)
 	}
 
 	return n, nil
+}
+
+func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
+	n.connDurHist, err = cfg.Meter.Float64Histogram(
+		"connection_duration_min",
+		metric.WithExplicitBucketBoundaries(0.5, 1, 5, 10, 50, 100, 500, 1000),
+	)
+	if err != nil {
+		return fmt.Errorf("new connection_duration_min histogram: %w", err)
+	}
+
+	n.connCount, err = cfg.Meter.Int64ObservableGauge("connection_count")
+	if err != nil {
+		return fmt.Errorf("new connection_count gauge: %w", err)
+	}
+
+	_, err = cfg.Meter.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
+		obs.ObserveInt64(n.connCount, int64(len(n.host.Network().Peers())))
+		return nil
+	}, n.connCount)
+	if err != nil {
+		return fmt.Errorf("register connectin_count gauge callback: %w", err)
+	}
+
+	return nil
 }
 
 func (n *Node) Start(ctx context.Context) error {
@@ -119,7 +165,7 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 
 	// cache the address information on the node
-	n.prysmAddrInfo = addrInfo
+	n.pryInfo = addrInfo
 	n.reqResp.delegate = addrInfo.ID
 
 	// Now we have the beacon node's identity. The next thing we need is its
@@ -142,7 +188,6 @@ func (n *Node) Start(ctx context.Context) error {
 		HeadRoot:       chainHead.HeadBlockRoot,
 		HeadSlot:       chainHead.HeadSlot,
 	}
-
 	n.reqResp.SetStatus(status)
 
 	// Set stream handlers on our libp2p host
@@ -187,11 +232,15 @@ func (n *Node) Start(ctx context.Context) error {
 	// connection already exists.
 	if err := <-connSignal; err != nil {
 		return fmt.Errorf("failed waiting for Prysm dialback: %w", err)
+	} else {
+		slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
 	}
-	slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
 
 	// start the discovery service to find peers in the discv5 DHT
-	n.supervisor.Add(n.disc)
+	n.sup.Add(n.disc)
+
+	// start the pubsub subscriptions and handlers
+	n.sup.Add(n.pubSub)
 
 	// start the peer dialers, that consume the discovered peers from
 	// the discovery service up until MaxPeers.
@@ -202,17 +251,17 @@ func (n *Node) Start(ctx context.Context) error {
 			peerChan: n.disc.out,
 			maxPeers: n.cfg.MaxPeers,
 		}
-		n.supervisor.Add(cs)
+		n.sup.Add(cs)
 	}
 
 	// start all long-running services
-	return n.supervisor.Serve(ctx)
+	return n.sup.Serve(ctx)
 }
 
 // logDeferErr executes the given function and logs the given error message
 // in case of an error.
 func logDeferErr(fn func() error, onErrMsg string) {
-	if err := fn(); err != nil {
+	if err := fn(); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Warn(onErrMsg, tele.LogAttrError(err))
 	}
 }

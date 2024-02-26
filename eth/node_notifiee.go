@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 
 	"github.com/probe-lab/hermes/tele"
+)
+
+const (
+	peerstoreKeyConnectedAt  = "connected_at"
+	peerstoreKeyIsHandshaked = "is_handshaked"
 )
 
 // The Hermes Ethereum [Node] implements the [network.Notifiee] interface.
@@ -19,14 +25,26 @@ var _ network.Notifiee = (*Node)(nil)
 func (n *Node) Connected(net network.Network, c network.Conn) {
 	slog.Debug("Connected with peer", tele.LogAttrPeerID(c.RemotePeer()), "total", len(n.host.Network().Peers()), "dir", c.Stat().Direction)
 
+	if err := n.host.Peerstore().Put(c.RemotePeer(), peerstoreKeyConnectedAt, time.Now()); err != nil {
+		slog.Warn("Failed to store connection timestamp in peerstore", tele.LogAttrError(err))
+	}
+
 	// handle the new connection by validating the peer. Needs to happen in a
 	// go routine because Connected is called synchronously.
 	go n.handleNewConnection(c.RemotePeer())
 }
 
 func (n *Node) Disconnected(net network.Network, c network.Conn) {
-	if n.prysmAddrInfo != nil && c.RemotePeer() == n.prysmAddrInfo.ID {
+	if n.pryInfo != nil && c.RemotePeer() == n.pryInfo.ID {
 		slog.Warn("Beacon node disconnected")
+	}
+
+	ps := n.host.Peerstore()
+	if _, err := ps.Get(c.RemotePeer(), peerstoreKeyIsHandshaked); err == nil {
+		if val, err := ps.Get(c.RemotePeer(), peerstoreKeyConnectedAt); err == nil {
+			slog.Info("Disconnected from handshaked peer", tele.LogAttrPeerID(c.RemotePeer()))
+			n.connDurHist.Record(context.Background(), time.Since(val.(time.Time)).Hours())
+		}
 	}
 
 	n.pool.RemovePeer(c.RemotePeer())
@@ -45,6 +63,8 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	defer cancel()
 
 	valid := true
+	ps := n.host.Peerstore()
+
 	_, err := n.reqResp.Status(ctx, pid)
 	if err != nil {
 		valid = false
@@ -56,13 +76,17 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 			if err != nil {
 				valid = false
 			} else {
-				rawVal, err := n.host.Peerstore().Get(pid, "AgentVersion")
+				rawVal, err := ps.Get(pid, "AgentVersion")
 
 				agentVersion := "n.a."
 				if err == nil {
 					if av, ok := rawVal.(string); ok {
 						agentVersion = av
 					}
+				}
+
+				if err := ps.Put(pid, peerstoreKeyIsHandshaked, true); err != nil {
+					slog.Warn("Failed to store handshaked marker in peerstore", tele.LogAttrError(err))
 				}
 
 				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", agentVersion)
@@ -72,7 +96,7 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 
 	if !valid {
 		// the handshake failed, we disconnect and remove it from our pool
-		n.host.Peerstore().RemovePeer(pid)
+		ps.RemovePeer(pid)
 		_ = n.host.Network().ClosePeer(pid)
 		n.pool.RemovePeer(pid)
 	} else {

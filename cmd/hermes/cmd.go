@@ -24,6 +24,11 @@ const (
 	flagCategoryTelemetry = "Telemetry Configuration:"
 )
 
+var firehoseConfig = struct {
+	Stream string
+	Region string
+}{}
+
 var rootConfig = struct {
 	Verbose        bool
 	LogLevel       string

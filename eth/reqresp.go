@@ -33,6 +33,7 @@ import (
 
 type ReqRespConfig struct {
 	ForkDigest [4]byte
+	Encoder    encoder.NetworkEncoding
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
@@ -48,7 +49,6 @@ type ReqResp struct {
 	host     host.Host
 	cfg      *ReqRespConfig
 	delegate peer.ID // peer ID that we delegate requests to
-	enc      encoder.NetworkEncoding
 
 	metaDataMu sync.RWMutex
 	metaData   *pb.MetaDataV1
@@ -82,7 +82,6 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	p := &ReqResp{
 		host:     h,
 		cfg:      cfg,
-		enc:      encoder.SszNetworkEncoder{},
 		metaData: md,
 	}
 
@@ -164,6 +163,7 @@ func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
 
 	for id, handler := range handlers {
 		protocolID := r.protocolID(id)
+		slog.Info("Register protocol handler", "protocol", protocolID)
 		r.host.SetStreamHandler(protocolID, r.wrapStreamHandler(ctx, string(protocolID), handler))
 	}
 
@@ -171,7 +171,7 @@ func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
 }
 
 func (r *ReqResp) protocolID(topic string) protocol.ID {
-	return protocol.ID(topic + r.enc.ProtocolSuffix())
+	return protocol.ID(topic + r.cfg.Encoder.ProtocolSuffix())
 }
 
 func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler ContextStreamHandler) network.StreamHandler {
@@ -239,7 +239,11 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) err
 
 	msg, found := types.GoodbyeCodeMessages[req]
 	if found {
-		slog.Debug("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
+		if _, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), peerstoreKeyIsHandshaked); err == nil {
+			slog.Info("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
+		} else {
+			slog.Debug("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
+		}
 	}
 
 	return stream.Close()
@@ -320,7 +324,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 
 	// read and decode status response
 	resp := &eth.Status{}
-	if err := r.enc.DecodeWithMaxLength(respReader, resp); err != nil {
+	if err := r.cfg.Encoder.DecodeWithMaxLength(respReader, resp); err != nil {
 		return fmt.Errorf("failed reading response data: %w", err)
 	}
 
@@ -564,7 +568,7 @@ func (r *ReqResp) readRequest(ctx context.Context, stream network.Stream, data s
 		return fmt.Errorf("failed setting read deadline on stream: %w", err)
 	}
 
-	if err = r.enc.DecodeWithMaxLength(stream, data); err != nil {
+	if err = r.cfg.Encoder.DecodeWithMaxLength(stream, data); err != nil {
 		return fmt.Errorf("read request data %T: %w", data, err)
 	}
 
@@ -608,7 +612,7 @@ func (r *ReqResp) readResponse(ctx context.Context, stream network.Stream, data 
 		return fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
 	}
 
-	if err = r.enc.DecodeWithMaxLength(stream, data); err != nil {
+	if err = r.cfg.Encoder.DecodeWithMaxLength(stream, data); err != nil {
 		return fmt.Errorf("read request data %T: %w", data, err)
 	}
 
@@ -635,7 +639,7 @@ func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data 
 		return fmt.Errorf("failed setting write deadline on stream: %w", err)
 	}
 
-	if _, err = r.enc.EncodeWithMaxLength(stream, data); err != nil {
+	if _, err = r.cfg.Encoder.EncodeWithMaxLength(stream, data); err != nil {
 		return fmt.Errorf("read sequence number: %w", err)
 	}
 
@@ -666,7 +670,7 @@ func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data
 		return fmt.Errorf("write success response code: %w", err)
 	}
 
-	if _, err = r.enc.EncodeWithMaxLength(stream, data); err != nil {
+	if _, err = r.cfg.Encoder.EncodeWithMaxLength(stream, data); err != nil {
 		return fmt.Errorf("read sequence number: %w", err)
 	}
 

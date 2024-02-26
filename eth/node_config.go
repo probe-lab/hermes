@@ -6,17 +6,22 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
+	"github.com/libp2p/go-libp2p-pubsub"
+	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -70,6 +75,15 @@ type NodeConfig struct {
 	// to establish a connection to a peer. However, we limit the concurrency to
 	// this DialerCount value.
 	DialerCount int
+
+	// It is set at this limit to handle the possibility
+	// of double topic subscriptions at fork boundaries.
+	// -> 64 Attestation Subnets * 2.
+	// -> 4 Sync Committee Subnets * 2.
+	// -> Block,Aggregate,ProposerSlashing,AttesterSlashing,Exits,SyncContribution * 2.
+	PubSubSubscriptionRequestLimit int
+
+	PubSubQueueSize int
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -199,49 +213,93 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	return opts, nil
 }
 
-type GenesisConfig struct {
-	GenesisValidatorRoot []byte    // Merkle Root at Genesis
-	GenesisTime          time.Time // Time at Genesis
-}
-
-func GetConfigsByNetworkName(net string) (*GenesisConfig, *params.NetworkConfig, *params.BeaconChainConfig, error) {
-	switch net {
-	case params.MainnetName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.MainnetConfig(), nil
-	case params.SepoliaName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.SepoliaConfig(), nil
-	case params.PraterName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.PraterConfig(), nil
-	case params.HoleskyName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.HoleskyConfig(), nil
-	default:
-		return nil, nil, nil, fmt.Errorf("network %s not found", net)
+func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub.Option {
+	psOpts := []pubsub.Option{
+		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithNoAuthor(),
+		pubsub.WithMessageIdFn(func(pmsg *pubsubpb.Message) string {
+			return p2p.MsgID(n.GenesisConfig.GenesisValidatorRoot, pmsg)
+		}),
+		pubsub.WithSubscriptionFilter(subFilter),
+		pubsub.WithPeerOutboundQueueSize(n.PubSubQueueSize),
+		pubsub.WithMaxMessageSize(int(n.BeaconConfig.GossipMaxSize)),
+		pubsub.WithValidateQueueSize(n.PubSubQueueSize),
+		pubsub.WithPeerScore(n.peerScoringParams()),
+		// pubsub.WithPeerScoreInspect(s.peerInspector, time.Minute),
+		pubsub.WithGossipSubParams(pubsubGossipParam()),
+		// pubsub.WithRawTracer(gossipTracer{host: s.host}),
 	}
+	return psOpts
 }
 
-var GenesisConfigs = map[string]*GenesisConfig{
-	params.MainnetName: {
-		GenesisValidatorRoot: hexToBytes("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
-		GenesisTime:          time.Unix(0, 1606824023*int64(time.Millisecond)),
-	},
-	params.SepoliaName: {
-		GenesisValidatorRoot: hexToBytes("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
-		GenesisTime:          time.Unix(0, 1655733600*int64(time.Millisecond)),
-	},
-	params.PraterName: {
-		GenesisValidatorRoot: hexToBytes("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
-		GenesisTime:          time.Unix(0, 1616508000*int64(time.Millisecond)), // https://github.com/eth-clients/goerli
-	},
-	params.HoleskyName: {
-		GenesisValidatorRoot: hexToBytes("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
-		GenesisTime:          time.Unix(0, 1695902400*int64(time.Millisecond)),
-	},
+const (
+
+	// decayToZero specifies the terminal value that we will use when decaying
+	// a value.
+	decayToZero = 0.01
+	// overlay parameters
+	gossipSubD   = 8  // topic stable mesh target count
+	gossipSubDlo = 6  // topic stable mesh low watermark
+	gossipSubDhi = 12 // topic stable mesh high watermark
+
+	// heartbeat interval
+	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+
+	// gossip parameters
+	gossipSubMcacheLen    = 6 // number of windows to retain full messages in cache for `IWANT` responses
+	gossipSubMcacheGossip = 3 // number of windows to gossip about
+)
+
+func (n *NodeConfig) oneEpochDuration() time.Duration {
+	return time.Duration(n.BeaconConfig.SlotsPerEpoch) * n.oneSlotDuration()
 }
 
-func hexToBytes(s string) []byte {
-	data, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
+func (n *NodeConfig) oneSlotDuration() time.Duration {
+	return time.Duration(n.BeaconConfig.SecondsPerSlot) * time.Second
+}
+
+func (n *NodeConfig) peerScoringParams() (*pubsub.PeerScoreParams, *pubsub.PeerScoreThresholds) {
+	thresholds := &pubsub.PeerScoreThresholds{
+		GossipThreshold:             -4000,
+		PublishThreshold:            -8000,
+		GraylistThreshold:           -16000,
+		AcceptPXThreshold:           100,
+		OpportunisticGraftThreshold: 5,
 	}
-	return data
+	scoreParams := &pubsub.PeerScoreParams{
+		Topics:        make(map[string]*pubsub.TopicScoreParams),
+		TopicScoreCap: 32.72,
+		AppSpecificScore: func(p peer.ID) float64 {
+			return 0
+		},
+		AppSpecificWeight:           1,
+		IPColocationFactorWeight:    -35.11,
+		IPColocationFactorThreshold: 10,
+		IPColocationFactorWhitelist: nil,
+		BehaviourPenaltyWeight:      -15.92,
+		BehaviourPenaltyThreshold:   6,
+		BehaviourPenaltyDecay:       n.scoreDecay(10 * n.oneEpochDuration()),
+		DecayInterval:               n.oneSlotDuration(),
+		DecayToZero:                 decayToZero,
+		RetainScore:                 100 * n.oneEpochDuration(),
+	}
+	return scoreParams, thresholds
+}
+
+// determines the decay rate from the provided time period till
+// the decayToZero value. Ex: ( 1 -> 0.01)
+func (n *NodeConfig) scoreDecay(totalDurationDecay time.Duration) float64 {
+	numOfTimes := totalDurationDecay / n.oneSlotDuration()
+	return math.Pow(decayToZero, 1/float64(numOfTimes))
+}
+
+// creates a custom gossipsub parameter set.
+func pubsubGossipParam() pubsub.GossipSubParams {
+	gParams := pubsub.DefaultGossipSubParams()
+	gParams.Dlo = gossipSubDlo
+	gParams.D = gossipSubD
+	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
+	gParams.HistoryLength = gossipSubMcacheLen
+	gParams.HistoryGossip = gossipSubMcacheGossip
+	return gParams
 }

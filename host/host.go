@@ -8,18 +8,24 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/thejerf/suture/v4"
+
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+
 	"github.com/probe-lab/hermes/tele"
 )
 
 type Host struct {
 	host.Host
+	pubsub   *pubsub.PubSub
+	fhClient *FirehoseClient
 }
 
 func New(opts ...libp2p.Option) (*Host, error) {
@@ -28,15 +34,37 @@ func New(opts ...libp2p.Option) (*Host, error) {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
 
+	fhClient, err := NewFirehoseClient(libp2pHost, nil) // config
+
 	h := &Host{
-		Host: libp2pHost,
+		Host:     libp2pHost,
+		fhClient: fhClient,
 	}
 
 	return h, nil
 }
 
 func (h *Host) Serve(ctx context.Context) error {
+	sup := suture.NewSimple("host")
+
+	sup.Add(h.fhClient)
+
 	return nil
+}
+
+func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsub.PubSub, error) {
+	// Add our custom tracer. Multiple tracers can be added using multiple
+	// invocations of the option.
+	opts = append(opts, pubsub.WithRawTracer(h.fhClient))
+
+	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("new gossip sub: %w", err)
+	}
+
+	h.pubsub = ps
+
+	return ps, nil
 }
 
 // WaitForPublicAddress blocks until the libp2p host has identified its own

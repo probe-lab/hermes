@@ -193,6 +193,10 @@ func cmdEthAction(c *cli.Context) error {
 		DialerCount:   16, // TODO: parameterize
 		Tracer:        otel.GetTracerProvider().Tracer("hermes"),
 		Meter:         otel.GetMeterProvider().Meter("hermes"),
+
+		// PubSub config
+		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
+		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10
 	}
 
 	n, err := eth.NewNode(cfg)
