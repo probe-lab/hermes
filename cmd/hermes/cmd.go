@@ -52,7 +52,7 @@ var rootConfig = struct {
 	MetricsPort:    6060,
 	TracingEnabled: false,
 	TracingAddr:    "localhost",
-	TracingPort:    4317,
+	TracingPort:    4317, // default jaeger port
 
 	tracerShutdownFunc:  nil,
 	metricsShutdownFunc: nil,
@@ -305,7 +305,7 @@ func configureMetrics(c *cli.Context) error {
 	}
 
 	// user wants to have metrics, use the prometheus meter provider
-	provider, err := tele.PromMeterProvider()
+	provider, err := tele.PromMeterProvider(c.Context)
 	if err != nil {
 		return fmt.Errorf("new prometheus meter provider: %w", err)
 	}
