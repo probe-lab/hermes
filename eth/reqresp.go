@@ -1,10 +1,13 @@
 package eth
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,6 +42,8 @@ type ReqRespConfig struct {
 	Meter  metric.Meter
 }
 
+// ReqResp implements the request response domain of the eth2 RPC spec:
+// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md
 type ReqResp struct {
 	host     host.Host
 	cfg      *ReqRespConfig
@@ -67,6 +72,11 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 		SeqNumber: 0,
 		Attnets:   bitfield.NewBitvector64(),
 		Syncnets:  bitfield.Bitvector4{byte(0x00)},
+	}
+
+	// fake to support all attnets
+	for i := uint64(0); i < 64; i++ {
+		md.Attnets.SetBitAt(i, true)
 	}
 
 	p := &ReqResp{
@@ -108,7 +118,40 @@ func (r *ReqResp) SetMetaData(seq uint64) {
 	}
 }
 
-func (r *ReqResp) RegisterHandlers(ctx context.Context) {
+func (r *ReqResp) SetStatus(status *eth.Status) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+
+	if r.status != nil && !bytes.Equal(r.status.ForkDigest, status.ForkDigest) {
+		slog.Warn("reqresp status updated with different fork digests", "old", hex.EncodeToString(r.status.ForkDigest), "new", hex.EncodeToString(status.ForkDigest))
+	}
+
+	slog.Info("New status:")
+	slog.Info("  fork_digest: " + hex.EncodeToString(status.ForkDigest))
+	slog.Info("  finalized_root: " + hex.EncodeToString(status.FinalizedRoot))
+	slog.Info("  finalized_epoch: " + strconv.FormatUint(uint64(status.FinalizedEpoch), 10))
+	slog.Info("  head_root: " + hex.EncodeToString(status.HeadRoot))
+	slog.Info("  head_slot: " + strconv.FormatUint(uint64(status.HeadSlot), 10))
+
+	r.status = status
+}
+
+// RegisterHandlers registers all RPC handlers. It checks first if all
+// preconditions are met. This includes valid initial status and metadata
+// values.
+func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
+	r.statusMu.RLock()
+	defer r.statusMu.RUnlock()
+	if r.status == nil {
+		return fmt.Errorf("chain status is nil")
+	}
+
+	r.metaDataMu.RLock()
+	defer r.metaDataMu.RUnlock()
+	if r.metaData == nil {
+		return fmt.Errorf("chain metadata is nil")
+	}
+
 	handlers := map[string]ContextStreamHandler{
 		p2p.RPCPingTopicV1:          r.pingHandler,
 		p2p.RPCGoodByeTopicV1:       r.goodbyeHandler,
@@ -123,6 +166,8 @@ func (r *ReqResp) RegisterHandlers(ctx context.Context) {
 		protocolID := r.protocolID(id)
 		r.host.SetStreamHandler(protocolID, r.wrapStreamHandler(ctx, string(protocolID), handler))
 	}
+
+	return nil
 }
 
 func (r *ReqResp) protocolID(topic string) protocol.ID {
@@ -171,7 +216,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 
 func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) error {
 	req := primitives.SSZUint64(0)
-	if err := r.ReadAndClose(ctx, stream, &req); err != nil {
+	if err := r.readRequest(ctx, stream, &req); err != nil {
 		return fmt.Errorf("read sequence number: %w", err)
 	}
 
@@ -179,7 +224,7 @@ func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) error 
 	sq := primitives.SSZUint64(r.metaData.SeqNumber)
 	r.metaDataMu.RUnlock()
 
-	if err := r.WriteAndClose(ctx, stream, &sq); err != nil {
+	if err := r.writeResponse(ctx, stream, &sq); err != nil {
 		return fmt.Errorf("write sequence number: %w", err)
 	}
 
@@ -188,7 +233,7 @@ func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) error 
 
 func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) error {
 	req := primitives.SSZUint64(0)
-	if err := r.ReadAndClose(ctx, stream, &req); err != nil {
+	if err := r.readRequest(ctx, stream, &req); err != nil {
 		return fmt.Errorf("read sequence number: %w", err)
 	}
 
@@ -206,19 +251,15 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 		// we need to handle its requests differently
 
 		resp := &eth.Status{}
-		if err := r.ReadAndClose(ctx, upstream, resp); err != nil {
+		if err := r.readRequest(ctx, upstream, resp); err != nil {
 			return fmt.Errorf("read status data from delegate: %w", err)
 		}
 
-		r.statusMu.Lock()
-		if r.status == nil {
-			slog.Info("Received first delegate status", "head_slot", resp.HeadSlot, "finalized_epoch", resp.FinalizedEpoch)
-		}
-		r.status = resp
-		r.statusMu.Unlock()
+		// update status
+		r.SetStatus(resp)
 
 		// mirror its own status back
-		if err := r.WriteAndClose(ctx, upstream, resp); err != nil {
+		if err := r.writeResponse(ctx, upstream, resp); err != nil {
 			return fmt.Errorf("write mirrored status response to delegate: %w", err)
 		}
 
@@ -261,8 +302,20 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 	// to the upstream peer
 	respReader := io.TeeReader(downstream, upstream)
 
-	if err = r.ReadRespCode(ctx, respReader); err != nil {
-		return fmt.Errorf("response code: %w", err)
+	code := make([]byte, 1)
+	if _, err := io.ReadFull(respReader, code); err != nil {
+		return fmt.Errorf("failed reading response code: %w", err)
+	}
+
+	// code == 0 means success
+	// code != 0 means error
+	if int(code[0]) != 0 {
+		errData, err := io.ReadAll(respReader)
+		if err != nil {
+			return fmt.Errorf("failed reading error data (code %d): %w", int(code[0]), err)
+		}
+
+		return fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
 	}
 
 	// read and decode status response
@@ -271,12 +324,8 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 		return fmt.Errorf("failed reading response data: %w", err)
 	}
 
-	r.statusMu.Lock()
-	if r.status == nil {
-		slog.Info("Received first delegate status", "head_slot", resp.HeadSlot, "finalized_epoch", resp.FinalizedEpoch)
-	}
-	r.status = resp
-	r.statusMu.Unlock()
+	// update status
+	r.SetStatus(resp)
 
 	// properly close both sides of the stream
 	downCloseErr := downstream.Close()
@@ -298,7 +347,7 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 	}
 	r.metaDataMu.RUnlock()
 
-	if err := r.WriteAndClose(ctx, stream, metaData); err != nil {
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		return fmt.Errorf("write meta data v1: %w", err)
 	}
 
@@ -309,7 +358,7 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 	r.metaDataMu.RLock()
 	defer r.metaDataMu.RUnlock()
 
-	if err := r.WriteAndClose(ctx, stream, r.metaData); err != nil {
+	if err := r.writeResponse(ctx, stream, r.metaData); err != nil {
 		return fmt.Errorf("write meta data v2: %w", err)
 	}
 
@@ -383,24 +432,61 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 	return nil
 }
 
-func (r *ReqResp) ReadRespCode(ctx context.Context, reader io.Reader) error {
-	code := make([]byte, 1)
-	if _, err := io.ReadFull(reader, code); err != nil {
-		return fmt.Errorf("failed reading response code: %w", err)
+func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, err error) {
+	defer func() {
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "status"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	slog.Debug("Perform status request", tele.LogAttrPeerID(pid))
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCStatusTopicV1))
+	if err != nil {
+		return nil, fmt.Errorf("new stream to peer %s: %w", pid, err)
+	}
+	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
+
+	// actually write the data to the stream
+	r.statusMu.RLock()
+	if r.status == nil {
+		return nil, fmt.Errorf("status unknown")
 	}
 
-	// code == 0 means success
-	// code != 0 means error
-	if int(code[0]) != 0 {
-		errData, _ := io.ReadAll(reader)
-		return fmt.Errorf("failed reading error data: %s", string(errData))
+	req := &eth.Status{
+		ForkDigest:     r.status.ForkDigest,
+		FinalizedRoot:  r.status.FinalizedRoot,
+		FinalizedEpoch: r.status.FinalizedEpoch,
+		HeadRoot:       r.status.HeadRoot,
+		HeadSlot:       r.status.HeadSlot,
+	}
+	r.statusMu.RUnlock()
+
+	if err := r.writeRequest(ctx, stream, req); err != nil {
+		return nil, fmt.Errorf("write status request: %w", err)
 	}
 
-	return nil
+	// read and decode status response
+	resp := &eth.Status{}
+	if err := r.readResponse(ctx, stream, resp); err != nil {
+		return nil, fmt.Errorf("read status response: %w", err)
+	}
+
+	// we have the data that we want, so ignore error here
+	_ = stream.Close() // (both sides should actually be already closed)
+
+	return resp, nil
 }
 
-func (r *ReqResp) ReadAndClose(ctx context.Context, stream network.Stream, data ssz.Unmarshaler) (err error) {
-	_, span := r.cfg.Tracer.Start(ctx, "read")
+// readRequest reads a request from the given network stream and populates the
+// data parameter with the decoded request. It also sets a read deadline on the
+// stream and returns an error if it fails to do so. After reading the request,
+// it closes the reading side of the stream and returns an error if it fails to
+// do so. The method also records any errors encountered using the
+// tracer configured at [ReqResp] initialization.
+func (r *ReqResp) readRequest(ctx context.Context, stream network.Stream, data ssz.Unmarshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "read_request")
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -414,7 +500,7 @@ func (r *ReqResp) ReadAndClose(ctx context.Context, stream network.Stream, data 
 	}
 
 	if err = r.enc.DecodeWithMaxLength(stream, data); err != nil {
-		return fmt.Errorf("read sequence number: %w", err)
+		return fmt.Errorf("read request data %T: %w", data, err)
 	}
 
 	if err = stream.CloseRead(); err != nil {
@@ -424,8 +510,81 @@ func (r *ReqResp) ReadAndClose(ctx context.Context, stream network.Stream, data 
 	return nil
 }
 
-func (r *ReqResp) WriteAndClose(ctx context.Context, stream network.Stream, data ssz.Marshaler) (err error) {
-	_, span := r.cfg.Tracer.Start(ctx, "write")
+// readResponse differs from readRequest in first reading a single byte that
+// indicates the response code before actually reading the payload data. It also
+// handles the response code in case it is not 0 (which would indicate success).
+func (r *ReqResp) readResponse(ctx context.Context, stream network.Stream, data ssz.Unmarshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "read_response")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
+	if err = stream.SetReadDeadline(time.Now().Add(r.cfg.ReadTimeout)); err != nil {
+		return fmt.Errorf("failed setting read deadline on stream: %w", err)
+	}
+
+	code := make([]byte, 1)
+	if _, err := io.ReadFull(stream, code); err != nil {
+		return fmt.Errorf("failed reading response code: %w", err)
+	}
+
+	// code == 0 means success
+	// code != 0 means error
+	if int(code[0]) != 0 {
+		errData, err := io.ReadAll(stream)
+		if err != nil {
+			return fmt.Errorf("failed reading error data (code %d): %w", int(code[0]), err)
+		}
+
+		return fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
+	}
+
+	if err = r.enc.DecodeWithMaxLength(stream, data); err != nil {
+		return fmt.Errorf("read request data %T: %w", data, err)
+	}
+
+	if err = stream.CloseRead(); err != nil {
+		return fmt.Errorf("failed to close reading side of stream: %w", err)
+	}
+
+	return nil
+}
+
+// writeRequest writes the given payload data to the given stream. It sets the
+// appropriate timeouts and closes the stream for further writes.
+func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data ssz.Marshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "write_request")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
+	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+
+	if _, err = r.enc.EncodeWithMaxLength(stream, data); err != nil {
+		return fmt.Errorf("read sequence number: %w", err)
+	}
+
+	if err = stream.CloseWrite(); err != nil {
+		return fmt.Errorf("failed to close writing side of stream: %w", err)
+	}
+
+	return nil
+}
+
+// writeResponse differs from writeRequest in prefixing the payload data with
+// a response code byte.
+func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data ssz.Marshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "write_response")
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -451,67 +610,4 @@ func (r *ReqResp) WriteAndClose(ctx context.Context, stream network.Stream, data
 	}
 
 	return nil
-}
-
-func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (*eth.Status, error) {
-	slog.Debug("Do status handshake")
-	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCStatusTopicV1))
-	if err != nil {
-		return nil, fmt.Errorf("new stream to peer %s: %w", pid, err)
-	}
-	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
-
-	// actually write the data to the stream
-	r.statusMu.RLock()
-	var req *eth.Status
-	if r.status == nil {
-		req = &eth.Status{
-			ForkDigest:     r.cfg.ForkDigest[:],
-			FinalizedRoot:  []byte{1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4},
-			FinalizedEpoch: 1,
-			HeadRoot:       []byte{1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4},
-			HeadSlot:       1,
-		}
-	} else {
-		req = &eth.Status{
-			ForkDigest:     r.status.ForkDigest,
-			FinalizedRoot:  r.status.FinalizedRoot,
-			FinalizedEpoch: r.status.FinalizedEpoch,
-			HeadRoot:       r.status.HeadRoot,
-			HeadSlot:       r.status.HeadSlot,
-		}
-	}
-	r.statusMu.RUnlock()
-
-	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
-		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
-	}
-
-	if _, err = r.enc.EncodeWithMaxLength(stream, req); err != nil {
-		return nil, fmt.Errorf("read sequence number: %w", err)
-	}
-
-	if err = stream.CloseWrite(); err != nil {
-		return nil, fmt.Errorf("failed to close writing side of stream: %w", err)
-	}
-
-	// define the maximum time we allow for receiving a response
-	if err = stream.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil { // TODO: parameterize timeout
-		return nil, fmt.Errorf("failed to set write deadline: %w", err)
-	}
-
-	if err := r.ReadRespCode(ctx, stream); err != nil {
-		return nil, fmt.Errorf("read status response code")
-	}
-
-	// read and decode status response
-	resp := &eth.Status{}
-	if err := r.ReadAndClose(ctx, stream, resp); err != nil {
-		return nil, fmt.Errorf("read status response: %w", err)
-	}
-
-	// we have the data that we want, so ignore error here
-	_ = stream.Close()
-
-	return resp, nil
 }
