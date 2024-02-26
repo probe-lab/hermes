@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -107,7 +108,8 @@ func TestPrysmClient_AddTrustedPeer(t *testing.T) {
 			port, err := strconv.Atoi(serverURL.Port())
 			require.NoError(t, err)
 
-			p := NewPrysmClient(serverURL.Hostname(), port)
+			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second)
+			require.NoError(t, err)
 
 			err = p.AddTrustedPeer(context.Background(), tt.payload)
 			if tt.expectErr {
@@ -170,7 +172,9 @@ func TestPrysmClient_RemoveTrustedPeer(t *testing.T) {
 			port, err := strconv.Atoi(serverURL.Port())
 			require.NoError(t, err)
 
-			p := NewPrysmClient(serverURL.Hostname(), port)
+			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second)
+			require.NoError(t, err)
+
 			err = p.RemoveTrustedPeer(context.Background(), pid)
 			if tt.expectErr {
 				assert.Error(t, err)

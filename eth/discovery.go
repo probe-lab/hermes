@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"fmt"
 	"log/slog"
 	"net"
 
+	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/probe-lab/hermes/tele"
 	"github.com/prysmaticlabs/prysm/v4/network/forks"
 	pb "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
@@ -188,20 +192,79 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		}
 
 		// construct the data structure that libp2p can make sense of
-		addrInfo, err := EnodeToAddrInfo(node)
+		pi, err := NewDiscoveredPeer(node)
 		if err != nil {
-			slog.Warn("Could not convert discovered peer info to addr info", tele.LogAttrError(err))
+			slog.Warn("Could not convert discovered node to peer info", tele.LogAttrError(err))
 			continue
 		}
 
 		// Update metrics
 		d.MeterDiscoveredPeers.Add(ctx, 1)
 
-		slog.Debug("Discovered peer", tele.LogAttrPeerID(addrInfo.ID))
+		slog.Debug("Discovered peer", tele.LogAttrPeerID(pi.AddrInfo.ID))
 		select {
-		case d.out <- *addrInfo:
+		case d.out <- pi.AddrInfo:
 		case <-ctx.Done():
 			return nil
 		}
 	}
+}
+
+type DiscoveredPeer struct {
+	AddrInfo peer.AddrInfo
+	ENR      *enode.Node
+}
+
+func NewDiscoveredPeer(node *enode.Node) (*DiscoveredPeer, error) {
+	pubKey := node.Pubkey()
+	if pubKey == nil {
+		return nil, fmt.Errorf("no public key")
+	}
+
+	pubBytes := elliptic.Marshal(secp256k1.S256(), pubKey.X, pubKey.Y)
+	secpKey, err := crypto.UnmarshalSecp256k1PublicKey(pubBytes)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal secp256k1 public key: %w", err)
+	}
+
+	peerID, err := peer.IDFromPublicKey(secpKey)
+	if err != nil {
+		return nil, fmt.Errorf("peer ID from public key: %w", err)
+	}
+
+	var ipScheme string
+	if p4 := node.IP().To4(); len(p4) == net.IPv4len {
+		ipScheme = "ip4"
+	} else {
+		ipScheme = "ip6"
+	}
+
+	maddrs := []ma.Multiaddr{}
+	if node.UDP() != 0 {
+		maddrStr := fmt.Sprintf("/%s/%s/udp/%d", ipScheme, node.IP(), node.UDP())
+		maddr, err := ma.NewMultiaddr(maddrStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse multiaddress %s: %w", maddrStr, err)
+		}
+		maddrs = append(maddrs, maddr)
+	}
+
+	if node.TCP() != 0 {
+		maddrStr := fmt.Sprintf("/%s/%s/tcp/%d", ipScheme, node.IP(), node.TCP())
+		maddr, err := ma.NewMultiaddr(maddrStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse multiaddress %s: %w", maddrStr, err)
+		}
+		maddrs = append(maddrs, maddr)
+	}
+
+	pi := &DiscoveredPeer{
+		AddrInfo: peer.AddrInfo{
+			ID:    peerID,
+			Addrs: maddrs,
+		},
+		ENR: node,
+	}
+
+	return pi, nil
 }

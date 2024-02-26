@@ -3,7 +3,6 @@ package eth
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -43,13 +42,16 @@ func (n *Node) ListenClose(net network.Network, maddr ma.Multiaddr) {}
 func (n *Node) handleNewConnection(pid peer.ID) {
 	// before we add the peer to our pool, we'll perform a handshake
 
-	valid := true
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), n.cfg.DialTimeout)
 	defer cancel()
+
+	valid := true
 	s, err := n.reqResp.Status(ctx, pid)
 	if err != nil {
 		slog.Debug("Did status handshake", tele.LogAttrError(err))
 		valid = false
+	} else {
+		slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid))
 	}
 	_ = s
 

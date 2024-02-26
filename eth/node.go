@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v4/network/forks"
+	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
@@ -69,16 +69,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new discovery service: %w", err)
 	}
 
-	genesisRoot := cfg.GenesisConfig.GenesisValidatorRoot
-	genesisTime := cfg.GenesisConfig.GenesisTime
-
-	digest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
-	if err != nil {
-		return nil, fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
-	}
-
 	reqRespCfg := &ReqRespConfig{
-		ForkDigest:   digest,
+		ForkDigest:   cfg.ForkDigest,
 		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
 		Tracer:       cfg.Tracer,
@@ -90,6 +82,11 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new p2p server: %w", err)
 	}
 
+	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("new prysm client")
+	}
+
 	// finally, initialize hermes node
 	n := &Node{
 		cfg:        cfg,
@@ -97,7 +94,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		supervisor: suture.NewSimple("eth"),
 		pool:       NewPool(),
 		reqResp:    reqResp,
-		pryClient:  NewPrysmClient(cfg.PrysmHost, cfg.PrysmPort),
+		pryClient:  pryClient,
 		disc:       disc,
 	}
 
@@ -110,22 +107,47 @@ func (n *Node) Start(ctx context.Context) error {
 	// identify the beacon node. We only have the host/port of the Beacon API
 	// endpoint. If we want to establish a P2P connection, we need its peer ID
 	// and dedicated p2p port. We call the identity endpoint to get this information
-	slog.Info("Getting Prysm P2P Identity")
-	addrInfo, err := n.pryClient.AddrInfo(ctx)
+	slog.Info("Getting Prysm P2P Identity...")
+	addrInfo, err := n.pryClient.Identity(ctx)
 	if err != nil {
 		return fmt.Errorf("get prysm node p2p addr info: %w", err)
 	}
 
 	slog.Info("Prysm P2P Identity:", tele.LogAttrPeerID(addrInfo.ID))
 	for i, maddr := range addrInfo.Addrs {
-		slog.Info(fmt.Sprintf("[%d] %s", i, maddr.String()))
+		slog.Info(fmt.Sprintf("  [%d] %s", i, maddr.String()))
 	}
 
 	// cache the address information on the node
 	n.prysmAddrInfo = addrInfo
 
+	// Now we have the beacon node's identity. The next thing we need is its
+	// current status. The status consists of the ForkDigest, FinalizedRoot,
+	// FinalizedEpoch, HeadRoot, and HeadSlot. We need the status so that we
+	// can reply with it upon status requests. This is just need for
+	// bootstrapping purposes. Subsequent Status requests will be forwarded to
+	// the beacon node, and the response will then be recorded and used from
+	// then on in the future.
+	slog.Info("Getting Prysm's chain head...")
+	chainHead, err := n.pryClient.ChainHead(ctx)
+	if err != nil {
+		return fmt.Errorf("get finalized finality checkpoints: %w", err)
+	}
+
+	status := &eth.Status{
+		ForkDigest:     n.cfg.ForkDigest[:],
+		FinalizedRoot:  chainHead.FinalizedBlockRoot,
+		FinalizedEpoch: chainHead.FinalizedEpoch,
+		HeadRoot:       chainHead.HeadBlockRoot,
+		HeadSlot:       chainHead.HeadSlot,
+	}
+
+	n.reqResp.SetStatus(status)
+
 	// Set stream handlers on our libp2p host
-	n.reqResp.RegisterHandlers(ctx)
+	if err := n.reqResp.RegisterHandlers(ctx); err != nil {
+		return fmt.Errorf("register RPC handlers: %w", err)
+	}
 
 	// Create a connection signal that fires when the Prysm node has connected
 	// to us. Prysm will try this periodically AFTER we have registered ourselves
@@ -138,7 +160,7 @@ func (n *Node) Start(ctx context.Context) error {
 
 	// register ourselves as a trusted peer
 	self := peer.AddrInfo{ID: n.host.ID(), Addrs: n.host.Addrs()}
-	slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "addr", self.Addrs)
+	slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "maddrs", self.Addrs)
 	if err := n.pryClient.AddTrustedPeer(ctx, self); err != nil {
 		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 	}
@@ -160,29 +182,12 @@ func (n *Node) Start(ctx context.Context) error {
 		slog.Info("Waiting for dialback from Prysm node")
 	}
 
+	// wait for the connection to Prysm, this will pass immediately if the
+	// connection already exists.
 	if err := <-connSignal; err != nil {
 		return fmt.Errorf("failed waiting for Prysm dialback: %w", err)
 	}
 	slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
-
-	slog.Info("Wait for first status information from Prysm")
-
-LOOP:
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.Tick(time.Second):
-			slog.Info("Check if status is there")
-			n.reqResp.statusMu.RLock()
-			isInit := n.reqResp.status != nil
-			n.reqResp.statusMu.RUnlock()
-			if isInit {
-				break LOOP
-			}
-		}
-	}
-	slog.Info("Found valid status")
 
 	// start the discovery service to find peers in the discv5 DHT
 	n.supervisor.Add(n.disc)

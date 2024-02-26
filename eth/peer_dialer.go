@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/probe-lab/hermes/host"
 	"github.com/thejerf/suture/v4"
+
+	"github.com/probe-lab/hermes/host"
 )
 
 // PeerDialer is a suture service that reads peers from the peerChan (which

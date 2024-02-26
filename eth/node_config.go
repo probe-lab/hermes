@@ -35,6 +35,9 @@ type NodeConfig struct {
 	// The beacon chain configuration that holds tons of information. Check out its definition
 	BeaconConfig *params.BeaconChainConfig
 
+	// The fork digest of the network Hermes participates in
+	ForkDigest [4]byte
+
 	// The private key for the libp2p host and local enode in hex format
 	PrivateKeyStr string
 
@@ -42,6 +45,9 @@ type NodeConfig struct {
 	// parsing result, so that [PrivateKey] can be called multiple times without
 	// regenerating the key over and over again.
 	privateKey *crypto.Secp256k1PrivateKey
+
+	// General timeout when communicating with other network participants
+	DialTimeout time.Duration
 
 	// The address information of the local ethereuem [enode.Node].
 	Devp2pHost string
@@ -52,8 +58,9 @@ type NodeConfig struct {
 	Libp2pPort int
 
 	// The address information where the Beacon API or Prysm's custom API is accessible at
-	PrysmHost string
-	PrysmPort int
+	PrysmHost     string
+	PrysmPortHTTP int
+	PrysmPortGRPC int
 
 	// The maximum number of peers our libp2p host can be connected to.
 	MaxPeers int
@@ -186,6 +193,7 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		libp2p.DisableRelay(),
 		libp2p.Ping(false),
 		libp2p.ResourceManager(rmgr),
+		libp2p.DisableMetrics(),
 	}
 
 	return opts, nil

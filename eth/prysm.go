@@ -13,33 +13,46 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	rpcnode "github.com/prysmaticlabs/prysm/v4/beacon-chain/rpc/eth/node"
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/rpc/prysm/node"
 	"github.com/prysmaticlabs/prysm/v4/network/httputil"
+	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // PrysmClient is an HTTP client for Prysm's JSON RPC API.
 type PrysmClient struct {
-	host    string
-	port    int
-	timeout time.Duration
-	tracer  trace.Tracer
+	host         string
+	port         int
+	nodeClient   eth.NodeClient
+	timeout      time.Duration
+	tracer       trace.Tracer
+	beaconClient eth.BeaconChainClient
 }
 
-func NewPrysmClient(host string, port int) *PrysmClient {
+func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration) (*PrysmClient, error) {
 	tracer := otel.GetTracerProvider().Tracer("prysm_client")
-	timeout := 5 * time.Second
+
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, portGRPC), grpc.WithTransportCredentials(
+		insecure.NewCredentials(),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("new grpc connection: %w", err)
+	}
 
 	return &PrysmClient{
-		host:    host,
-		port:    port,
-		timeout: timeout,
-		tracer:  tracer,
-	}
+		host:         host,
+		port:         portHTTP,
+		nodeClient:   eth.NewNodeClient(conn),
+		beaconClient: eth.NewBeaconChainClient(conn),
+		timeout:      timeout,
+		tracer:       tracer,
+	}, nil
 }
 
 func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) (err error) {
@@ -157,7 +170,23 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 	return nil
 }
 
-func (p *PrysmClient) Identity(ctx context.Context) (idResp *rpcnode.GetIdentityResponse, err error) {
+func (p *PrysmClient) ChainHead(ctx context.Context) (chainHead *eth.ChainHead, err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.chain_head")
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	return p.beaconClient.GetChainHead(ctx, &emptypb.Empty{})
+}
+
+func (p *PrysmClient) Identity(ctx context.Context) (addrInfo *peer.AddrInfo, err error) {
 	ctx, span := p.tracer.Start(ctx, "prysm_client.identity")
 	defer func() {
 		if err != nil {
@@ -167,79 +196,33 @@ func (p *PrysmClient) Identity(ctx context.Context) (idResp *rpcnode.GetIdentity
 		span.End()
 	}()
 
-	u := url.URL{
-		Scheme: "http",
-		Host:   fmt.Sprintf("%s:%d", p.host, p.port),
-		Path:   "/eth/v1/node/identity",
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	hostData, err := p.nodeClient.GetHost(ctx, &emptypb.Empty{})
 	if err != nil {
-		return nil, fmt.Errorf("new get prysm identity request: %w", err)
+		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	pid, err := peer.Decode(hostData.PeerId)
 	if err != nil {
-		return nil, fmt.Errorf("get prysm identity http get failed: %w", err)
+		return nil, fmt.Errorf("decode peer ID %s: %w", hostData.PeerId, err)
 	}
-	defer logDeferErr(resp.Body.Close, "Failed closing body")
 
-	if resp.StatusCode != http.StatusOK {
-		errResp := &httputil.DefaultJsonError{}
-		respData, err := io.ReadAll(resp.Body)
+	addrInfo = &peer.AddrInfo{
+		ID:    pid,
+		Addrs: make([]ma.Multiaddr, 0, len(hostData.Addresses)),
+	}
+
+	for _, addr := range hostData.Addresses {
+
+		maddr, err := ma.NewMultiaddr(addr)
 		if err != nil {
-			return nil, fmt.Errorf("failed reading response body: %w", err)
+			return nil, fmt.Errorf("parse host data multiaddress %s: %w", addr, err)
 		}
 
-		if err := json.Unmarshal(respData, errResp); err != nil {
-			return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
-		}
-
-		return nil, errResp
+		addrInfo.Addrs = append(addrInfo.Addrs, maddr)
 	}
 
-	idResp = &rpcnode.GetIdentityResponse{}
-	respData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed reading response body: %w", err)
-	}
-
-	if err := json.Unmarshal(respData, idResp); err != nil {
-		return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
-	}
-
-	return idResp, nil
-}
-
-// AddrInfo calls the beaconAPI /eth/v1/node/identity endpoint
-// and extracts the beacon node addr info object.
-func (p *PrysmClient) AddrInfo(ctx context.Context) (*peer.AddrInfo, error) {
-	beaIdentity, err := p.Identity(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to contact prysm node: %w", err)
-	}
-
-	beaAddrInfo := &peer.AddrInfo{Addrs: []ma.Multiaddr{}}
-	for _, p2pMaddr := range beaIdentity.Data.P2PAddresses {
-		maddr, err := ma.NewMultiaddr(p2pMaddr)
-		if err != nil {
-			return nil, fmt.Errorf("parse prysm node identity multiaddress: %w", err)
-		}
-		addrInfo, err := peer.AddrInfoFromP2pAddr(maddr)
-		if err != nil {
-			return nil, fmt.Errorf("parse prysm node identity p2p maddr: %w", err)
-		}
-
-		if beaAddrInfo.ID.Size() != 0 && beaAddrInfo.ID != addrInfo.ID {
-			return nil, fmt.Errorf("received inconsistend prysm node identity peer IDs %s != %s", beaAddrInfo.ID, addrInfo.ID)
-		}
-
-		beaAddrInfo.ID = addrInfo.ID
-		beaAddrInfo.Addrs = append(beaAddrInfo.Addrs, addrInfo.Addrs...)
-	}
-
-	return beaAddrInfo, nil
+	return addrInfo, nil
 }

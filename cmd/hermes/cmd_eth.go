@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v4/config/params"
+	"github.com/prysmaticlabs/prysm/v4/network/forks"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
@@ -24,7 +26,9 @@ var ethConfig = &struct {
 	Libp2pHost    string
 	Libp2pPort    int
 	PrysmHost     string
-	PrysmPort     int
+	PrysmPortHTTP int
+	PrysmPortGRPC int
+	DialTimeout   time.Duration
 	MaxPeers      int
 }{
 	PrivateKeyStr: "", // unset means it'll be generated
@@ -35,7 +39,9 @@ var ethConfig = &struct {
 	Libp2pHost:    "127.0.0.1",
 	Libp2pPort:    0,
 	PrysmHost:     "",
-	PrysmPort:     0,
+	PrysmPortHTTP: 3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmPortGRPC: 4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	DialTimeout:   5 * time.Second,
 	MaxPeers:      30, // arbitrary
 }
 
@@ -76,6 +82,13 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.Attnets,
 		Destination: &ethConfig.Attnets,
 	},
+	&cli.DurationFlag{
+		Name:        "timeout",
+		EnvVars:     []string{"HERMES_ETH_TIMEOUT"},
+		Usage:       "The request timeout when contacting other network participants",
+		Value:       ethConfig.DialTimeout,
+		Destination: &ethConfig.DialTimeout,
+	},
 	&cli.StringFlag{
 		Name:        "devp2p.host",
 		EnvVars:     []string{"HERMES_ETH_DEVP2P_HOST"},
@@ -114,11 +127,18 @@ var cmdEthFlags = []cli.Flag{
 		Destination: &ethConfig.PrysmHost,
 	},
 	&cli.IntFlag{
-		Name:        "prysm.port",
-		EnvVars:     []string{"HERMES_ETH_PRYSM_PORT"},
-		Usage:       "The port on which Prysm's (beacon) API is listening on",
-		Value:       ethConfig.PrysmPort,
-		Destination: &ethConfig.PrysmPort,
+		Name:        "prysm.port.http",
+		EnvVars:     []string{"HERMES_ETH_PRYSM_PORT_HTTP"},
+		Usage:       "The port on which Prysm's beacon nodes' Query HTTP API is listening on",
+		Value:       ethConfig.PrysmPortHTTP,
+		Destination: &ethConfig.PrysmPortHTTP,
+	},
+	&cli.IntFlag{
+		Name:        "prysm.port.grpc",
+		EnvVars:     []string{"HERMES_ETH_PRYSM_PORT_GRPC"},
+		Usage:       "The port on which Prysm's gRPC API is listening on",
+		Value:       ethConfig.PrysmPortGRPC,
+		Destination: &ethConfig.PrysmPortGRPC,
 	},
 	&cli.IntFlag{
 		Name:        "max-peers",
@@ -142,6 +162,14 @@ func cmdEthAction(c *cli.Context) error {
 		return fmt.Errorf("get config for %s: %w", ethConfig.Chain, err)
 	}
 
+	genesisRoot := genConfig.GenesisValidatorRoot
+	genesisTime := genConfig.GenesisTime
+
+	forkDigest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
+	if err != nil {
+		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
+	}
+
 	// Overriding configuration so that functions like ComputForkDigest take the
 	// correct input data from the global configuration.
 	params.OverrideBeaconConfig(beaConfig)
@@ -151,15 +179,18 @@ func cmdEthAction(c *cli.Context) error {
 		GenesisConfig: genConfig,
 		NetworkConfig: netConfig,
 		BeaconConfig:  beaConfig,
+		ForkDigest:    forkDigest,
 		PrivateKeyStr: ethConfig.PrivateKeyStr,
+		DialTimeout:   ethConfig.DialTimeout,
 		Devp2pHost:    ethConfig.Devp2pHost,
 		Devp2pPort:    ethConfig.Devp2pPort,
 		Libp2pHost:    ethConfig.Libp2pHost,
 		Libp2pPort:    ethConfig.Libp2pPort,
 		PrysmHost:     ethConfig.PrysmHost,
-		PrysmPort:     ethConfig.PrysmPort,
+		PrysmPortHTTP: ethConfig.PrysmPortHTTP,
+		PrysmPortGRPC: ethConfig.PrysmPortGRPC,
 		MaxPeers:      ethConfig.MaxPeers,
-		DialerCount:   16,
+		DialerCount:   16, // TODO: parameterize
 		Tracer:        otel.GetTracerProvider().Tracer("hermes"),
 		Meter:         otel.GetMeterProvider().Meter("hermes"),
 	}
