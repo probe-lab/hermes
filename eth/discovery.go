@@ -147,6 +147,11 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 
 	iterator := listener.RandomNodes()
 
+	go func() {
+		<-ctx.Done()
+		iterator.Close()
+	}()
+
 	slog.Info("Listen for discv5 peers...")
 	defer iterator.Close()
 	defer close(d.out)
@@ -163,7 +168,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		// let's see if we have another peer to process
 		exists := iterator.Next()
 		if !exists {
-			continue
+			return
 		}
 
 		// yes, we do
