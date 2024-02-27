@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . ./
-RUN GOARCH=amd64 GOOS=linux go build -o hermes ./cmd/hermes
+RUN CGO_ENABLED=0 go build -o hermes ./cmd/hermes
 
 # Create lightweight container
 FROM alpine:latest
@@ -17,5 +17,7 @@ RUN chown -R hermes:hermes /home/hermes
 USER hermes
 
 COPY --from=builder /build/hermes /usr/local/bin/hermes
+
+RUN chmod +x /usr/local/bin/hermes
 
 CMD hermes
