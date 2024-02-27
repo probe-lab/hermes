@@ -49,6 +49,7 @@ type Node struct {
 	// Metrics
 	connCount   metric.Int64ObservableGauge
 	connDurHist metric.Float64Histogram
+	connBeacon  metric.Int64ObservableGauge
 }
 
 // NewNode initializes a new [Node] using the provided configuration.
@@ -177,6 +178,23 @@ func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
 	}, n.connCount)
 	if err != nil {
 		return fmt.Errorf("register connectin_count gauge callback: %w", err)
+	}
+
+	n.connBeacon, err = cfg.Meter.Int64ObservableGauge("beacon_connected", metric.WithDescription("Tracks the standing connection to our beacon node (1=connected, 0=disconnected)"))
+	if err != nil {
+		return fmt.Errorf("new beacon_connected gauge: %w", err)
+	}
+
+	_, err = cfg.Meter.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
+		if n.pryInfo != nil && len(n.host.Network().ConnsToPeer(n.pryInfo.ID)) > 0 {
+			obs.ObserveInt64(n.connBeacon, 1)
+		} else {
+			obs.ObserveInt64(n.connBeacon, 0)
+		}
+		return nil
+	}, n.connBeacon)
+	if err != nil {
+		return fmt.Errorf("register beacon_connected gauge callback: %w", err)
 	}
 
 	return nil
