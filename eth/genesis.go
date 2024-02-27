@@ -8,11 +8,15 @@ import (
 	"github.com/prysmaticlabs/prysm/v4/config/params"
 )
 
+// GenesisConfig represents the Genesis configuration with the Merkle Root
+// at Genesis and the Time at Genesis.
 type GenesisConfig struct {
 	GenesisValidatorRoot []byte    // Merkle Root at Genesis
 	GenesisTime          time.Time // Time at Genesis
 }
 
+// GetConfigsByNetworkName returns the GenesisConfig, NetworkConfig,
+// BeaconChainConfig and any error based on the input network name
 func GetConfigsByNetworkName(net string) (*GenesisConfig, *params.NetworkConfig, *params.BeaconChainConfig, error) {
 	switch net {
 	case params.MainnetName:

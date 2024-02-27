@@ -38,9 +38,9 @@ type PrysmClient struct {
 func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration) (*PrysmClient, error) {
 	tracer := otel.GetTracerProvider().Tracer("prysm_client")
 
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, portGRPC), grpc.WithTransportCredentials(
-		insecure.NewCredentials(),
-	))
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, portGRPC),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("new grpc connection: %w", err)
 	}
@@ -121,6 +121,71 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 	}
 
 	return nil
+}
+
+func (p *PrysmClient) ListTrustedPeers(ctx context.Context) (peers map[peer.ID]*node.Peer, err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.listTrustedPeers")
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	u := url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("%s:%d", p.host, p.port),
+		Path:   "/prysm/node/trusted_peers",
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("new list trusted peer request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list trusted peer http get failed: %w", err)
+	}
+	defer logDeferErr(resp.Body.Close, "Failed closing body")
+
+	if resp.StatusCode != http.StatusOK {
+		errResp := &httputil.DefaultJsonError{}
+		respData, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed reading response body: %w", err)
+		}
+
+		if err := json.Unmarshal(respData, errResp); err != nil {
+			return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
+		}
+
+		return nil, errResp
+	}
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed reading response body: %w", err)
+	}
+
+	peerResp := &node.PeersResponse{}
+	if err := json.Unmarshal(respData, peerResp); err != nil {
+		return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
+	}
+
+	peerData := make(map[peer.ID]*node.Peer, len(peerResp.Peers))
+	for _, p := range peerResp.Peers {
+		pid, err := peer.Decode(p.PeerID)
+		if err != nil {
+			return nil, fmt.Errorf("decode peer ID %s: %w", p.PeerID, err)
+		}
+		peerData[pid] = p
+	}
+
+	return peerData, nil
 }
 
 func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err error) {

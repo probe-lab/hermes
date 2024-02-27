@@ -46,8 +46,6 @@ func (n *Node) Disconnected(net network.Network, c network.Conn) {
 			n.connDurHist.Record(context.Background(), time.Since(val.(time.Time)).Hours())
 		}
 	}
-
-	n.pool.RemovePeer(c.RemotePeer())
 }
 
 func (n *Node) Listen(net network.Network, maddr ma.Multiaddr) {}
@@ -98,9 +96,7 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 		// the handshake failed, we disconnect and remove it from our pool
 		ps.RemovePeer(pid)
 		_ = n.host.Network().ClosePeer(pid)
-		n.pool.RemovePeer(pid)
 	} else {
 		// handshake succeeded, add this peer to our pool
-		n.pool.AddPeer(pid)
 	}
 }

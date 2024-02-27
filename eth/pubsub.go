@@ -19,23 +19,40 @@ type PubSubConfig struct {
 	Encoder    encoder.NetworkEncoding
 }
 
+func (p PubSubConfig) Validate() error {
+	if len(p.ForkDigest) == 0 {
+		return fmt.Errorf("empty fork digest")
+	}
+
+	if p.Encoder == nil {
+		return fmt.Errorf("nil encoder")
+	}
+
+	return nil
+}
+
 type PubSub struct {
 	host *host.Host
 	cfg  *PubSubConfig
+	gs   *pubsub.PubSub
 }
 
-func NewPubSub(h *host.Host, cfg *PubSubConfig) *PubSub {
+func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate configuration: %w", err)
+	}
+
 	ps := &PubSub{
 		host: h,
 		cfg:  cfg,
 	}
-	return ps
+
+	return ps, nil
 }
 
 func (p *PubSub) Serve(ctx context.Context) error {
-	ps, err := p.host.InitGossipSub(ctx)
-	if err != nil {
-		return fmt.Errorf("init gossip sub: %w", err)
+	if p.gs == nil {
+		return fmt.Errorf("node's pubsub service uninitialized gossip sub: %w", suture.ErrTerminateSupervisorTree)
 	}
 
 	topicFormats := []string{
@@ -56,7 +73,7 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 	for _, topicFormat := range topicFormats {
 		topicName := fmt.Sprintf(topicFormat, p.cfg.ForkDigest) + p.cfg.Encoder.ProtocolSuffix()
-		topic, err := ps.Join(topicName)
+		topic, err := p.gs.Join(topicName)
 		if err != nil {
 			return fmt.Errorf("join pubsub topic %s: %w", topicName, err)
 		}

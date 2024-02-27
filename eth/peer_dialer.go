@@ -17,7 +17,6 @@ import (
 // to establish a connection.
 type PeerDialer struct {
 	host     *host.Host
-	pool     *Pool
 	peerChan <-chan peer.AddrInfo
 	maxPeers int
 }
@@ -55,11 +54,6 @@ func (p *PeerDialer) Serve(ctx context.Context) error {
 
 		// don't connect with ourselves
 		if addrInfo.ID == p.host.ID() {
-			continue
-		}
-
-		// skip peer if we banned it previously
-		if p.pool.BanStatus(addrInfo.ID) {
 			continue
 		}
 

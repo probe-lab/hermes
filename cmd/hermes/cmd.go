@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/iand/pontium/hlog"
 	"github.com/lmittmann/tint"
 	"github.com/urfave/cli/v2"
@@ -22,12 +24,8 @@ import (
 const (
 	flagCategoryLogging   = "Logging Configuration:"
 	flagCategoryTelemetry = "Telemetry Configuration:"
+	flagCategoryKinesis   = "Kinesis Configuration:"
 )
-
-var firehoseConfig = struct {
-	Stream string
-	Region string
-}{}
 
 var rootConfig = struct {
 	Verbose        bool
@@ -41,6 +39,11 @@ var rootConfig = struct {
 	TracingEnabled bool
 	TracingAddr    string
 	TracingPort    int
+	KinesisRegion  string
+	KinesisStream  string
+
+	// unexported fields are derived from the configuration
+	awsConfig *aws.Config
 
 	// Functions that shut down the telemetry providers.
 	// Both block until they're done
@@ -58,7 +61,11 @@ var rootConfig = struct {
 	TracingEnabled: false,
 	TracingAddr:    "localhost",
 	TracingPort:    4317, // default jaeger port
+	KinesisRegion:  "",
+	KinesisStream:  "",
 
+	// unexported fields are derived or initialized during startup
+	awsConfig:           nil,
 	tracerShutdownFunc:  nil,
 	metricsShutdownFunc: nil,
 }
@@ -162,6 +169,22 @@ var rootFlags = []cli.Flag{
 		Destination: &rootConfig.TracingPort,
 		Category:    flagCategoryTelemetry,
 	},
+	&cli.StringFlag{
+		Name:        "kinesis.region",
+		EnvVars:     []string{"HERMES_KINESIS_REGION"},
+		Usage:       "The region of the AWS Kinesis Data Stream",
+		Value:       rootConfig.KinesisRegion,
+		Destination: &rootConfig.KinesisRegion,
+		Category:    flagCategoryKinesis,
+	},
+	&cli.StringFlag{
+		Name:        "kinesis.stream",
+		EnvVars:     []string{"HERMES_KINESIS_DATA_STREAM"},
+		Usage:       "The name of the AWS Kinesis Data Stream",
+		Value:       rootConfig.KinesisStream,
+		Destination: &rootConfig.KinesisStream,
+		Category:    flagCategoryKinesis,
+	},
 }
 
 func main() {
@@ -206,6 +229,15 @@ func rootBefore(c *cli.Context) error {
 	// read CLI args and configure the global tracer provider
 	if err := configureTracing(c); err != nil {
 		return err
+	}
+
+	// if either parameter is set explicitly, we consider Kinesis to be enabled
+	if c.IsSet("kinesis.region") || c.IsSet("kinesis.stream") {
+		awsConfig, err := config.LoadDefaultConfig(c.Context, config.WithRegion(rootConfig.KinesisRegion))
+		if err != nil {
+			return fmt.Errorf("load AWS configuration: %w", err)
+		}
+		rootConfig.awsConfig = &awsConfig
 	}
 
 	return nil
@@ -317,8 +349,10 @@ func configureMetrics(c *cli.Context) error {
 
 	otel.SetMeterProvider(provider)
 
-	// expose the /metrics endpoint
-	shutdownFunc := tele.ServeMetrics(c.Context, rootConfig.MetricsAddr, rootConfig.MetricsPort)
+	// expose the /metrics endpoint. Use new context, so that the metrics server
+	// won't stop when an interrupt is received. If the shutdown procedure hangs
+	// this will give us a chance to still query pprof or the metrics endpoints.
+	shutdownFunc := tele.ServeMetrics(context.Background(), rootConfig.MetricsAddr, rootConfig.MetricsPort)
 
 	rootConfig.metricsShutdownFunc = shutdownFunc
 

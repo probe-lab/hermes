@@ -18,31 +18,33 @@ import (
 )
 
 var ethConfig = &struct {
-	PrivateKeyStr string
-	Chain         string
-	Attnets       string
-	Devp2pHost    string
-	Devp2pPort    int
-	Libp2pHost    string
-	Libp2pPort    int
-	PrysmHost     string
-	PrysmPortHTTP int
-	PrysmPortGRPC int
-	DialTimeout   time.Duration
-	MaxPeers      int
+	PrivateKeyStr   string
+	Chain           string
+	Attnets         string
+	Devp2pHost      string
+	Devp2pPort      int
+	Libp2pHost      string
+	Libp2pPort      int
+	PrysmHost       string
+	PrysmPortHTTP   int
+	PrysmPortGRPC   int
+	DialConcurrency int
+	DialTimeout     time.Duration
+	MaxPeers        int
 }{
-	PrivateKeyStr: "", // unset means it'll be generated
-	Chain:         params.MainnetName,
-	Attnets:       "ffffffffffffffff", // subscribed to all attnets.
-	Devp2pHost:    "127.0.0.1",
-	Devp2pPort:    0,
-	Libp2pHost:    "127.0.0.1",
-	Libp2pPort:    0,
-	PrysmHost:     "",
-	PrysmPortHTTP: 3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	PrysmPortGRPC: 4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	DialTimeout:   5 * time.Second,
-	MaxPeers:      30, // arbitrary
+	PrivateKeyStr:   "", // unset means it'll be generated
+	Chain:           params.MainnetName,
+	Attnets:         "ffffffffffffffff", // subscribed to all attnets.
+	Devp2pHost:      "127.0.0.1",
+	Devp2pPort:      0,
+	Libp2pHost:      "127.0.0.1",
+	Libp2pPort:      0,
+	PrysmHost:       "",
+	PrysmPortHTTP:   3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmPortGRPC:   4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	DialConcurrency: 16,
+	DialTimeout:     5 * time.Second,
+	MaxPeers:        30, // arbitrary
 }
 
 var cmdEth = &cli.Command{
@@ -82,9 +84,16 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.Attnets,
 		Destination: &ethConfig.Attnets,
 	},
+	&cli.IntFlag{
+		Name:        "dial.concurrency",
+		EnvVars:     []string{"HERMES_ETH_DIAL_CONCURRENCY"},
+		Usage:       "The maximum number of parallel workers dialing other peers in the network",
+		Value:       ethConfig.DialConcurrency,
+		Destination: &ethConfig.DialConcurrency,
+	},
 	&cli.DurationFlag{
-		Name:        "timeout",
-		EnvVars:     []string{"HERMES_ETH_TIMEOUT"},
+		Name:        "dial.timeout",
+		EnvVars:     []string{"HERMES_ETH_DIAL_TIMEOUT"},
 		Usage:       "The request timeout when contacting other network participants",
 		Value:       ethConfig.DialTimeout,
 		Destination: &ethConfig.DialTimeout,
@@ -176,27 +185,29 @@ func cmdEthAction(c *cli.Context) error {
 	params.OverrideBeaconNetworkConfig(netConfig)
 
 	cfg := &eth.NodeConfig{
-		GenesisConfig: genConfig,
-		NetworkConfig: netConfig,
-		BeaconConfig:  beaConfig,
-		ForkDigest:    forkDigest,
-		PrivateKeyStr: ethConfig.PrivateKeyStr,
-		DialTimeout:   ethConfig.DialTimeout,
-		Devp2pHost:    ethConfig.Devp2pHost,
-		Devp2pPort:    ethConfig.Devp2pPort,
-		Libp2pHost:    ethConfig.Libp2pHost,
-		Libp2pPort:    ethConfig.Libp2pPort,
-		PrysmHost:     ethConfig.PrysmHost,
-		PrysmPortHTTP: ethConfig.PrysmPortHTTP,
-		PrysmPortGRPC: ethConfig.PrysmPortGRPC,
-		MaxPeers:      ethConfig.MaxPeers,
-		DialerCount:   16, // TODO: parameterize
-		Tracer:        otel.GetTracerProvider().Tracer("hermes"),
-		Meter:         otel.GetMeterProvider().Meter("hermes"),
-
+		GenesisConfig:   genConfig,
+		NetworkConfig:   netConfig,
+		BeaconConfig:    beaConfig,
+		ForkDigest:      forkDigest,
+		PrivateKeyStr:   ethConfig.PrivateKeyStr,
+		DialTimeout:     ethConfig.DialTimeout,
+		Devp2pHost:      ethConfig.Devp2pHost,
+		Devp2pPort:      ethConfig.Devp2pPort,
+		Libp2pHost:      ethConfig.Libp2pHost,
+		Libp2pPort:      ethConfig.Libp2pPort,
+		PrysmHost:       ethConfig.PrysmHost,
+		PrysmPortHTTP:   ethConfig.PrysmPortHTTP,
+		PrysmPortGRPC:   ethConfig.PrysmPortGRPC,
+		AWSConfig:       rootConfig.awsConfig,
+		KinesisRegion:   rootConfig.KinesisRegion,
+		KinesisStream:   rootConfig.KinesisStream,
+		MaxPeers:        ethConfig.MaxPeers,
+		DialConcurrency: ethConfig.DialConcurrency,
 		// PubSub config
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
 		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10
+		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
+		Meter:                          otel.GetMeterProvider().Meter("hermes"),
 	}
 
 	n, err := eth.NewNode(cfg)

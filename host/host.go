@@ -2,14 +2,14 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"sync/atomic"
 	"time"
 
-	"github.com/thejerf/suture/v4"
-
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
@@ -18,51 +18,141 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+	"github.com/thejerf/suture/v4"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/probe-lab/hermes/tele"
 )
 
-type Host struct {
-	host.Host
-	pubsub   *pubsub.PubSub
-	fhClient *FirehoseClient
+type Config struct {
+	AWSConfig     *aws.Config
+	KinesisRegion string
+	KinesisStream string
+
+	// Telemetry accessors
+	Tracer trace.Tracer
+	Meter  metric.Meter
 }
 
-func New(opts ...libp2p.Option) (*Host, error) {
-	libp2pHost, err := libp2p.New(opts...)
+type Host struct {
+	host.Host
+	cfg *Config
+	ps  *pubsub.PubSub
+	ds  DataStream
+
+	meterSubmittedTraces metric.Int64Counter
+}
+
+func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
+	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
 
-	fhClient, err := NewFirehoseClient(libp2pHost, nil) // config
-
-	h := &Host{
-		Host:     libp2pHost,
-		fhClient: fhClient,
+	var ds DataStream
+	if cfg.AWSConfig != nil {
+		kpc := &KinProConfig{
+			AWSConfig:     cfg.AWSConfig,
+			StreamName:    cfg.KinesisStream,
+			FlushInterval: 5 * time.Second,
+			BatchCount:    500,
+			BacklogCount:  1000,
+			Log:           slog.Default(),
+			Meter:         cfg.Meter,
+		}
+		ds, err = NewKinPro(kpc)
+		if err != nil {
+			return nil, fmt.Errorf("new kinesis producer: %w", err)
+		}
+	} else {
+		ds = NoopDataStream{}
 	}
 
-	return h, nil
+	hermesHost := &Host{
+		Host: h,
+		cfg:  cfg,
+		ds:   ds,
+	}
+
+	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
+	if err != nil {
+		return nil, fmt.Errorf("new submitted_traces counter: %w", err)
+	}
+
+	return hermesHost, nil
 }
 
 func (h *Host) Serve(ctx context.Context) error {
-	sup := suture.NewSimple("host")
+	if h.ps == nil {
+		return fmt.Errorf("host started without gossip sub initialization: %w", suture.ErrTerminateSupervisorTree)
+	}
 
-	sup.Add(h.fhClient)
+	eventHandler := func(n network.Network, c network.Conn, evtType string) {
+		avStr := ""
+		agentVersion, err := h.Peerstore().Get(c.RemotePeer(), "AgentVersion")
+		if err == nil {
+			if str, ok := agentVersion.(string); ok {
+				avStr = str
+			}
+		}
+		evt := &TraceEvent{
+			Type:      evtType,
+			PeerID:    h.ID(),
+			Timestamp: time.Now(),
+			Data: struct {
+				RemotePeer   string
+				RemoteMaddrs ma.Multiaddr
+				AgentVersion string
+				Region       string
+			}{
+				RemotePeer:   c.RemotePeer().String(),
+				RemoteMaddrs: c.RemoteMultiaddr(),
+				AgentVersion: avStr,
+				Region:       h.cfg.KinesisRegion,
+			},
+		}
+
+		payload, err := json.Marshal(evt)
+		if err != nil {
+			slog.Warn("Failed to marshal trace event", tele.LogAttrError(err))
+			return
+		}
+
+		if err := h.ds.Put(ctx, h.ID().String(), payload); err != nil {
+			slog.Warn("Failed to put event payload", tele.LogAttrError(err))
+			return
+		}
+
+		h.meterSubmittedTraces.Add(ctx, 1)
+	}
+
+	notifiee := &network.NotifyBundle{
+		ConnectedF:    func(n network.Network, c network.Conn) { eventHandler(n, c, "CONNECTED") },
+		DisconnectedF: func(n network.Network, c network.Conn) { eventHandler(n, c, "DISCONNECTED") },
+	}
+	h.Host.Network().Notify(notifiee)
+
+	h.ds.Serve(ctx)
+
+	h.Host.Network().StopNotify(notifiee)
 
 	return nil
 }
 
 func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsub.PubSub, error) {
-	// Add our custom tracer. Multiple tracers can be added using multiple
-	// invocations of the option.
-	opts = append(opts, pubsub.WithRawTracer(h.fhClient))
+	mt, err := newMeterTracer(h.cfg.Meter)
+	if err != nil {
+		return nil, fmt.Errorf("new gossip sub meter tracer: %w", err)
+	}
 
+	opts = append(opts, pubsub.WithEventTracer(h), pubsub.WithRawTracer(mt))
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new gossip sub: %w", err)
 	}
 
-	h.pubsub = ps
+	h.ps = ps
 
 	return ps, nil
 }
@@ -80,11 +170,11 @@ func (h *Host) WaitForPublicAddress(ctx context.Context) error {
 		}
 	}()
 
+	timeout := "none"
 	if deadline, ok := ctx.Deadline(); ok {
-		slog.Info("Waiting for public addresses...", "timeout", time.Until(deadline).String())
-	} else {
-		slog.Info("Waiting for public addresses...", "timeout", "none")
+		timeout = time.Until(deadline).String()
 	}
+	slog.Info("Waiting for public addresses...", "timeout", timeout)
 
 	for {
 		select {

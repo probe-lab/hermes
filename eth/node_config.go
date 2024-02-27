@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/libp2p/go-libp2p"
@@ -67,14 +69,19 @@ type NodeConfig struct {
 	PrysmPortHTTP int
 	PrysmPortGRPC int
 
+	// The AWS Kinesis Data Stream configuration
+	AWSConfig     *aws.Config // if set, we consider Kinesis to be enabled
+	KinesisRegion string
+	KinesisStream string
+
 	// The maximum number of peers our libp2p host can be connected to.
 	MaxPeers int
 
 	// Limits the number of concurrent connection establishment routines. When
 	// we discover peers over discv5 and are not at our MaxPeers limit we try
 	// to establish a connection to a peer. However, we limit the concurrency to
-	// this DialerCount value.
-	DialerCount int
+	// this DialConcurrency value.
+	DialConcurrency int
 
 	// It is set at this limit to handle the possibility
 	// of double topic subscriptions at fork boundaries.
@@ -90,18 +97,68 @@ type NodeConfig struct {
 	Meter  metric.Meter
 }
 
-// Validate validates the Node configuration.
+// Validate validates the [NodeConfig] [Node] configuration.
 func (n *NodeConfig) Validate() error {
-	if n.NetworkConfig == nil {
+	if n.GenesisConfig == nil {
 		return fmt.Errorf("genesis config must not be nil")
 	}
 
+	if n.NetworkConfig == nil {
+		return fmt.Errorf("beacon network config must not be nil")
+	}
+
 	if n.BeaconConfig == nil {
-		return fmt.Errorf("genesis config must not be nil")
+		return fmt.Errorf("beacon config must not be nil")
+	}
+
+	if len(n.ForkDigest) == 0 {
+		return fmt.Errorf("fork digest not given")
 	}
 
 	if _, err := n.PrivateKey(); err != nil {
 		return err
+	}
+
+	if n.DialTimeout <= 0 {
+		return fmt.Errorf("dial timeout must be positive")
+	}
+
+	if net.ParseIP(n.Devp2pHost) == nil {
+		return fmt.Errorf("invalid devp2p host %s", n.Devp2pHost)
+	}
+
+	if n.Devp2pPort < 0 {
+		return fmt.Errorf("devp2p port must be greater than or equal to 0, got %d", n.Devp2pPort)
+	}
+
+	if n.Libp2pPort < 0 {
+		return fmt.Errorf("libp2p port must be greater than or equal to 0, got %d", n.Devp2pPort)
+	}
+
+	if n.PrysmPortHTTP < 0 {
+		return fmt.Errorf("prysm http port must be greater than or equal to 0, got %d", n.PrysmPortHTTP)
+	}
+
+	if n.PrysmPortGRPC < 0 {
+		return fmt.Errorf("prysm grpc port must be greater than or equal to 0, got %d", n.PrysmPortGRPC)
+	}
+
+	if n.MaxPeers <= 0 {
+		return fmt.Errorf("maximum number of peers must be positive, got %d", n.MaxPeers)
+	}
+
+	if n.DialConcurrency <= 0 {
+		return fmt.Errorf("dialer count must be positive, got %d", n.DialConcurrency)
+	}
+
+	if n.AWSConfig != nil {
+		if n.KinesisStream == "" {
+			return fmt.Errorf("kinesis is enabled but stream is not set")
+		}
+
+		if n.KinesisRegion == "" {
+			return fmt.Errorf("kinesis is enabled but region is not set")
+		}
 	}
 
 	if n.Tracer == nil {
@@ -152,7 +209,7 @@ func (n *NodeConfig) PrivateKey() (*crypto.Secp256k1PrivateKey, error) {
 	return n.privateKey, nil
 }
 
-// ECDSAPrivateKey returns the ECDSA private key associated with the NodeConfig.
+// ECDSAPrivateKey returns the ECDSA private key associated with the [NodeConfig].
 // It retrieves the private key using the PrivateKey method and then converts it
 // to ECDSA format. If there is an error retrieving the private key or
 // converting it to ECDSA format, an error is returned.
