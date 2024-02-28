@@ -252,12 +252,12 @@ func printEthConfig() {
 		cfgCopy.PrivateKeyStr = "***"
 	}
 
-	dat, err := json.MarshalIndent(cfgCopy, "", "  ")
+	dat, err := json.Marshal(cfgCopy)
 	if err != nil {
 		slog.Warn("Failed marshalling eth config struct", tele.LogAttrError(err))
 		return
 	}
 
-	slog.Debug("Config:")
-	slog.Debug(string(dat))
+	slog.Info("Config:")
+	slog.Info(string(dat))
 }
