@@ -125,10 +125,11 @@ func (k *KinPro) flush(ctx context.Context) {
 
 	if err != nil {
 		slog.Warn("Couldn't flush record to Kinesis", "err", err)
+		k.flushedRecordsCounter.Add(ctx, int64(len(k.buffer)), metric.WithAttributes(attribute.Bool("success", false)))
 	} else {
 		slog.Info(fmt.Sprintf("Flushed %d records", len(out.Records)), "stream", k.cfg.StreamName, "size", len(k.buffer))
+		k.flushedRecordsCounter.Add(ctx, int64(len(out.Records)), metric.WithAttributes(attribute.Bool("success", true)))
 	}
 
 	k.buffer = nil
-	k.flushedRecordsCounter.Add(ctx, int64(len(out.Records)), metric.WithAttributes(attribute.Bool("success", err == nil)))
 }
