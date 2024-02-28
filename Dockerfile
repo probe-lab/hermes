@@ -1,23 +1,24 @@
 FROM golang:1.21 AS builder
 
+# Switch to an isolated build directory
 WORKDIR /build
 
+# For caching, only copy the dependency-defining files and download depdencies
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . ./
-RUN CGO_ENABLED=0 go build -o hermes ./cmd/hermes
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o hermes ./cmd/hermes
 
-# Create lightweight container
-FROM alpine:latest
+# Create lightweight image. Use Debian as base because we have enabled CGO
+# above and hence compile against glibc. This means we can't use alpine.
+FROM debian:latest
 
-RUN adduser -D -H hermes
+# Create user hermes
+RUN adduser --system --no-create-home --disabled-login --group hermes
 WORKDIR /home/hermes
-RUN chown -R hermes:hermes /home/hermes
 USER hermes
 
 COPY --from=builder /build/hermes /usr/local/bin/hermes
 
-RUN chmod +x /usr/local/bin/hermes
-
-CMD hermes
+CMD ["hermes"]
