@@ -103,6 +103,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new discovery service: %w", err)
 	}
+	slog.Info("Initialized new devp2p Node", "enr", disc.node.Node().String())
 
 	// initialize the request-response protocol handlers
 	reqRespCfg := &ReqRespConfig{
@@ -322,6 +323,13 @@ func (n *Node) Start(ctx context.Context) error {
 		}
 		n.sup.Add(cs)
 	}
+
+	// start public listen address watcher to keep our ENR up to date
+	aw := &AddrWatcher{
+		h: *n.host,
+		n: n.disc.node,
+	}
+	n.sup.Add(aw)
 
 	// start all long-running services
 	return n.sup.Serve(ctx)
