@@ -264,16 +264,20 @@ func (n *Node) Start(ctx context.Context) error {
 	defer cancel()
 	connSignal := n.host.ConnSignal(timeoutCtx, addrInfo.ID)
 
-	// register ourselves as a trusted peer
-	self := peer.AddrInfo{ID: n.host.ID(), Addrs: n.host.Addrs()}
-	slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(self.ID), "maddrs", self.Addrs)
-	if err := n.pryClient.AddTrustedPeer(ctx, self); err != nil {
+	// register ourselves as a trusted peer by submitting our private ip address
+	privateMaddr, err := n.host.PrivateListenMaddr()
+	if err != nil {
+		return err
+	}
+
+	slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(n.host.ID()), "maddr", privateMaddr)
+	if err := n.pryClient.AddTrustedPeer(ctx, n.host.ID(), privateMaddr); err != nil {
 		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 	}
 	defer func() {
 		// unregister ourselves as a trusted peer from prysm. Context timeout
 		// is not necessary because the pryClient applies a 5s timeout to each API call
-		slog.Info("Removing ourselves as a trusted peer from Prysm", tele.LogAttrPeerID(self.ID))
+		slog.Info("Removing ourselves as a trusted peer from Prysm", tele.LogAttrPeerID(n.host.ID()))
 		if err := n.pryClient.RemoveTrustedPeer(context.Background(), n.host.ID()); err != nil { // use new context, as the old one is likely cancelled
 			slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
 		}

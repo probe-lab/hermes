@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
@@ -68,17 +67,17 @@ func (p *Peerer) Serve(ctx context.Context) error {
 		slog.Warn("Not registered as a trusted peer")
 
 		// we're not in the list of trusted peers
-		// construct our own addr info and add ourselves
-		self := peer.AddrInfo{
-			ID:    p.host.ID(),
-			Addrs: p.host.Addrs(),
+		// get our private liste multiaddress and register again
+		privateMaddr, err := p.host.PrivateListenMaddr()
+		if err != nil {
+			return err
 		}
 
 		// register ourselves as a trusted peer
-		if err := p.pryClient.AddTrustedPeer(ctx, self); err != nil {
+		if err := p.pryClient.AddTrustedPeer(ctx, p.host.ID(), privateMaddr); err != nil {
 			return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 		}
-	}
 
-	return nil
+		slog.Info("Re-registered as a trusted peer")
+	}
 }

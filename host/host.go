@@ -243,6 +243,24 @@ func (h *Host) ConnSignal(ctx context.Context, pid peer.ID) chan error {
 	return signal
 }
 
+// PrivateListenMaddr returns the first multiaddress in a private IP range that
+// this host is listening on.
+func (h *Host) PrivateListenMaddr() (ma.Multiaddr, error) {
+	for _, maddr := range h.Addrs() {
+		if manet.IsIPLoopback(maddr) {
+			continue
+		}
+
+		if !manet.IsPrivateAddr(maddr) {
+			continue
+		}
+
+		return maddr, nil
+	}
+
+	return nil, fmt.Errorf("no private multi address found in %s", h.Addrs())
+}
+
 // MaddrFrom takes in an ip address string and port to produce a go multiaddr format.
 func MaddrFrom(ip string, port uint) (ma.Multiaddr, error) {
 	parsed := net.ParseIP(ip)

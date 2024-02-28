@@ -56,8 +56,8 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 	}, nil
 }
 
-func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo) (err error) {
-	ctx, span := p.tracer.Start(ctx, "prysm_client.addTrustedPeer", trace.WithAttributes(attribute.String("pid", addrInfo.ID.String())))
+func (p *PrysmClient) AddTrustedPeer(ctx context.Context, pid peer.ID, maddr ma.Multiaddr) (err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.addTrustedPeer", trace.WithAttributes(attribute.String("pid", pid.String())))
 	defer func() {
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
@@ -66,17 +66,8 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 		span.End()
 	}()
 
-	if len(addrInfo.Addrs) != 1 {
-		return fmt.Errorf("trusted peer has %d addresses, expected exactly 1", len(addrInfo.Addrs))
-	}
-
-	maddrs, err := peer.AddrInfoToP2pAddrs(&addrInfo)
-	if err != nil {
-		return fmt.Errorf("failed to construct p2p addr from addrinfo: %w", err)
-	}
-
 	payload := structs.AddrRequest{
-		Addr: maddrs[0].String(), // save because we checked the length above
+		Addr: maddr.String(), // save because we checked the length above
 	}
 
 	u := url.URL{
