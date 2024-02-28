@@ -21,4 +21,7 @@ USER hermes
 
 COPY --from=builder /build/hermes /usr/local/bin/hermes
 
+# Get more CA certificates
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
 CMD ["hermes"]
