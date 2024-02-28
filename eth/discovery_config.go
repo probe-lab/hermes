@@ -64,6 +64,9 @@ func (d *DiscoveryConfig) enrEth2Entry() (enr.Entry, error) {
 
 func (d *DiscoveryConfig) enrAttnetsEntry() enr.Entry {
 	bitV := bitfield.NewBitvector64()
+	for i := uint64(0); i < bitV.Len(); i++ {
+		bitV.SetBitAt(i, true)
+	}
 	return enr.WithEntry(d.NetworkConfig.AttSubnetKey, bitV.Bytes())
 }
 
