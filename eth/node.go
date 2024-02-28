@@ -83,7 +83,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
-	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()))
+	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
 
 	// initialize ethereum node
 	privKey, err := cfg.ECDSAPrivateKey()
