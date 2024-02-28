@@ -14,7 +14,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/prysm/v4/beacon-chain/rpc/prysm/node"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/rpc/prysm/node"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"

@@ -1,6 +1,6 @@
 module github.com/probe-lab/hermes
 
-go 1.21.4
+go 1.22
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.25.2
@@ -17,7 +17,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.12.2
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
-	github.com/prysmaticlabs/prysm/v4 v4.2.1
+	github.com/prysmaticlabs/prysm/v5 v5.0.0
 	github.com/stretchr/testify v1.8.4
 	github.com/thejerf/suture/v4 v4.0.2
 	github.com/urfave/cli/v2 v2.27.1
@@ -88,6 +88,7 @@ require (
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20231023181126-ff6d637d2a7b // indirect
 	github.com/google/uuid v1.4.0 // indirect
+	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d // indirect
@@ -163,6 +164,7 @@ require (
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/rogpeppe/go-internal v1.11.0 // indirect
+	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/schollz/progressbar/v3 v3.3.4 // indirect
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect

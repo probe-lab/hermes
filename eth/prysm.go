@@ -11,11 +11,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/prysm/v4/beacon-chain/rpc/prysm/node"
-	"github.com/prysmaticlabs/prysm/v4/network/httputil"
-	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/network/httputil"
+	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -74,7 +75,7 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 		return fmt.Errorf("failed to construct p2p addr from addrinfo: %w", err)
 	}
 
-	payload := node.AddrRequest{
+	payload := structs.AddrRequest{
 		Addr: maddrs[0].String(), // save because we checked the length above
 	}
 
@@ -123,7 +124,7 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, addrInfo peer.AddrInfo
 	return nil
 }
 
-func (p *PrysmClient) ListTrustedPeers(ctx context.Context) (peers map[peer.ID]*node.Peer, err error) {
+func (p *PrysmClient) ListTrustedPeers(ctx context.Context) (peers map[peer.ID]*structs.Peer, err error) {
 	ctx, span := p.tracer.Start(ctx, "prysm_client.listTrustedPeers")
 	defer func() {
 		if err != nil {
@@ -171,16 +172,16 @@ func (p *PrysmClient) ListTrustedPeers(ctx context.Context) (peers map[peer.ID]*
 		return nil, fmt.Errorf("failed reading response body: %w", err)
 	}
 
-	peerResp := &node.PeersResponse{}
+	peerResp := &structs.PeersResponse{}
 	if err := json.Unmarshal(respData, peerResp); err != nil {
 		return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
 	}
 
-	peerData := make(map[peer.ID]*node.Peer, len(peerResp.Peers))
+	peerData := make(map[peer.ID]*structs.Peer, len(peerResp.Peers))
 	for _, p := range peerResp.Peers {
-		pid, err := peer.Decode(p.PeerID)
+		pid, err := peer.Decode(p.PeerId)
 		if err != nil {
-			return nil, fmt.Errorf("decode peer ID %s: %w", p.PeerID, err)
+			return nil, fmt.Errorf("decode peer ID %s: %w", p.PeerId, err)
 		}
 		peerData[pid] = p
 	}

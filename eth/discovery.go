@@ -17,8 +17,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/probe-lab/hermes/tele"
-	"github.com/prysmaticlabs/prysm/v4/network/forks"
-	pb "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/network/forks"
+	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/metric"
 )

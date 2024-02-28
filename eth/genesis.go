@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v4/config/params"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
 )
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root
