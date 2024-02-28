@@ -67,7 +67,7 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, pid peer.ID, maddr ma.
 	}()
 
 	payload := structs.AddrRequest{
-		Addr: maddr.String(), // save because we checked the length above
+		Addr: fmt.Sprintf("%s/p2p/%s", maddr.String(), pid.String()),
 	}
 
 	u := url.URL{
