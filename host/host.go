@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/dennis-tra/kinesis-producer"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
@@ -52,19 +54,12 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 
 	var ds DataStream
 	if cfg.AWSConfig != nil {
-		kpc := &KinProConfig{
-			AWSConfig:     cfg.AWSConfig,
-			StreamName:    cfg.KinesisStream,
-			FlushInterval: 5 * time.Second,
-			BatchCount:    500,
-			BacklogCount:  1000,
-			Log:           slog.Default(),
-			Meter:         cfg.Meter,
-		}
-		ds, err = NewKinPro(kpc)
-		if err != nil {
-			return nil, fmt.Errorf("new kinesis producer: %w", err)
-		}
+		client := kinesis.NewFromConfig(*cfg.AWSConfig)
+		ds = producer.New(&producer.Config{
+			StreamName:   cfg.KinesisStream,
+			BacklogCount: 2000,
+			Client:       client,
+		})
 	} else {
 		ds = NoopDataStream{}
 	}
@@ -119,7 +114,7 @@ func (h *Host) Serve(ctx context.Context) error {
 			return
 		}
 
-		if err := h.ds.Put(ctx, h.ID().String(), payload); err != nil {
+		if err := h.ds.Put(payload, h.ID().String()); err != nil {
 			slog.Warn("Failed to put event payload", tele.LogAttrError(err))
 			return
 		}
@@ -133,7 +128,11 @@ func (h *Host) Serve(ctx context.Context) error {
 	}
 	h.Host.Network().Notify(notifiee)
 
-	h.ds.Serve(ctx)
+	h.ds.Start(ctx)
+
+	<-ctx.Done()
+
+	h.ds.Stop()
 
 	h.Host.Network().StopNotify(notifiee)
 

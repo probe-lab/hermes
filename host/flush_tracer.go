@@ -160,7 +160,7 @@ func (h *Host) Trace(evt *pubsubpb.TraceEvent) {
 		return
 	}
 
-	if err := h.ds.Put(ctx, h.ID().String(), payload); err != nil {
+	if err := h.ds.Put(payload, h.ID().String()); err != nil {
 		slog.Warn("Failed to put trace event payload", tele.LogAttrError(err))
 		return
 	}

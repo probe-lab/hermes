@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.27.4
 	github.com/aws/aws-sdk-go-v2/service/kinesis v1.27.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
+	github.com/dennis-tra/kinesis-producer v0.0.0-20240227093050-fb268efe4d86
 	github.com/ethereum/go-ethereum v1.13.12
 	github.com/ferranbt/fastssz v0.1.3
 	github.com/iand/pontium v0.3.11
@@ -101,6 +102,7 @@ require (
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/k0kubun/go-ansi v0.0.0-20180517002512-3bf9e2903213 // indirect
 	github.com/klauspost/compress v1.17.2 // indirect
