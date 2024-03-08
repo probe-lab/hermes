@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/dennis-tra/kinesis-producer"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
@@ -24,6 +26,9 @@ type Node struct {
 
 	// The libp2p host, however, this is a custom Hermes wrapper host.
 	host *host.Host
+
+	// The data stream to which we transmit data
+	ds host.DataStream
 
 	// The suture supervisor that is the root of the service tree
 	sup *suture.Supervisor
@@ -65,12 +70,22 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
 
+	var ds host.DataStream
+	if cfg.AWSConfig != nil {
+		client := kinesis.NewFromConfig(*cfg.AWSConfig)
+		ds = producer.New(&producer.Config{
+			StreamName:   cfg.KinesisStream,
+			BacklogCount: 2000,
+			Client:       client,
+		})
+	} else {
+		ds = host.NoopDataStream{}
+	}
+
 	hostCfg := &host.Config{
-		AWSConfig:     cfg.AWSConfig,
-		KinesisRegion: cfg.KinesisRegion,
-		KinesisStream: cfg.KinesisStream,
-		Tracer:        cfg.Tracer,
-		Meter:         cfg.Meter,
+		DataStream: ds,
+		Tracer:     cfg.Tracer,
+		Meter:      cfg.Meter,
 	}
 
 	// initialize libp2p host
@@ -109,6 +124,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	reqRespCfg := &ReqRespConfig{
 		ForkDigest:   cfg.ForkDigest,
 		Encoder:      encoder.SszNetworkEncoder{},
+		DataStream:   ds,
 		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
 		Tracer:       cfg.Tracer,
@@ -141,6 +157,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	n := &Node{
 		cfg:       cfg,
 		host:      h,
+		ds:        ds,
 		sup:       suture.NewSimple("eth"),
 		reqResp:   reqResp,
 		pubSub:    pubSub,
@@ -259,7 +276,7 @@ func (n *Node) Start(ctx context.Context) error {
 	// Create a connection signal that fires when the Prysm node has connected
 	// to us. Prysm will try this periodically AFTER we have registered ourselves
 	// as a trusted peer. Therefore, we register the signal first and only
-	// aftewards add ourselves as a trusted peer to not miss the signal
+	// afterward add ourselves as a trusted peer to not miss the signal
 	// https://github.com/prysmaticlabs/prysm/issues/13659
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -300,6 +317,9 @@ func (n *Node) Start(ctx context.Context) error {
 	} else {
 		slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
 	}
+
+	// protect connection to beacon node so that it's not pruned at some point
+	n.host.ConnManager().Protect(addrInfo.ID, "hermes")
 
 	// start the discovery service to find peers in the discv5 DHT
 	n.sup.Add(n.disc)

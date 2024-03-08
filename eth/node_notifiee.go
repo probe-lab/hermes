@@ -29,9 +29,11 @@ func (n *Node) Connected(net network.Network, c network.Conn) {
 		slog.Warn("Failed to store connection timestamp in peerstore", tele.LogAttrError(err))
 	}
 
-	// handle the new connection by validating the peer. Needs to happen in a
-	// go routine because Connected is called synchronously.
-	go n.handleNewConnection(c.RemotePeer())
+	if c.Stat().Direction == network.DirOutbound {
+		// handle the new connection by validating the peer. Needs to happen in a
+		// go routine because Connected is called synchronously.
+		go n.handleNewConnection(c.RemotePeer())
+	}
 }
 
 func (n *Node) Disconnected(net network.Network, c network.Conn) {
@@ -74,20 +76,16 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 			if err != nil {
 				valid = false
 			} else {
-				rawVal, err := ps.Get(pid, "AgentVersion")
-
-				agentVersion := "n.a."
-				if err == nil {
-					if av, ok := rawVal.(string); ok {
-						agentVersion = av
-					}
+				av := n.host.AgentVersion(pid)
+				if av == "" {
+					av = "n.a."
 				}
 
 				if err := ps.Put(pid, peerstoreKeyIsHandshaked, true); err != nil {
 					slog.Warn("Failed to store handshaked marker in peerstore", tele.LogAttrError(err))
 				}
 
-				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", agentVersion)
+				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", av)
 			}
 		}
 	}

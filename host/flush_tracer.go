@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"time"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/probe-lab/hermes/tele"
 )
@@ -20,150 +22,139 @@ type TraceEvent struct {
 	Data      any
 }
 
-func (h *Host) Trace(evt *pubsubpb.TraceEvent) {
-	ctx := context.TODO()
+var _ pubsub.RawTracer = (*Host)(nil)
 
-	te := &TraceEvent{
-		Type:      evt.GetType().String(),
-		PeerID:    peer.ID(evt.GetPeerID()),
-		Timestamp: time.Unix(0, evt.GetTimestamp()),
+func (h *Host) Trace(evtType string, payload any) {
+	evt := &TraceEvent{
+		Type:      evtType,
+		PeerID:    h.ID(),
+		Timestamp: time.Now(),
+		Data:      payload,
 	}
 
-	switch evt.GetType() {
-	case pubsubpb.TraceEvent_PUBLISH_MESSAGE:
-		te.Data = struct {
-			MessageID string
-			Topic     string
-		}{
-			MessageID: hex.EncodeToString(evt.GetPublishMessage().GetMessageID()),
-			Topic:     evt.GetPublishMessage().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_REJECT_MESSAGE:
-		te.Data = struct {
-			MessageID    string
-			ReceivedFrom peer.ID
-			Reason       string
-			Topic        string
-		}{
-			MessageID:    hex.EncodeToString(evt.GetRejectMessage().GetMessageID()),
-			ReceivedFrom: peer.ID(evt.GetRejectMessage().GetReceivedFrom()),
-			Reason:       evt.GetRejectMessage().GetReason(),
-			Topic:        evt.GetRejectMessage().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_DUPLICATE_MESSAGE:
-		te.Data = struct {
-			MessageID    string
-			ReceivedFrom peer.ID
-			Topic        string
-		}{
-			MessageID:    hex.EncodeToString(evt.GetDuplicateMessage().GetMessageID()),
-			ReceivedFrom: peer.ID(evt.GetDuplicateMessage().GetReceivedFrom()),
-			Topic:        evt.GetDuplicateMessage().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_DELIVER_MESSAGE:
-		te.Data = struct {
-			MessageID    string
-			ReceivedFrom peer.ID
-			Topic        string
-		}{
-			MessageID:    hex.EncodeToString(evt.GetDeliverMessage().GetMessageID()),
-			ReceivedFrom: peer.ID(evt.GetDeliverMessage().GetReceivedFrom()),
-			Topic:        evt.GetDeliverMessage().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_ADD_PEER:
-		te.Data = struct {
-			PeerID peer.ID
-			Proto  string
-		}{
-			PeerID: peer.ID(evt.GetAddPeer().GetPeerID()),
-			Proto:  evt.GetAddPeer().GetProto(),
-		}
-	case pubsubpb.TraceEvent_REMOVE_PEER:
-		te.Data = struct {
-			PeerID peer.ID
-		}{
-			PeerID: peer.ID(evt.GetRemovePeer().GetPeerID()),
-		}
-	case pubsubpb.TraceEvent_RECV_RPC:
-		//te.Data = struct {
-		//	ReceivedFrom peer.ID
-		//	Meta         struct {
-		//		Messages []struct {
-		//			MessageID string
-		//			Topic     string
-		//		}
-		//		Subscription []struct {
-		//			Subscribe bool
-		//			Topic     string
-		//		}
-		//		Control struct {
-		//			IHave []struct {
-		//				Topic      string
-		//				MessageIDs string
-		//			}
-		//			IWant []struct {
-		//				MessageIDs string
-		//			}
-		//			Graft []struct {
-		//				Topic string
-		//			}
-		//			Prune []struct {
-		//				Topic string
-		//				Peers []peer.ID
-		//			}
-		//		}
-		//	}
-		//}{
-		//	ReceivedFrom: peer.ID(evt.GetRecvRPC().GetReceivedFrom()),
-		//}
-		// TODO: ...
-		return
-	case pubsubpb.TraceEvent_SEND_RPC:
-		// TODO: ...
-		return
-	case pubsubpb.TraceEvent_DROP_RPC:
-		// TODO: ...
-		return
-	case pubsubpb.TraceEvent_JOIN:
-		te.Data = struct {
-			Topic string
-		}{
-			Topic: evt.GetJoin().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_LEAVE:
-		te.Data = struct {
-			Topic string
-		}{
-			Topic: evt.GetLeave().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_GRAFT:
-		te.Data = struct {
-			PeerID peer.ID
-			Topic  string
-		}{
-			PeerID: peer.ID(evt.GetGraft().GetPeerID()),
-			Topic:  evt.GetGraft().GetTopic(),
-		}
-	case pubsubpb.TraceEvent_PRUNE:
-		te.Data = struct {
-			PeerID peer.ID
-			Topic  string
-		}{
-			PeerID: peer.ID(evt.GetPrune().GetPeerID()),
-			Topic:  evt.GetPrune().GetTopic(),
-		}
-	}
-
-	payload, err := json.Marshal(te)
+	data, err := json.Marshal(evt)
 	if err != nil {
 		slog.Warn("Failed to marshal trace event", tele.LogAttrError(err))
 		return
 	}
 
-	if err := h.ds.Put(payload, h.ID().String()); err != nil {
+	if err := h.cfg.DataStream.Put(data, h.ID().String()); err != nil {
 		slog.Warn("Failed to put trace event payload", tele.LogAttrError(err))
 		return
 	}
 
-	h.meterSubmittedTraces.Add(ctx, 1)
+	h.meterSubmittedTraces.Add(context.TODO(), 1)
+}
+
+func (h *Host) AddPeer(p peer.ID, proto protocol.ID) {
+	h.Trace(pubsubpb.TraceEvent_ADD_PEER.String(), map[string]any{
+		"PeerID":   p,
+		"Protocol": proto,
+	})
+}
+
+func (h *Host) RemovePeer(p peer.ID) {
+	h.Trace(pubsubpb.TraceEvent_REMOVE_PEER.String(), map[string]any{
+		"PeerID": p,
+	})
+}
+
+func (h *Host) Join(topic string) {
+	h.Trace(pubsubpb.TraceEvent_JOIN.String(), map[string]any{
+		"Topic": topic,
+	})
+}
+
+func (h *Host) Leave(topic string) {
+	h.Trace(pubsubpb.TraceEvent_LEAVE.String(), map[string]any{
+		"Topic": topic,
+	})
+}
+
+func (h *Host) Graft(p peer.ID, topic string) {
+	h.Trace(pubsubpb.TraceEvent_GRAFT.String(), map[string]any{
+		"PeerID": p,
+		"Topic":  topic,
+	})
+}
+
+func (h *Host) Prune(p peer.ID, topic string) {
+	h.Trace(pubsubpb.TraceEvent_PRUNE.String(), map[string]any{
+		"PeerID": p,
+		"Topic":  topic,
+	})
+}
+
+func (h *Host) ValidateMessage(msg *pubsub.Message) {
+	h.Trace("VALIDATE_MESSAGE", map[string]any{
+		"ReceivedFrom": msg.ReceivedFrom,
+		"Topic":        msg.GetTopic(),
+		"MessageID":    hex.EncodeToString([]byte(msg.ID)),
+		"Local":        msg.Local,
+		"MessageBytes": msg.Size(),
+	})
+}
+
+func (h *Host) DeliverMessage(msg *pubsub.Message) {
+	h.Trace(pubsubpb.TraceEvent_DELIVER_MESSAGE.String(), map[string]any{
+		"ReceivedFrom": msg.ReceivedFrom,
+		"Topic":        msg.GetTopic(),
+		"MessageID":    hex.EncodeToString([]byte(msg.ID)),
+		"Local":        msg.Local,
+		"MessageBytes": msg.Size(),
+	})
+}
+
+func (h *Host) RejectMessage(msg *pubsub.Message, reason string) {
+	h.Trace(pubsubpb.TraceEvent_REJECT_MESSAGE.String(), map[string]any{
+		"ReceivedFrom": msg.ReceivedFrom,
+		"Topic":        msg.GetTopic(),
+		"MessageID":    hex.EncodeToString([]byte(msg.ID)),
+		"Reason":       reason,
+		"Local":        msg.Local,
+		"MessageBytes": msg.Size(),
+	})
+}
+
+func (h *Host) DuplicateMessage(msg *pubsub.Message) {
+	h.Trace(pubsubpb.TraceEvent_DUPLICATE_MESSAGE.String(), map[string]any{
+		"ReceivedFrom": msg.ReceivedFrom,
+		"Topic":        msg.GetTopic(),
+		"MessageID":    hex.EncodeToString([]byte(msg.ID)),
+		"Local":        msg.Local,
+		"MessageBytes": msg.Size(),
+	})
+}
+
+func (h *Host) ThrottlePeer(p peer.ID) {
+	h.Trace("THROTTLE_PEER", map[string]any{
+		"PeerID": p,
+	})
+}
+
+func (h *Host) RecvRPC(rpc *pubsub.RPC) {
+	h.Trace(pubsubpb.TraceEvent_RECV_RPC.String(), map[string]any{
+		// TODO: Add relevant fields
+	})
+}
+
+func (h *Host) SendRPC(rpc *pubsub.RPC, p peer.ID) {
+	h.Trace(pubsubpb.TraceEvent_SEND_RPC.String(), map[string]any{
+		// TODO: Add relevant fields
+	})
+}
+
+func (h *Host) DropRPC(rpc *pubsub.RPC, p peer.ID) {
+	h.Trace(pubsubpb.TraceEvent_DROP_RPC.String(), map[string]any{
+		// TODO: Add relevant fields
+	})
+}
+
+func (h *Host) UndeliverableMessage(msg *pubsub.Message) {
+	h.Trace("UNDELIVERABLE_MESSAGE", map[string]any{
+		"ReceivedFrom": msg.ReceivedFrom,
+		"Topic":        msg.GetTopic(),
+		"MessageID":    hex.EncodeToString([]byte(msg.ID)),
+		"Local":        msg.Local,
+	})
 }

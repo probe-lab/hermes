@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,12 +31,14 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	hermeshost "github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
 
 type ReqRespConfig struct {
 	ForkDigest [4]byte
 	Encoder    encoder.NetworkEncoding
+	DataStream hermeshost.DataStream
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
@@ -61,7 +66,7 @@ type ReqResp struct {
 	latencyHistogram    metric.Float64Histogram
 }
 
-type ContextStreamHandler func(context.Context, network.Stream) error
+type ContextStreamHandler func(context.Context, network.Stream) (map[string]any, error)
 
 func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	if cfg == nil {
@@ -203,10 +208,48 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 
 		// time the request handling
 		start := time.Now()
-		if err := handler(ctx, s); err != nil {
+		traceData, err := handler(ctx, s)
+		if err != nil {
 			slog.Debug("failed handling rpc", "protocol", s.Protocol(), tele.LogAttrError(err), tele.LogAttrPeerID(s.Conn().RemotePeer()), "agent", agentVersion)
 		}
 		end := time.Now()
+
+		traceType := "HANDLE_STREAM"
+
+		// Usual protocol string: /eth2/beacon_chain/req/metadata/2/ssz_snappy
+		parts := strings.Split(string(s.Protocol()), "/")
+		if len(parts) > 4 {
+			traceType = "HANDLE_" + strings.ToUpper(parts[4])
+		}
+
+		commonData := map[string]any{
+			"RemotePeer": s.Conn().RemotePeer(),
+			"ProtocolID": s.Protocol(),
+			"LatencyS":   end.Sub(start).Seconds(),
+		}
+
+		if err != nil {
+			commonData["Error"] = err.Error()
+		} else {
+			commonData["Error"] = nil
+		}
+
+		maps.Copy(commonData, traceData)
+
+		traceEvt := hermeshost.TraceEvent{
+			Type:      traceType,
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Data:      commonData,
+		}
+
+		data, err := json.Marshal(traceEvt)
+		if err != nil {
+			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+			return
+		}
+
+		r.cfg.DataStream.Put(data, r.host.ID().String())
 
 		// update meters
 		r.meterRequestCounter.Add(ctx, 1, mattrs)
@@ -214,10 +257,10 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 	}
 }
 
-func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) error {
+func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	req := primitives.SSZUint64(0)
 	if err := r.readRequest(ctx, stream, &req); err != nil {
-		return fmt.Errorf("read sequence number: %w", err)
+		return nil, fmt.Errorf("read sequence number: %w", err)
 	}
 
 	r.metaDataMu.RLock()
@@ -225,16 +268,21 @@ func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) error 
 	r.metaDataMu.RUnlock()
 
 	if err := r.writeResponse(ctx, stream, &sq); err != nil {
-		return fmt.Errorf("write sequence number: %w", err)
+		return nil, fmt.Errorf("write sequence number: %w", err)
 	}
 
-	return stream.Close()
+	traceData := map[string]any{
+		"ReceivedSeq": req,
+		"SentSeq":     sq,
+	}
+
+	return traceData, stream.Close()
 }
 
-func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) error {
+func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	req := primitives.SSZUint64(0)
 	if err := r.readRequest(ctx, stream, &req); err != nil {
-		return fmt.Errorf("read sequence number: %w", err)
+		return nil, fmt.Errorf("read sequence number: %w", err)
 	}
 
 	msg, found := types.GoodbyeCodeMessages[req]
@@ -246,17 +294,22 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) err
 		}
 	}
 
-	return stream.Close()
+	traceData := map[string]any{
+		"Code":   req,
+		"Reason": msg,
+	}
+
+	return traceData, stream.Close()
 }
 
-func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) error {
+func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
 	if upstream.Conn().RemotePeer() == r.delegate {
 		// because we pass the status request through to the upstream,
 		// we need to handle its requests differently
 
 		resp := &eth.Status{}
 		if err := r.readRequest(ctx, upstream, resp); err != nil {
-			return fmt.Errorf("read status data from delegate: %w", err)
+			return nil, fmt.Errorf("read status data from delegate: %w", err)
 		}
 
 		// update status
@@ -264,42 +317,50 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 
 		// mirror its own status back
 		if err := r.writeResponse(ctx, upstream, resp); err != nil {
-			return fmt.Errorf("write mirrored status response to delegate: %w", err)
+			return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
 		}
 
-		return upstream.Close()
+		traceData := map[string]any{
+			"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
+			"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
+			"HeadSlot":       resp.HeadSlot,
+			"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
+			"FinalizedEpoch": resp.FinalizedEpoch,
+		}
+
+		return traceData, upstream.Close()
 	}
 
 	downstream, err := r.host.NewStream(ctx, r.delegate, upstream.Protocol())
 	if err != nil {
-		return fmt.Errorf("new stream to downstream host: %w", err)
+		return nil, fmt.Errorf("new stream to downstream host: %w", err)
 	}
 	defer logDeferErr(downstream.Reset, "failed resetting downstream stream")
 
 	// send status request to downstream peer. This will stop as soon as the
 	// upstream has closed its writer side.
 	if _, err = io.Copy(downstream, upstream); err != nil {
-		return fmt.Errorf("copy data from upstream to downstream: %w", err)
+		return nil, fmt.Errorf("copy data from upstream to downstream: %w", err)
 	}
 
 	// The upstream is done, so also tell downstream that we're done
 	if err = downstream.CloseWrite(); err != nil {
-		return fmt.Errorf("failed to close writing side of stream: %w", err)
+		return nil, fmt.Errorf("failed to close writing side of stream: %w", err)
 	}
 
 	// We won't read anything from upstream from this point on
 	if err = upstream.CloseRead(); err != nil {
-		return fmt.Errorf("failed to close reading side of stream: %w", err)
+		return nil, fmt.Errorf("failed to close reading side of stream: %w", err)
 	}
 
 	// set timeout for reading from our delegated node
 	if err = downstream.SetReadDeadline(time.Now().Add(r.cfg.ReadTimeout)); err != nil {
-		return fmt.Errorf("failed setting read deadline on stream: %w", err)
+		return nil, fmt.Errorf("failed setting read deadline on stream: %w", err)
 	}
 
 	// set timeout for writing to the upstream remote peer
 	if err = upstream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
-		return fmt.Errorf("failed setting read deadline on stream: %w", err)
+		return nil, fmt.Errorf("failed setting read deadline on stream: %w", err)
 	}
 
 	// read response from downstream peer but simultaneously pass it through
@@ -308,7 +369,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 
 	code := make([]byte, 1)
 	if _, err := io.ReadFull(respReader, code); err != nil {
-		return fmt.Errorf("failed reading response code: %w", err)
+		return nil, fmt.Errorf("failed reading response code: %w", err)
 	}
 
 	// code == 0 means success
@@ -316,34 +377,42 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) er
 	if int(code[0]) != 0 {
 		errData, err := io.ReadAll(respReader)
 		if err != nil {
-			return fmt.Errorf("failed reading error data (code %d): %w", int(code[0]), err)
+			return nil, fmt.Errorf("failed reading error data (code %d): %w", int(code[0]), err)
 		}
 
-		return fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
+		return nil, fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
 	}
 
 	// read and decode status response
 	resp := &eth.Status{}
 	if err := r.cfg.Encoder.DecodeWithMaxLength(respReader, resp); err != nil {
-		return fmt.Errorf("failed reading response data: %w", err)
+		return nil, fmt.Errorf("failed reading response data: %w", err)
 	}
 
 	// update status
 	r.SetStatus(resp)
 
+	traceData := map[string]any{
+		"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
+		"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
+		"HeadSlot":       resp.HeadSlot,
+		"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
+		"FinalizedEpoch": resp.FinalizedEpoch,
+	}
+
 	// properly close both sides of the stream
 	downCloseErr := downstream.Close()
 	upCloseErr := upstream.Close()
 	if upCloseErr != nil {
-		return upCloseErr
+		return traceData, upCloseErr
 	} else if downCloseErr != nil {
-		return downCloseErr
+		return traceData, downCloseErr
 	}
 
-	return nil
+	return traceData, nil
 }
 
-func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) error {
+func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	r.metaDataMu.RLock()
 	metaData := &pb.MetaDataV0{
 		SeqNumber: r.metaData.SeqNumber,
@@ -352,37 +421,53 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 	r.metaDataMu.RUnlock()
 
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
-		return fmt.Errorf("write meta data v1: %w", err)
+		return nil, fmt.Errorf("write meta data v1: %w", err)
 	}
 
-	return stream.Close()
+	traceData := map[string]any{
+		"SeqNumber": metaData.SeqNumber,
+		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
+	}
+
+	return traceData, stream.Close()
 }
 
-func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) error {
+func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	r.metaDataMu.RLock()
-	defer r.metaDataMu.RUnlock()
+	metaData := &pb.MetaDataV1{
+		SeqNumber: r.metaData.SeqNumber,
+		Attnets:   r.metaData.Attnets,
+		Syncnets:  r.metaData.Syncnets,
+	}
+	r.metaDataMu.RUnlock()
 
-	if err := r.writeResponse(ctx, stream, r.metaData); err != nil {
-		return fmt.Errorf("write meta data v2: %w", err)
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
+		return nil, fmt.Errorf("write meta data v2: %w", err)
 	}
 
-	return stream.Close()
+	traceData := map[string]any{
+		"SeqNumber": metaData.SeqNumber,
+		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
+		"Syncnets":  hex.EncodeToString(metaData.Syncnets.Bytes()),
+	}
+
+	return traceData, stream.Close()
 }
 
-func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Stream) error {
+func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
-		return fmt.Errorf("blocks by range request from delegate peer")
+		return nil, fmt.Errorf("blocks by range request from delegate peer")
 	}
 
-	return r.delegateStream(ctx, stream)
+	return nil, r.delegateStream(ctx, stream)
 }
 
-func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stream) error {
+func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
-		return fmt.Errorf("blocks by root request from delegate peer")
+		return nil, fmt.Errorf("blocks by root request from delegate peer")
 	}
 
-	return r.delegateStream(ctx, stream)
+	return nil, r.delegateStream(ctx, stream)
 }
 
 func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) error {
@@ -438,6 +523,32 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 
 func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, err error) {
 	defer func() {
+		reqData := map[string]any{}
+		if status != nil {
+			reqData["ForkDigest"] = hex.EncodeToString(status.ForkDigest)
+			reqData["HeadRoot"] = hex.EncodeToString(status.HeadRoot)
+			reqData["HeadSlot"] = status.HeadSlot
+			reqData["FinalizedRoot"] = hex.EncodeToString(status.FinalizedRoot)
+			reqData["FinalizedEpoch"] = status.FinalizedEpoch
+		}
+
+		if err != nil {
+			reqData["Error"] = err.Error()
+		}
+
+		traceEvt := hermeshost.TraceEvent{
+			Type:      "REQUEST_STATUS",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Data:      reqData,
+		}
+
+		if data, err := json.Marshal(traceEvt); err == nil {
+			r.cfg.DataStream.Put(data, r.host.ID().String())
+		} else {
+			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+		}
+
 		attrs := []attribute.KeyValue{
 			attribute.String("rpc", "status"),
 			attribute.Bool("success", err == nil),
@@ -485,6 +596,18 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 
 func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 	defer func() {
+		traceEvt := hermeshost.TraceEvent{
+			Type:      "REQUEST_PING",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+		}
+
+		if data, err := json.Marshal(traceEvt); err == nil {
+			r.cfg.DataStream.Put(data, r.host.ID().String())
+		} else {
+			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+		}
+
 		attrs := []attribute.KeyValue{
 			attribute.String("rpc", "ping"),
 			attribute.Bool("success", err == nil),
@@ -522,6 +645,30 @@ func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 
 func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV1, err error) {
 	defer func() {
+		reqData := map[string]any{}
+		if resp != nil {
+			reqData["SeqNumber"] = resp.SeqNumber
+			reqData["Attnets"] = resp.Attnets
+			reqData["Syncnets"] = resp.Syncnets
+		}
+
+		if err != nil {
+			reqData["Error"] = err.Error()
+		}
+
+		traceEvt := hermeshost.TraceEvent{
+			Type:      "REQUEST_METADATA",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Data:      reqData,
+		}
+
+		if data, err := json.Marshal(traceEvt); err == nil {
+			r.cfg.DataStream.Put(data, r.host.ID().String())
+		} else {
+			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+		}
+
 		attrs := []attribute.KeyValue{
 			attribute.String("rpc", "meta_data"),
 			attribute.Bool("success", err == nil),
