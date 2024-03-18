@@ -20,10 +20,6 @@ type PubSubConfig struct {
 }
 
 func (p PubSubConfig) Validate() error {
-	if len(p.ForkDigest) == 0 {
-		return fmt.Errorf("empty fork digest")
-	}
-
 	if p.Encoder == nil {
 		return fmt.Errorf("nil encoder")
 	}
