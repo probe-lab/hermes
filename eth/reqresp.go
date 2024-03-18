@@ -325,9 +325,19 @@ func (r *ReqResp) verifyStatus(status *eth.Status) error {
 }
 
 func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
+	statusTraceData := func(status *eth.Status) map[string]any {
+		return map[string]any{
+			"ForkDigest":     hex.EncodeToString(status.ForkDigest),
+			"HeadRoot":       hex.EncodeToString(status.HeadRoot),
+			"HeadSlot":       status.HeadSlot,
+			"FinalizedRoot":  hex.EncodeToString(status.FinalizedRoot),
+			"FinalizedEpoch": status.FinalizedEpoch,
+		}
+	}
+
+	// check if the request comes from our delegate node. If so, just mirror
+	// its own status back and update our latest known status.
 	if upstream.Conn().RemotePeer() == r.delegate {
-		// because we pass the status request through to the upstream,
-		// we need to handle its requests differently
 
 		resp := &eth.Status{}
 		if err := r.readRequest(ctx, upstream, resp); err != nil {
@@ -343,34 +353,28 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 		}
 
 		traceData := map[string]any{
-			"Request": map[string]any{
-				"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
-				"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
-				"HeadSlot":       resp.HeadSlot,
-				"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
-				"FinalizedEpoch": resp.FinalizedEpoch,
-			},
-			"Response": map[string]any{
-				"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
-				"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
-				"HeadSlot":       resp.HeadSlot,
-				"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
-				"FinalizedEpoch": resp.FinalizedEpoch,
-			},
+			"Request":  statusTraceData(resp),
+			"Response": statusTraceData(resp),
 		}
 
 		return traceData, upstream.Close()
 	}
 
+	// first, read the status from the remote peer
 	req := &eth.Status{}
 	if err := r.readRequest(ctx, upstream, req); err != nil {
 		return nil, fmt.Errorf("read status data from delegate: %w", err)
 	}
 
+	// ask our delegate node for the latest status, using our known latest status
+	// this is important because blindly forwarding the request from a remote peer
+	// will lead to intermittent disconnects from the beacon node. The "trusted peer"
+	// setting doesn't seem to apply if we send, e.g., a status payload with
+	// a non-matching fork-digest or non-finalized root hash.
 	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
 	resp, err := r.Status(dialCtx, r.delegate)
 	if err != nil {
-
+		// asking for the latest status failed. Use our own latest known status
 		slog.Warn("Downstream status request failed, using the latest known status")
 
 		statusCpy := r.cpyStatus()
@@ -379,47 +383,24 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 		}
 
 		traceData := map[string]any{
-			"Request": map[string]any{
-				"ForkDigest":     hex.EncodeToString(req.ForkDigest),
-				"HeadRoot":       hex.EncodeToString(req.HeadRoot),
-				"HeadSlot":       req.HeadSlot,
-				"FinalizedRoot":  hex.EncodeToString(req.FinalizedRoot),
-				"FinalizedEpoch": req.FinalizedEpoch,
-			},
-			"Response": map[string]any{
-				"ForkDigest":     hex.EncodeToString(statusCpy.ForkDigest),
-				"HeadRoot":       hex.EncodeToString(statusCpy.HeadRoot),
-				"HeadSlot":       statusCpy.HeadSlot,
-				"FinalizedRoot":  hex.EncodeToString(statusCpy.FinalizedRoot),
-				"FinalizedEpoch": statusCpy.FinalizedEpoch,
-			},
+			"Request":  statusTraceData(req),
+			"Response": statusTraceData(statusCpy),
 		}
 
 		return traceData, upstream.Close()
 	}
 
-	// update status
+	// we got a valid response from our delegate node. Update our own status
 	r.SetStatus(resp)
 
+	// let the upstream peer (who initiated the request) know the latest status
 	if err := r.writeResponse(ctx, upstream, resp); err != nil {
 		return nil, fmt.Errorf("respond status to upstream: %w", err)
 	}
 
 	traceData := map[string]any{
-		"Request": map[string]any{
-			"ForkDigest":     hex.EncodeToString(req.ForkDigest),
-			"HeadRoot":       hex.EncodeToString(req.HeadRoot),
-			"HeadSlot":       req.HeadSlot,
-			"FinalizedRoot":  hex.EncodeToString(req.FinalizedRoot),
-			"FinalizedEpoch": req.FinalizedEpoch,
-		},
-		"Response": map[string]any{
-			"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
-			"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
-			"HeadSlot":       resp.HeadSlot,
-			"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
-			"FinalizedEpoch": resp.FinalizedEpoch,
-		},
+		"Request":  statusTraceData(req),
+		"Response": statusTraceData(resp),
 	}
 
 	return traceData, nil
