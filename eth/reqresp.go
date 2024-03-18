@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/time/rate"
 
 	hermeshost "github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
@@ -57,8 +58,9 @@ type ReqResp struct {
 	metaDataMu sync.RWMutex
 	metaData   *pb.MetaDataV1
 
-	statusMu sync.RWMutex
-	status   *eth.Status
+	statusMu  sync.RWMutex
+	status    *eth.Status
+	statusLim *rate.Limiter
 
 	// metrics
 	meterRequestCounter metric.Int64Counter
@@ -84,9 +86,10 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	}
 
 	p := &ReqResp{
-		host:     h,
-		cfg:      cfg,
-		metaData: md,
+		host:      h,
+		cfg:       cfg,
+		metaData:  md,
+		statusLim: rate.NewLimiter(1, 5),
 	}
 
 	var err error
@@ -367,32 +370,41 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 		return nil, fmt.Errorf("read status data from delegate: %w", err)
 	}
 
-	// ask our delegate node for the latest status, using our known latest status
-	// this is important because blindly forwarding the request from a remote peer
-	// will lead to intermittent disconnects from the beacon node. The "trusted peer"
-	// setting doesn't seem to apply if we send, e.g., a status payload with
-	// a non-matching fork-digest or non-finalized root hash.
-	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
-	resp, err := r.Status(dialCtx, r.delegate)
-	if err != nil {
-		// asking for the latest status failed. Use our own latest known status
-		slog.Warn("Downstream status request failed, using the latest known status")
+	// create response status from memory status
+	resp := r.cpyStatus()
 
-		statusCpy := r.cpyStatus()
-		if err := r.writeResponse(ctx, upstream, statusCpy); err != nil {
-			return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
+	// if the rate limiter allows requesting a new status, do that.
+	if r.statusLim.Allow() {
+		r.statusLim.Reserve()
+
+		// ask our delegate node for the latest status, using our known latest status
+		// this is important because blindly forwarding the request from a remote peer
+		// will lead to intermittent disconnects from the beacon node. The "trusted peer"
+		// setting doesn't seem to apply if we send, e.g., a status payload with
+		// a non-matching fork-digest or non-finalized root hash.
+		dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
+		var err error
+		resp, err = r.Status(dialCtx, r.delegate)
+		if err != nil {
+			// asking for the latest status failed. Use our own latest known status
+			slog.Warn("Downstream status request failed, using the latest known status")
+
+			statusCpy := r.cpyStatus()
+			if err := r.writeResponse(ctx, upstream, statusCpy); err != nil {
+				return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
+			}
+
+			traceData := map[string]any{
+				"Request":  statusTraceData(req),
+				"Response": statusTraceData(statusCpy),
+			}
+
+			return traceData, upstream.Close()
 		}
 
-		traceData := map[string]any{
-			"Request":  statusTraceData(req),
-			"Response": statusTraceData(statusCpy),
-		}
-
-		return traceData, upstream.Close()
+		// we got a valid response from our delegate node. Update our own status
+		r.SetStatus(resp)
 	}
-
-	// we got a valid response from our delegate node. Update our own status
-	r.SetStatus(resp)
 
 	// let the upstream peer (who initiated the request) know the latest status
 	if err := r.writeResponse(ctx, upstream, resp); err != nil {
