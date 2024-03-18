@@ -233,7 +233,12 @@ func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
 // Start starts the listening process.
 func (n *Node) Start(ctx context.Context) error {
 	defer logDeferErr(n.host.Close, "Failed closing libp2p host")
-	defer n.startDataStream()()
+
+	dsCleanupFn, err := n.startDataStream(ctx)
+	if err != nil {
+		return fmt.Errorf("failed starting data stream producer: %w", err)
+	}
+	defer dsCleanupFn()
 
 	// identify the beacon node. We only have the host/port of the Beacon API
 	// endpoint. If we want to establish a P2P connection, we need its peer ID
@@ -390,7 +395,7 @@ func terminateSupervisorTreeOnErr(err error) error {
 }
 
 // startDataStream starts the data stream and implements a graceful shutdown
-func (n *Node) startDataStream() func() {
+func (n *Node) startDataStream(ctx context.Context) (func(), error) {
 	dsCtx, dsCancel := context.WithCancel(context.Background())
 
 	go func() {
@@ -426,5 +431,10 @@ func (n *Node) startDataStream() func() {
 		timeoutCncl()
 	}
 
-	return cleanupFn
+	producer, ok := n.ds.(*gk.Producer)
+	if !ok {
+		return cleanupFn, nil
+	}
+
+	return cleanupFn, producer.WaitIdle(ctx)
 }
