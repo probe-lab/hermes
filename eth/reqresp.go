@@ -297,6 +297,33 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 	return traceData, stream.Close()
 }
 
+func (r *ReqResp) cpyStatus() *eth.Status {
+	r.statusMu.RLock()
+	defer r.statusMu.RUnlock()
+
+	if r.status == nil {
+		return nil
+	}
+
+	return &eth.Status{
+		ForkDigest:     bytes.Clone(r.status.ForkDigest),
+		FinalizedRoot:  bytes.Clone(r.status.FinalizedRoot),
+		FinalizedEpoch: r.status.FinalizedEpoch,
+		HeadRoot:       bytes.Clone(r.status.HeadRoot),
+		HeadSlot:       r.status.HeadSlot,
+	}
+}
+
+func (r *ReqResp) verifyStatus(status *eth.Status) error {
+	r.statusMu.RLock()
+	defer r.statusMu.RUnlock()
+
+	if !bytes.Equal(status.ForkDigest, r.status.ForkDigest) {
+		return fmt.Errorf("fork digest mismatch")
+	}
+	return nil
+}
+
 func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
 	if upstream.Conn().RemotePeer() == r.delegate {
 		// because we pass the status request through to the upstream,
@@ -316,111 +343,83 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 		}
 
 		traceData := map[string]any{
-			"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
-			"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
-			"HeadSlot":       resp.HeadSlot,
-			"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
-			"FinalizedEpoch": resp.FinalizedEpoch,
+			"Request": map[string]any{
+				"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
+				"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
+				"HeadSlot":       resp.HeadSlot,
+				"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
+				"FinalizedEpoch": resp.FinalizedEpoch,
+			},
+			"Response": map[string]any{
+				"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
+				"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
+				"HeadSlot":       resp.HeadSlot,
+				"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
+				"FinalizedEpoch": resp.FinalizedEpoch,
+			},
 		}
 
 		return traceData, upstream.Close()
 	}
 
+	req := &eth.Status{}
+	if err := r.readRequest(ctx, upstream, req); err != nil {
+		return nil, fmt.Errorf("read status data from delegate: %w", err)
+	}
+
 	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
-	downstream, err := r.host.NewStream(dialCtx, r.delegate, upstream.Protocol())
+	resp, err := r.Status(dialCtx, r.delegate)
 	if err != nil {
 
-		// dial to downstream host failed, use the latest known status
-		r.statusMu.Lock()
-		statusCpy := *r.status
-		r.statusMu.Unlock()
+		slog.Warn("Downstream status request failed, using the latest known status")
 
-		if err := r.writeResponse(ctx, upstream, &statusCpy); err != nil {
+		statusCpy := r.cpyStatus()
+		if err := r.writeResponse(ctx, upstream, statusCpy); err != nil {
 			return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
 		}
 
 		traceData := map[string]any{
-			"ForkDigest":     hex.EncodeToString(statusCpy.ForkDigest),
-			"HeadRoot":       hex.EncodeToString(statusCpy.HeadRoot),
-			"HeadSlot":       statusCpy.HeadSlot,
-			"FinalizedRoot":  hex.EncodeToString(statusCpy.FinalizedRoot),
-			"FinalizedEpoch": statusCpy.FinalizedEpoch,
+			"Request": map[string]any{
+				"ForkDigest":     hex.EncodeToString(req.ForkDigest),
+				"HeadRoot":       hex.EncodeToString(req.HeadRoot),
+				"HeadSlot":       req.HeadSlot,
+				"FinalizedRoot":  hex.EncodeToString(req.FinalizedRoot),
+				"FinalizedEpoch": req.FinalizedEpoch,
+			},
+			"Response": map[string]any{
+				"ForkDigest":     hex.EncodeToString(statusCpy.ForkDigest),
+				"HeadRoot":       hex.EncodeToString(statusCpy.HeadRoot),
+				"HeadSlot":       statusCpy.HeadSlot,
+				"FinalizedRoot":  hex.EncodeToString(statusCpy.FinalizedRoot),
+				"FinalizedEpoch": statusCpy.FinalizedEpoch,
+			},
 		}
 
 		return traceData, upstream.Close()
-	}
-	defer logDeferErr(downstream.Reset, "failed resetting downstream stream")
-
-	// send status request to downstream peer. This will stop as soon as the
-	// upstream has closed its writer side.
-	if _, err = io.Copy(downstream, upstream); err != nil {
-		return nil, fmt.Errorf("copy data from upstream to downstream: %w", err)
-	}
-
-	// The upstream is done, so also tell downstream that we're done
-	if err = downstream.CloseWrite(); err != nil {
-		return nil, fmt.Errorf("failed to close writing side of stream: %w", err)
-	}
-
-	// We won't read anything from upstream from this point on
-	if err = upstream.CloseRead(); err != nil {
-		return nil, fmt.Errorf("failed to close reading side of stream: %w", err)
-	}
-
-	// set timeout for reading from our delegated node
-	if err = downstream.SetReadDeadline(time.Now().Add(r.cfg.ReadTimeout)); err != nil {
-		return nil, fmt.Errorf("failed setting read deadline on stream: %w", err)
-	}
-
-	// set timeout for writing to the upstream remote peer
-	if err = upstream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
-		return nil, fmt.Errorf("failed setting read deadline on stream: %w", err)
-	}
-
-	// read response from downstream peer but simultaneously pass it through
-	// to the upstream peer
-	respReader := io.TeeReader(downstream, upstream)
-
-	code := make([]byte, 1)
-	if _, err := io.ReadFull(respReader, code); err != nil {
-		return nil, fmt.Errorf("failed reading response code: %w", err)
-	}
-
-	// code == 0 means success
-	// code != 0 means error
-	if int(code[0]) != 0 {
-		errData, err := io.ReadAll(respReader)
-		if err != nil {
-			return nil, fmt.Errorf("failed reading error data (code %d): %w", int(code[0]), err)
-		}
-
-		return nil, fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
-	}
-
-	// read and decode status response
-	resp := &eth.Status{}
-	if err := r.cfg.Encoder.DecodeWithMaxLength(respReader, resp); err != nil {
-		return nil, fmt.Errorf("failed reading response data: %w", err)
 	}
 
 	// update status
 	r.SetStatus(resp)
 
-	traceData := map[string]any{
-		"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
-		"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
-		"HeadSlot":       resp.HeadSlot,
-		"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
-		"FinalizedEpoch": resp.FinalizedEpoch,
+	if err := r.writeResponse(ctx, upstream, resp); err != nil {
+		return nil, fmt.Errorf("respond status to upstream: %w", err)
 	}
 
-	// properly close both sides of the stream
-	downCloseErr := downstream.Close()
-	upCloseErr := upstream.Close()
-	if upCloseErr != nil {
-		return traceData, upCloseErr
-	} else if downCloseErr != nil {
-		return traceData, downCloseErr
+	traceData := map[string]any{
+		"Request": map[string]any{
+			"ForkDigest":     hex.EncodeToString(req.ForkDigest),
+			"HeadRoot":       hex.EncodeToString(req.HeadRoot),
+			"HeadSlot":       req.HeadSlot,
+			"FinalizedRoot":  hex.EncodeToString(req.FinalizedRoot),
+			"FinalizedEpoch": req.FinalizedEpoch,
+		},
+		"Response": map[string]any{
+			"ForkDigest":     hex.EncodeToString(resp.ForkDigest),
+			"HeadRoot":       hex.EncodeToString(resp.HeadRoot),
+			"HeadSlot":       resp.HeadSlot,
+			"FinalizedRoot":  hex.EncodeToString(resp.FinalizedRoot),
+			"FinalizedEpoch": resp.FinalizedEpoch,
+		},
 	}
 
 	return traceData, nil
@@ -570,7 +569,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
-	slog.Debug("Perform status request", tele.LogAttrPeerID(pid))
+	slog.Info("Perform status request", tele.LogAttrPeerID(pid))
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCStatusTopicV1))
 	if err != nil {
 		return nil, fmt.Errorf("new stream to peer %s: %w", pid, err)
@@ -578,19 +577,10 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
 
 	// actually write the data to the stream
-	r.statusMu.RLock()
-	if r.status == nil {
+	req := r.cpyStatus()
+	if req == nil {
 		return nil, fmt.Errorf("status unknown")
 	}
-
-	req := &eth.Status{
-		ForkDigest:     r.status.ForkDigest,
-		FinalizedRoot:  r.status.FinalizedRoot,
-		FinalizedEpoch: r.status.FinalizedEpoch,
-		HeadRoot:       r.status.HeadRoot,
-		HeadSlot:       r.status.HeadSlot,
-	}
-	r.statusMu.RUnlock()
 
 	if err := r.writeRequest(ctx, stream, req); err != nil {
 		return nil, fmt.Errorf("write status request: %w", err)
@@ -600,6 +590,11 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 	resp := &eth.Status{}
 	if err := r.readResponse(ctx, stream, resp); err != nil {
 		return nil, fmt.Errorf("read status response: %w", err)
+	}
+
+	// if we requested the status from our delegate
+	if stream.Conn().RemotePeer() == r.delegate {
+		r.SetStatus(resp)
 	}
 
 	// we have the data that we want, so ignore error here
