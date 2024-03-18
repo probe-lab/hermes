@@ -48,6 +48,4 @@ func (t *TopicSubscription) Serve(ctx context.Context) error {
 			return fmt.Errorf("handle gossip message for topic %s: %w", t.Sub, err)
 		}
 	}
-
-	return nil
 }

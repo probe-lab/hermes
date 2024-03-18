@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/dennis-tra/kinesis-producer"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
@@ -73,11 +73,23 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	var ds host.DataStream
 	if cfg.AWSConfig != nil {
 		client := kinesis.NewFromConfig(*cfg.AWSConfig)
-		ds = producer.New(&producer.Config{
-			StreamName:   cfg.KinesisStream,
-			BacklogCount: 2000,
-			Client:       client,
-		})
+
+		notifiee := &gk.NotifieeBundle{
+			DroppedRecordF: func(record gk.Record) {
+				slog.Warn("Dropped record", "partition_key", record.PartitionKey(), "data", string(record.Data()))
+			},
+		}
+
+		pcfg := gk.DefaultProducerConfig()
+		pcfg.Log = slog.Default()
+		pcfg.Meter = cfg.Meter
+		pcfg.Notifiee = notifiee
+
+		p, err := gk.NewProducer(client, cfg.KinesisStream, pcfg)
+		if err != nil {
+			return nil, fmt.Errorf("new kinesis producer: %w", err)
+		}
+		ds = p
 	} else {
 		ds = host.NoopDataStream{}
 	}
@@ -221,6 +233,7 @@ func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
 // Start starts the listening process.
 func (n *Node) Start(ctx context.Context) error {
 	defer logDeferErr(n.host.Close, "Failed closing libp2p host")
+	defer n.startDataStream()()
 
 	// identify the beacon node. We only have the host/port of the Beacon API
 	// endpoint. If we want to establish a P2P connection, we need its peer ID
@@ -376,8 +389,42 @@ func terminateSupervisorTreeOnErr(err error) error {
 	return nil
 }
 
-// wrapTermSupTree can be used to wrap a [suture.ErrTerminateSupervisorTree]
-// error in the given error.
-func wrapTermSupTree(err error) error {
-	return fmt.Errorf("%s: %w", err, suture.ErrTerminateSupervisorTree)
+// startDataStream starts the data stream and implements a graceful shutdown
+func (n *Node) startDataStream() func() {
+	dsCtx, dsCancel := context.WithCancel(context.Background())
+
+	go func() {
+		if err := n.ds.Start(dsCtx); err != nil {
+			slog.Warn("Failed to start data stream", tele.LogAttrError(err))
+		}
+	}()
+
+	cleanupFn := func() {
+		producer, ok := n.ds.(*gk.Producer)
+		if !ok {
+			dsCancel()
+			return
+		}
+
+		slog.Info("Waiting for Kinesis producer to become idle", "timeout", "15s")
+		// wait until the producer is idle
+		timeoutCtx, timeoutCncl := context.WithTimeout(dsCtx, 15*time.Second)
+		if err := producer.WaitIdle(timeoutCtx); err != nil {
+			slog.Info("Error waiting for producer to become idle", tele.LogAttrError(err))
+		}
+		timeoutCncl()
+
+		// stop the producer
+		dsCancel()
+
+		slog.Info("Stopped Kinesis producer, waiting for shutdown", "timeout", "5s")
+		// wait until the producer has stopped
+		timeoutCtx, timeoutCncl = context.WithTimeout(dsCtx, 5*time.Second)
+		if err := producer.WaitStopped(timeoutCtx); err != nil {
+			slog.Info("Error waiting for producer to stop", tele.LogAttrError(err))
+		}
+		timeoutCncl()
+	}
+
+	return cleanupFn
 }

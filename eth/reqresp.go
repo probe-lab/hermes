@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -236,20 +235,16 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 
 		maps.Copy(commonData, traceData)
 
-		traceEvt := hermeshost.TraceEvent{
+		traceEvt := &hermeshost.TraceEvent{
 			Type:      traceType,
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
-			Data:      commonData,
+			Payload:   commonData,
 		}
 
-		data, err := json.Marshal(traceEvt)
-		if err != nil {
-			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
-			return
+		if err := r.cfg.DataStream.PutRecord(ctx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
-
-		r.cfg.DataStream.Put(data, r.host.ID().String())
 
 		// update meters
 		r.meterRequestCounter.Add(ctx, 1, mattrs)
@@ -536,24 +531,23 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 			reqData["Error"] = err.Error()
 		}
 
-		traceEvt := hermeshost.TraceEvent{
+		traceEvt := &hermeshost.TraceEvent{
 			Type:      "REQUEST_STATUS",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
-			Data:      reqData,
+			Payload:   reqData,
 		}
 
-		if data, err := json.Marshal(traceEvt); err == nil {
-			r.cfg.DataStream.Put(data, r.host.ID().String())
-		} else {
-			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 
 		attrs := []attribute.KeyValue{
 			attribute.String("rpc", "status"),
 			attribute.Bool("success", err == nil),
 		}
-		r.meterRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
 	slog.Debug("Perform status request", tele.LogAttrPeerID(pid))
@@ -596,23 +590,21 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 
 func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 	defer func() {
-		traceEvt := hermeshost.TraceEvent{
+		traceEvt := &hermeshost.TraceEvent{
 			Type:      "REQUEST_PING",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 		}
-
-		if data, err := json.Marshal(traceEvt); err == nil {
-			r.cfg.DataStream.Put(data, r.host.ID().String())
-		} else {
-			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 
 		attrs := []attribute.KeyValue{
 			attribute.String("rpc", "ping"),
 			attribute.Bool("success", err == nil),
 		}
-		r.meterRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
 	slog.Debug("Perform ping request", tele.LogAttrPeerID(pid))
@@ -656,24 +648,22 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 			reqData["Error"] = err.Error()
 		}
 
-		traceEvt := hermeshost.TraceEvent{
+		traceEvt := &hermeshost.TraceEvent{
 			Type:      "REQUEST_METADATA",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
-			Data:      reqData,
+			Payload:   reqData,
 		}
-
-		if data, err := json.Marshal(traceEvt); err == nil {
-			r.cfg.DataStream.Put(data, r.host.ID().String())
-		} else {
-			slog.Warn("failed marshalling trace event", tele.LogAttrError(err))
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 
 		attrs := []attribute.KeyValue{
 			attribute.String("rpc", "meta_data"),
 			attribute.Bool("success", err == nil),
 		}
-		r.meterRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
 	slog.Debug("Perform metadata request", tele.LogAttrPeerID(pid))

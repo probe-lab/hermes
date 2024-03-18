@@ -2,25 +2,24 @@ package host
 
 import (
 	"context"
-	"log/slog"
+
+	gk "github.com/dennis-tra/go-kinesis"
 )
 
 type DataStream interface {
-	Start(ctx context.Context)
-	Stop()
-	Put(data []byte, partitionKey string) error
+	Start(ctx context.Context) error
+	PutRecord(ctx context.Context, record gk.Record) error
 }
 
 type NoopDataStream struct{}
 
 var _ DataStream = (*NoopDataStream)(nil)
 
-func (n NoopDataStream) Start(ctx context.Context) {}
-
-func (n NoopDataStream) Stop() {}
-
-func (n NoopDataStream) Put(data []byte, partitionKey string) error {
-	slog.Info(string(data), "partition_key", partitionKey)
-
+func (n NoopDataStream) Start(ctx context.Context) error {
+	<-ctx.Done()
 	return nil
+}
+
+func (n NoopDataStream) PutRecord(ctx context.Context, record gk.Record) error {
+	return ctx.Err()
 }

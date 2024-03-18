@@ -2,13 +2,13 @@ package host
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
@@ -34,8 +34,9 @@ type Config struct {
 
 type Host struct {
 	host.Host
-	cfg *Config
-	ps  *pubsub.PubSub
+	cfg   *Config
+	ps    *pubsub.PubSub
+	avlru *lru.Cache[string, string]
 
 	meterSubmittedTraces metric.Int64Counter
 }
@@ -46,9 +47,15 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
 
+	avlru, err := lru.New[string, string](500)
+	if err != nil {
+		return nil, fmt.Errorf("new agent version LRU cache: %w", err)
+	}
+
 	hermesHost := &Host{
-		Host: h,
-		cfg:  cfg,
+		Host:  h,
+		cfg:   cfg,
+		avlru: avlru,
 	}
 
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
@@ -65,35 +72,28 @@ func (h *Host) Serve(ctx context.Context) error {
 	}
 
 	eventHandler := func(n network.Network, c network.Conn, evtType string) {
-		avStr := ""
-		agentVersion, err := h.Peerstore().Get(c.RemotePeer(), "AgentVersion")
-		if err == nil {
-			if str, ok := agentVersion.(string); ok {
-				avStr = str
-			}
-		}
 		evt := &TraceEvent{
 			Type:      evtType,
 			PeerID:    h.ID(),
 			Timestamp: time.Now(),
-			Data: struct {
+			Payload: struct {
 				RemotePeer   string
 				RemoteMaddrs ma.Multiaddr
 				AgentVersion string
+				Direction    network.Direction
+				Opened       time.Time
+				Transient    bool
 			}{
 				RemotePeer:   c.RemotePeer().String(),
 				RemoteMaddrs: c.RemoteMultiaddr(),
-				AgentVersion: avStr,
+				AgentVersion: h.AgentVersion(c.RemotePeer()),
+				Direction:    c.Stat().Direction,
+				Opened:       c.Stat().Opened,
+				Transient:    c.Stat().Transient,
 			},
 		}
 
-		payload, err := json.Marshal(evt)
-		if err != nil {
-			slog.Warn("Failed to marshal trace event", tele.LogAttrError(err))
-			return
-		}
-
-		if err := h.cfg.DataStream.Put(payload, h.ID().String()); err != nil {
+		if err := h.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 			slog.Warn("Failed to put event payload", tele.LogAttrError(err))
 			return
 		}
@@ -107,11 +107,7 @@ func (h *Host) Serve(ctx context.Context) error {
 	}
 	h.Host.Network().Notify(notifiee)
 
-	h.cfg.DataStream.Start(ctx)
-
 	<-ctx.Done()
-
-	h.cfg.DataStream.Stop()
 
 	h.Host.Network().StopNotify(notifiee)
 
@@ -124,7 +120,7 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		return nil, fmt.Errorf("new gossip sub meter tracer: %w", err)
 	}
 
-	opts = append(opts, pubsub.WithRawTracer(h), pubsub.WithRawTracer(mt))
+	opts = append(opts, pubsub.WithRawTracer(h), pubsub.WithRawTracer(mt), pubsub.WithEventTracer(h))
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new gossip sub: %w", err)
@@ -224,15 +220,25 @@ func (h *Host) ConnSignal(ctx context.Context, pid peer.ID) chan error {
 // AgentVersion returns the agent version of the given peer. If the agent version
 // is not known, it returns an empty string.
 func (h *Host) AgentVersion(pid peer.ID) string {
-	rawVal, err := h.Peerstore().Get(pid, "AgentVersion")
-
-	if err == nil {
-		if av, ok := rawVal.(string); ok {
-			return av
-		}
+	// use an LRU cache to prevent excessive locking/unlocking
+	av, found := h.avlru.Get(pid.String())
+	if found {
+		return av
 	}
 
-	return ""
+	rawVal, err := h.Peerstore().Get(pid, "AgentVersion")
+	if err != nil {
+		return ""
+	}
+
+	av, ok := rawVal.(string)
+	if !ok {
+		return ""
+	}
+
+	h.avlru.Add(pid.String(), av)
+
+	return av
 }
 
 // PrivateListenMaddr returns the first multiaddress in a private IP range that
