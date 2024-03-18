@@ -127,7 +127,7 @@ func (r *ReqResp) SetStatus(status *eth.Status) {
 
 	// check if anything has changed. Prevents the below log message to pollute
 	// the log output.
-	if bytes.Equal(r.status.ForkDigest, status.ForkDigest) &&
+	if r.status != nil && bytes.Equal(r.status.ForkDigest, status.ForkDigest) &&
 		bytes.Equal(r.status.FinalizedRoot, status.FinalizedRoot) &&
 		r.status.FinalizedEpoch == status.FinalizedEpoch &&
 		bytes.Equal(r.status.HeadRoot, status.HeadRoot) &&
