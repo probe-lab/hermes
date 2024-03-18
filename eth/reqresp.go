@@ -125,6 +125,17 @@ func (r *ReqResp) SetStatus(status *eth.Status) {
 	r.statusMu.Lock()
 	defer r.statusMu.Unlock()
 
+	// check if anything has changed. Prevents the below log message to pollute
+	// the log output.
+	if bytes.Equal(r.status.ForkDigest, status.ForkDigest) &&
+		bytes.Equal(r.status.FinalizedRoot, status.FinalizedRoot) &&
+		r.status.FinalizedEpoch == status.FinalizedEpoch &&
+		bytes.Equal(r.status.HeadRoot, status.HeadRoot) &&
+		r.status.HeadSlot == status.HeadSlot {
+		// nothing has changed -> return
+		return
+	}
+
 	if r.status != nil && !bytes.Equal(r.status.ForkDigest, status.ForkDigest) {
 		slog.Warn("reqresp status updated with different fork digests", "old", hex.EncodeToString(r.status.ForkDigest), "new", hex.EncodeToString(status.ForkDigest))
 	}
@@ -137,6 +148,23 @@ func (r *ReqResp) SetStatus(status *eth.Status) {
 	slog.Info("  head_slot: " + strconv.FormatUint(uint64(status.HeadSlot), 10))
 
 	r.status = status
+}
+
+func (r *ReqResp) cpyStatus() *eth.Status {
+	r.statusMu.RLock()
+	defer r.statusMu.RUnlock()
+
+	if r.status == nil {
+		return nil
+	}
+
+	return &eth.Status{
+		ForkDigest:     bytes.Clone(r.status.ForkDigest),
+		FinalizedRoot:  bytes.Clone(r.status.FinalizedRoot),
+		FinalizedEpoch: r.status.FinalizedEpoch,
+		HeadRoot:       bytes.Clone(r.status.HeadRoot),
+		HeadSlot:       r.status.HeadSlot,
+	}
 }
 
 // RegisterHandlers registers all RPC handlers. It checks first if all
@@ -295,33 +323,6 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 	}
 
 	return traceData, stream.Close()
-}
-
-func (r *ReqResp) cpyStatus() *eth.Status {
-	r.statusMu.RLock()
-	defer r.statusMu.RUnlock()
-
-	if r.status == nil {
-		return nil
-	}
-
-	return &eth.Status{
-		ForkDigest:     bytes.Clone(r.status.ForkDigest),
-		FinalizedRoot:  bytes.Clone(r.status.FinalizedRoot),
-		FinalizedEpoch: r.status.FinalizedEpoch,
-		HeadRoot:       bytes.Clone(r.status.HeadRoot),
-		HeadSlot:       r.status.HeadSlot,
-	}
-}
-
-func (r *ReqResp) verifyStatus(status *eth.Status) error {
-	r.statusMu.RLock()
-	defer r.statusMu.RUnlock()
-
-	if !bytes.Equal(status.ForkDigest, r.status.ForkDigest) {
-		return fmt.Errorf("fork digest mismatch")
-	}
-	return nil
 }
 
 func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
