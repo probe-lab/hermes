@@ -329,7 +329,25 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
 	downstream, err := r.host.NewStream(dialCtx, r.delegate, upstream.Protocol())
 	if err != nil {
-		return nil, fmt.Errorf("new stream to downstream host: %w", err)
+
+		// dial to downstream host failed, use the latest known status
+		r.statusMu.Lock()
+		statusCpy := *r.status
+		r.statusMu.Unlock()
+
+		if err := r.writeResponse(ctx, upstream, &statusCpy); err != nil {
+			return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
+		}
+
+		traceData := map[string]any{
+			"ForkDigest":     hex.EncodeToString(statusCpy.ForkDigest),
+			"HeadRoot":       hex.EncodeToString(statusCpy.HeadRoot),
+			"HeadSlot":       statusCpy.HeadSlot,
+			"FinalizedRoot":  hex.EncodeToString(statusCpy.FinalizedRoot),
+			"FinalizedEpoch": statusCpy.FinalizedEpoch,
+		}
+
+		return traceData, upstream.Close()
 	}
 	defer logDeferErr(downstream.Reset, "failed resetting downstream stream")
 
