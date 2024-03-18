@@ -326,7 +326,8 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 		return traceData, upstream.Close()
 	}
 
-	downstream, err := r.host.NewStream(ctx, r.delegate, upstream.Protocol())
+	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
+	downstream, err := r.host.NewStream(dialCtx, r.delegate, upstream.Protocol())
 	if err != nil {
 		return nil, fmt.Errorf("new stream to downstream host: %w", err)
 	}
@@ -466,7 +467,8 @@ func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stre
 }
 
 func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) error {
-	downstream, err := r.host.NewStream(ctx, r.delegate, upstream.Protocol())
+	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
+	downstream, err := r.host.NewStream(dialCtx, r.delegate, upstream.Protocol())
 	if err != nil {
 		return fmt.Errorf("new stream to downstream host: %w", err)
 	}

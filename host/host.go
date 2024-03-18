@@ -80,14 +80,14 @@ func (h *Host) Serve(ctx context.Context) error {
 				RemotePeer   string
 				RemoteMaddrs ma.Multiaddr
 				AgentVersion string
-				Direction    network.Direction
+				Direction    string
 				Opened       time.Time
 				Transient    bool
 			}{
 				RemotePeer:   c.RemotePeer().String(),
 				RemoteMaddrs: c.RemoteMultiaddr(),
 				AgentVersion: h.AgentVersion(c.RemotePeer()),
-				Direction:    c.Stat().Direction,
+				Direction:    c.Stat().Direction.String(),
 				Opened:       c.Stat().Opened,
 				Transient:    c.Stat().Transient,
 			},

@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thejerf/suture/v4"
-
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
+	"github.com/thejerf/suture/v4"
 )
 
 // Peerer is a suture service that ensures Hermes' registration as a trusted
@@ -44,7 +44,12 @@ func (p *Peerer) Serve(ctx context.Context) error {
 		}
 	}()
 
-	ticker := time.NewTicker(time.Minute)
+	addrInfo, err := p.pryClient.Identity(ctx)
+	if err != nil {
+		return terminateSupervisorTreeOnErr(fmt.Errorf("request beacon node identity: %w", err))
+	}
+
+	ticker := time.NewTicker(10 * time.Second)
 	for {
 		// check if we're still registered every 60s
 		select {
@@ -60,24 +65,39 @@ func (p *Peerer) Serve(ctx context.Context) error {
 		}
 
 		// if we're in there, do nothing
-		if _, found := peers[p.host.ID()]; found {
+		if _, found := peers[p.host.ID()]; !found {
+
+			slog.Warn("Not registered as a trusted peer")
+
+			// we're not in the list of trusted peers
+			// get our private liste multiaddress and register again
+			privateMaddr, err := p.host.PrivateListenMaddr()
+			if err != nil {
+				return err
+			}
+
+			// register ourselves as a trusted peer
+			if err := p.pryClient.AddTrustedPeer(ctx, p.host.ID(), privateMaddr); err != nil {
+				return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
+			}
+
+			slog.Info("Re-registered as a trusted peer")
+		}
+
+		// check if we're connected
+		conns := p.host.Network().ConnsToPeer(addrInfo.ID)
+		if len(conns) != 0 {
+			// we have a connection
 			continue
 		}
 
-		slog.Warn("Not registered as a trusted peer")
-
-		// we're not in the list of trusted peers
-		// get our private liste multiaddress and register again
-		privateMaddr, err := p.host.PrivateListenMaddr()
-		if err != nil {
-			return err
+		// we're not connected, attempt a re-connect
+		dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
+		if err := p.host.Connect(dialCtx, *addrInfo); err != nil {
+			slog.Warn("Failed reconnecting to beacon node", tele.LogAttrError(err))
+			continue
 		}
 
-		// register ourselves as a trusted peer
-		if err := p.pryClient.AddTrustedPeer(ctx, p.host.ID(), privateMaddr); err != nil {
-			return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
-		}
-
-		slog.Info("Re-registered as a trusted peer")
+		slog.Info("Re-connected to beacon node")
 	}
 }
