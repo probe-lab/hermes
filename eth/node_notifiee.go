@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/probe-lab/hermes/tele"
 )
@@ -39,6 +42,22 @@ func (n *Node) Connected(net network.Network, c network.Conn) {
 func (n *Node) Disconnected(net network.Network, c network.Conn) {
 	if n.pryInfo != nil && c.RemotePeer() == n.pryInfo.ID {
 		slog.Warn("Beacon node disconnected")
+	}
+
+	if !c.Stat().Opened.IsZero() {
+		av := n.host.AgentVersion(c.RemotePeer())
+		parts := strings.Split(av, "/")
+		if len(parts) > 0 {
+			switch strings.ToLower(parts[0]) {
+			case "prysm", "lighthouse", "nimbus", "lodestar", "grandine", "teku", "erigon":
+				av = strings.ToLower(parts[0])
+			default:
+				av = "other"
+			}
+		} else {
+			av = "unknown"
+		}
+		n.connAge.Record(context.TODO(), time.Since(c.Stat().Opened).Seconds(), metric.WithAttributes(attribute.String("agent", av)))
 	}
 
 	ps := n.host.Peerstore()

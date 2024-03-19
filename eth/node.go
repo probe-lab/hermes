@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
@@ -13,6 +14,7 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/probe-lab/hermes/host"
@@ -52,9 +54,11 @@ type Node struct {
 	disc *Discovery
 
 	// Metrics
-	connCount   metric.Int64ObservableGauge
-	connDurHist metric.Float64Histogram
-	connBeacon  metric.Int64ObservableGauge
+	connCount     metric.Int64ObservableGauge
+	connDurHist   metric.Float64Histogram
+	connBeacon    metric.Int64ObservableGauge
+	connAge       metric.Float64Histogram
+	connMedianAge metric.Float64ObservableGauge
 }
 
 // NewNode initializes a new [Node] using the provided configuration.
@@ -72,11 +76,21 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	var ds host.DataStream
 	if cfg.AWSConfig != nil {
-		client := kinesis.NewFromConfig(*cfg.AWSConfig)
+
+		droppedTraces, err := cfg.Meter.Int64Counter("dropped_traces")
+		if err != nil {
+			return nil, fmt.Errorf("new dropped_traces counter: %w", err)
+		}
 
 		notifiee := &gk.NotifieeBundle{
-			DroppedRecordF: func(record gk.Record) {
-				slog.Warn("Dropped record", "partition_key", record.PartitionKey(), "data", string(record.Data()))
+			DroppedRecordF: func(ctx context.Context, record gk.Record) {
+				tevt, ok := record.(*host.TraceEvent)
+				if !ok {
+					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", "UNKNOWN")))
+				} else {
+					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", tevt.Type)))
+				}
+				slog.Warn("Dropped record", "partition_key", record.PartitionKey(), "size", len(record.Data()))
 			},
 		}
 
@@ -85,7 +99,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		pcfg.Meter = cfg.Meter
 		pcfg.Notifiee = notifiee
 
-		p, err := gk.NewProducer(client, cfg.KinesisStream, pcfg)
+		p, err := gk.NewProducer(kinesis.NewFromConfig(*cfg.AWSConfig), cfg.KinesisStream, pcfg)
 		if err != nil {
 			return nil, fmt.Errorf("new kinesis producer: %w", err)
 		}
@@ -225,6 +239,45 @@ func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
 	}, n.connBeacon)
 	if err != nil {
 		return fmt.Errorf("register beacon_connected gauge callback: %w", err)
+	}
+
+	n.connAge, err = cfg.Meter.Float64Histogram("conn_age", metric.WithDescription("Connection age after disconnect in seconds"), metric.WithUnit("s"))
+	if err != nil {
+		return fmt.Errorf("new conn_age histogram: %w", err)
+	}
+
+	n.connMedianAge, err = cfg.Meter.Float64ObservableGauge("conn_median_age", metric.WithDescription("The median age of all currently active connections"), metric.WithUnit("s"))
+	if err != nil {
+		return fmt.Errorf("new conn_median_age gauge: %w", err)
+	}
+	_, err = cfg.Meter.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
+		// get a reference to all connections
+		conns := n.host.Network().Conns()
+		if len(conns) == 0 {
+			// don't measure anything if we have no active connection
+			return nil
+		}
+
+		// calculate connection ages in seconds
+		ages := make([]float64, len(conns))
+		for i, conn := range conns {
+			ages[i] = time.Since(conn.Stat().Opened).Seconds()
+		}
+
+		// calculate median
+		sort.Float64s(ages)
+
+		if len(ages)%2 == 0 {
+			lo, hi := ages[(len(ages)-1)/2], ages[len(ages)/2]
+			obs.ObserveFloat64(n.connMedianAge, (lo+hi)/2)
+		} else {
+			obs.ObserveFloat64(n.connMedianAge, ages[len(ages)/2])
+		}
+
+		return nil
+	}, n.connMedianAge)
+	if err != nil {
+		return fmt.Errorf("register conn_median_age gauge callback: %w", err)
 	}
 
 	return nil
