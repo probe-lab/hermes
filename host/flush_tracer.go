@@ -49,10 +49,14 @@ var _ gk.Record = (*TraceEvent)(nil)
 var _ pubsub.RawTracer = (*Host)(nil)
 
 func (h *Host) FlushTrace(evtType string, payload any) {
+	h.FlushTraceWithTimestamp(evtType, time.Now(), payload)
+}
+
+func (h *Host) FlushTraceWithTimestamp(evtType string, timestamp time.Time, payload any) {
 	evt := &TraceEvent{
 		Type:      evtType,
 		PeerID:    h.ID(),
-		Timestamp: time.Now(),
+		Timestamp: timestamp,
 		Payload:   payload,
 	}
 
@@ -179,15 +183,21 @@ func (h *Host) UndeliverableMessage(msg *pubsub.Message) {
 }
 
 func (h *Host) Trace(evt *pubsubpb.TraceEvent) {
+	ts := time.Unix(0, evt.GetTimestamp())
 	switch evt.GetType() {
+	case pubsubpb.TraceEvent_PUBLISH_MESSAGE:
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_PUBLISH_MESSAGE.String(), ts, map[string]any{
+			"MsgID": evt.GetPublishMessage().GetMessageID(),
+			"Topic": evt.GetPublishMessage().GetTopic(),
+		})
 	case pubsubpb.TraceEvent_RECV_RPC:
 		payload := newRPCMeta(evt.GetRecvRPC().GetReceivedFrom(), evt.GetRecvRPC().GetMeta())
-		h.FlushTrace(pubsubpb.TraceEvent_RECV_RPC.String(), payload)
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_RECV_RPC.String(), ts, payload)
 	case pubsubpb.TraceEvent_SEND_RPC:
 		payload := newRPCMeta(evt.GetSendRPC().GetSendTo(), evt.GetSendRPC().GetMeta())
-		h.FlushTrace(pubsubpb.TraceEvent_SEND_RPC.String(), payload)
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_SEND_RPC.String(), ts, payload)
 	case pubsubpb.TraceEvent_DROP_RPC:
 		payload := newRPCMeta(evt.GetDropRPC().GetSendTo(), evt.GetDropRPC().GetMeta())
-		h.FlushTrace(pubsubpb.TraceEvent_DROP_RPC.String(), payload)
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_DROP_RPC.String(), ts, payload)
 	}
 }
