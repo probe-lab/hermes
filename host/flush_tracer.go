@@ -108,46 +108,46 @@ func (h *Host) Prune(p peer.ID, topic string) {
 
 func (h *Host) ValidateMessage(msg *pubsub.Message) {
 	h.FlushTrace("VALIDATE_MESSAGE", map[string]any{
-		"RecvFrom": msg.ReceivedFrom,
-		"Topic":    msg.GetTopic(),
-		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
-		"Local":    msg.Local,
-		"MsgBytes": msg.Size(),
-		"SeqNo":    hex.EncodeToString(msg.GetSeqno()),
+		"PeerID":  msg.ReceivedFrom,
+		"Topic":   msg.GetTopic(),
+		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
+		"Local":   msg.Local,
+		"MsgSize": msg.Size(),
+		"SeqNo":   hex.EncodeToString(msg.GetSeqno()),
 	})
 }
 
 func (h *Host) DeliverMessage(msg *pubsub.Message) {
 	h.FlushTrace(pubsubpb.TraceEvent_DELIVER_MESSAGE.String(), map[string]any{
-		"RecvFrom": msg.ReceivedFrom,
-		"Topic":    msg.GetTopic(),
-		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
-		"Local":    msg.Local,
-		"MsgBytes": msg.Size(),
-		"Seq":      hex.EncodeToString(msg.GetSeqno()),
+		"PeerID":  msg.ReceivedFrom,
+		"Topic":   msg.GetTopic(),
+		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
+		"Local":   msg.Local,
+		"MsgSize": msg.Size(),
+		"Seq":     hex.EncodeToString(msg.GetSeqno()),
 	})
 }
 
 func (h *Host) RejectMessage(msg *pubsub.Message, reason string) {
 	h.FlushTrace(pubsubpb.TraceEvent_REJECT_MESSAGE.String(), map[string]any{
-		"RecvFrom": msg.ReceivedFrom,
-		"Topic":    msg.GetTopic(),
-		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
-		"Reason":   reason,
-		"Local":    msg.Local,
-		"MsgBytes": msg.Size(),
-		"Seq":      hex.EncodeToString(msg.GetSeqno()),
+		"PeerID":  msg.ReceivedFrom,
+		"Topic":   msg.GetTopic(),
+		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
+		"Reason":  reason,
+		"Local":   msg.Local,
+		"MsgSize": msg.Size(),
+		"Seq":     hex.EncodeToString(msg.GetSeqno()),
 	})
 }
 
 func (h *Host) DuplicateMessage(msg *pubsub.Message) {
 	h.FlushTrace(pubsubpb.TraceEvent_DUPLICATE_MESSAGE.String(), map[string]any{
-		"RecvFrom": msg.ReceivedFrom,
-		"Topic":    msg.GetTopic(),
-		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
-		"Local":    msg.Local,
-		"MsgBytes": msg.Size(),
-		"Seq":      hex.EncodeToString(msg.GetSeqno()),
+		"PeerID":  msg.ReceivedFrom,
+		"Topic":   msg.GetTopic(),
+		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
+		"Local":   msg.Local,
+		"MsgSize": msg.Size(),
+		"Seq":     hex.EncodeToString(msg.GetSeqno()),
 	})
 }
 
@@ -171,10 +171,10 @@ func (h *Host) DropRPC(rpc *pubsub.RPC, p peer.ID) {
 
 func (h *Host) UndeliverableMessage(msg *pubsub.Message) {
 	h.FlushTrace("UNDELIVERABLE_MESSAGE", map[string]any{
-		"RecvFrom": msg.ReceivedFrom,
-		"Topic":    msg.GetTopic(),
-		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
-		"Local":    msg.Local,
+		"PeerID": msg.ReceivedFrom,
+		"Topic":  msg.GetTopic(),
+		"MsgID":  hex.EncodeToString([]byte(msg.ID)),
+		"Local":  msg.Local,
 	})
 }
 

@@ -259,6 +259,29 @@ func (h *Host) PrivateListenMaddr() (ma.Multiaddr, error) {
 	return nil, fmt.Errorf("no private multi address found in %s", h.Addrs())
 }
 
+func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
+	return func(ctx context.Context, msg *pubsub.Message) error {
+		evt := &TraceEvent{
+			Type:      "HANDLE_MESSAGE",
+			PeerID:    h.ID(),
+			Timestamp: time.Now(),
+			Payload: map[string]any{
+				"PeerID":  msg.ReceivedFrom.String(),
+				"MsgID":   msg.ID,
+				"MsgSize": len(msg.Data),
+				"Topic":   msg.GetTopic(),
+				"Seq":     msg.GetSeqno(),
+			},
+		}
+
+		if err := h.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+			slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+		}
+
+		return handler(ctx, msg)
+	}
+}
+
 // MaddrFrom takes in an ip address string and port to produce a go multiaddr format.
 func MaddrFrom(ip string, port uint) (ma.Multiaddr, error) {
 	parsed := net.ParseIP(ip)

@@ -164,8 +164,11 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
-		ForkDigest: cfg.ForkDigest,
-		Encoder:    encoder.SszNetworkEncoder{},
+		ForkDigest:     cfg.ForkDigest,
+		Encoder:        encoder.SszNetworkEncoder{},
+		SecondsPerSlot: time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second,
+		GenesisTime:    cfg.GenesisConfig.GenesisTime,
+		DataStream:     ds,
 	}
 
 	pubSub, err := NewPubSub(h, pubSubConfig)

@@ -253,7 +253,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 		}
 
 		commonData := map[string]any{
-			"RemotePeer": s.Conn().RemotePeer(),
+			"PeerID":     s.Conn().RemotePeer(),
 			"ProtocolID": s.Protocol(),
 			"LatencyS":   end.Sub(start).Seconds(),
 		}
@@ -531,7 +531,9 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 
 func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, err error) {
 	defer func() {
-		reqData := map[string]any{}
+		reqData := map[string]any{
+			"PeerID": pid.String(),
+		}
 		if status != nil {
 			reqData["ForkDigest"] = hex.EncodeToString(status.ForkDigest)
 			reqData["HeadRoot"] = hex.EncodeToString(status.HeadRoot)
@@ -603,6 +605,9 @@ func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 			Type:      "REQUEST_PING",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
+			Payload: map[string]string{
+				"PeerID": pid.String(),
+			},
 		}
 		traceCtx := context.Background()
 		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
@@ -646,7 +651,10 @@ func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 
 func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV1, err error) {
 	defer func() {
-		reqData := map[string]any{}
+		reqData := map[string]any{
+			"PeerID": pid.String(),
+		}
+
 		if resp != nil {
 			reqData["SeqNumber"] = resp.SeqNumber
 			reqData["Attnets"] = resp.Attnets

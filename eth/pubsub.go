@@ -3,25 +3,44 @@ package eth
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
+	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
+	"github.com/probe-lab/hermes/tele"
 )
 
 type PubSubConfig struct {
-	ForkDigest [4]byte
-	Encoder    encoder.NetworkEncoding
+	ForkDigest     [4]byte
+	Encoder        encoder.NetworkEncoding
+	SecondsPerSlot time.Duration
+	GenesisTime    time.Time
+	DataStream     host.DataStream
 }
 
 func (p PubSubConfig) Validate() error {
 	if p.Encoder == nil {
 		return fmt.Errorf("nil encoder")
+	}
+
+	if p.SecondsPerSlot == 0 {
+		return fmt.Errorf("seconds per slot must not be 0")
+	}
+
+	if p.GenesisTime.IsZero() {
+		return fmt.Errorf("genesis time must not be zero time")
+	}
+
+	if p.DataStream == nil {
+		return fmt.Errorf("datastream implementation required")
 	}
 
 	return nil
@@ -51,23 +70,22 @@ func (p *PubSub) Serve(ctx context.Context) error {
 		return fmt.Errorf("node's pubsub service uninitialized gossip sub: %w", suture.ErrTerminateSupervisorTree)
 	}
 
-	topicFormats := []string{
-		p2p.BlockSubnetTopicFormat,
-		p2p.AggregateAndProofSubnetTopicFormat,
-		p2p.ExitSubnetTopicFormat,
-		p2p.ProposerSlashingSubnetTopicFormat,
-		p2p.AttesterSlashingSubnetTopicFormat,
-		p2p.SyncContributionAndProofSubnetTopicFormat,
-		p2p.BlsToExecutionChangeSubnetTopicFormat,
-		// Not supported topics yet:
-		// p2p.AttestationSubnetTopicFormat,
-		// p2p.SyncCommitteeSubnetTopicFormat,
-		// p2p.BlobSubnetTopicFormat,
+	topicHandlers := map[string]host.TopicHandler{
+		p2p.BlockSubnetTopicFormat:                    p.host.TracedTopicHandler(host.NoopHandler),
+		p2p.AggregateAndProofSubnetTopicFormat:        p.handleAggregateAndProof,
+		p2p.ExitSubnetTopicFormat:                     p.host.TracedTopicHandler(host.NoopHandler),
+		p2p.ProposerSlashingSubnetTopicFormat:         p.host.TracedTopicHandler(host.NoopHandler),
+		p2p.AttesterSlashingSubnetTopicFormat:         p.host.TracedTopicHandler(host.NoopHandler),
+		p2p.SyncContributionAndProofSubnetTopicFormat: p.host.TracedTopicHandler(host.NoopHandler),
+		p2p.BlsToExecutionChangeSubnetTopicFormat:     p.host.TracedTopicHandler(host.NoopHandler),
+		// p2p.AttestationSubnetTopicFormat:              p.host.TracedTopicHandler(host.NoopHandler),
+		// p2p.SyncCommitteeSubnetTopicFormat:            p.host.TracedTopicHandler(host.NoopHandler),
+		// p2p.BlobSubnetTopicFormat:                     p.host.TracedTopicHandler(host.NoopHandler),
 	}
 
 	supervisor := suture.NewSimple("pubsub")
 
-	for _, topicFormat := range topicFormats {
+	for topicFormat, topicHandler := range topicHandlers {
 		topicName := fmt.Sprintf(topicFormat, p.cfg.ForkDigest) + p.cfg.Encoder.ProtocolSuffix()
 		topic, err := p.gs.Join(topicName)
 		if err != nil {
@@ -84,7 +102,7 @@ func (p *PubSub) Serve(ctx context.Context) error {
 			Topic:   topicName,
 			LocalID: p.host.ID(),
 			Sub:     sub,
-			Handler: host.NoopHandler,
+			Handler: topicHandler,
 		}
 
 		supervisor.Add(ts)
@@ -107,6 +125,39 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 	if len(subs) > n.cfg.PubSubSubscriptionRequestLimit {
 		return nil, pubsub.ErrTooManySubscriptions
 	}
-
 	return pubsub.FilterSubscriptions(subs, n.CanSubscribe), nil
+}
+
+func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Message) error {
+	sbb := eth.SignedBeaconBlock{}
+	if err := p.cfg.Encoder.DecodeGossip(msg.Data, &sbb); err != nil {
+		return fmt.Errorf("decode beacon block gossip message: %w", err)
+	}
+
+	blockSlot := sbb.GetBlock().GetSlot()
+
+	now := time.Now()
+	slotStart := p.cfg.GenesisTime.Add(time.Duration(blockSlot) * p.cfg.SecondsPerSlot)
+
+	evt := &host.TraceEvent{
+		Type:      "HANDLE_MESSAGE",
+		PeerID:    p.host.ID(),
+		Timestamp: now,
+		Payload: map[string]any{
+			"PeerID":     msg.ReceivedFrom.String(),
+			"MsgID":      msg.ID,
+			"MsgSize":    len(msg.Data),
+			"Topic":      msg.GetTopic(),
+			"Seq":        msg.GetSeqno(),
+			"ValIdx":     sbb.GetBlock().GetProposerIndex(),
+			"Slot":       blockSlot,
+			"TimeInSlot": now.Sub(slotStart).Seconds(),
+		},
+	}
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+	}
+
+	return nil
 }
