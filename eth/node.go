@@ -98,6 +98,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		pcfg.Log = slog.Default()
 		pcfg.Meter = cfg.Meter
 		pcfg.Notifiee = notifiee
+		pcfg.RetryLimit = 5
 
 		p, err := gk.NewProducer(kinesis.NewFromConfig(*cfg.AWSConfig), cfg.KinesisStream, pcfg)
 		if err != nil {
