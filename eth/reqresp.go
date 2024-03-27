@@ -187,13 +187,15 @@ func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
 	}
 
 	handlers := map[string]ContextStreamHandler{
-		p2p.RPCPingTopicV1:          r.pingHandler,
-		p2p.RPCGoodByeTopicV1:       r.goodbyeHandler,
-		p2p.RPCStatusTopicV1:        r.statusHandler,
-		p2p.RPCMetaDataTopicV1:      r.metadataV1Handler,
-		p2p.RPCMetaDataTopicV2:      r.metadataV2Handler,
-		p2p.RPCBlocksByRangeTopicV2: r.blocksByRangeV2Handler,
-		p2p.RPCBlocksByRootTopicV2:  r.blocksByRootV2Handler,
+		p2p.RPCPingTopicV1:                r.pingHandler,
+		p2p.RPCGoodByeTopicV1:             r.goodbyeHandler,
+		p2p.RPCStatusTopicV1:              r.statusHandler,
+		p2p.RPCMetaDataTopicV1:            r.metadataV1Handler,
+		p2p.RPCMetaDataTopicV2:            r.metadataV2Handler,
+		p2p.RPCBlocksByRangeTopicV2:       r.blocksByRangeV2Handler,
+		p2p.RPCBlocksByRootTopicV2:        r.blocksByRootV2Handler,
+		p2p.RPCBlobSidecarsByRangeTopicV1: r.blobsByRangeV2Handler,
+		p2p.RPCBlobSidecarsByRootTopicV1:  r.blobsByRootV2Handler,
 	}
 
 	for id, handler := range handlers {
@@ -472,6 +474,22 @@ func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Str
 func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
 		return nil, fmt.Errorf("blocks by root request from delegate peer")
+	}
+
+	return nil, r.delegateStream(ctx, stream)
+}
+
+func (r *ReqResp) blobsByRangeV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
+	if stream.Conn().RemotePeer() == r.delegate {
+		return nil, fmt.Errorf("blobs by range request from delegate peer")
+	}
+
+	return nil, r.delegateStream(ctx, stream)
+}
+
+func (r *ReqResp) blobsByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
+	if stream.Conn().RemotePeer() == r.delegate {
+		return nil, fmt.Errorf("blobs by root request from delegate peer")
 	}
 
 	return nil, r.delegateStream(ctx, stream)
