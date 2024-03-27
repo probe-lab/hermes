@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -267,7 +268,7 @@ func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 			Timestamp: time.Now(),
 			Payload: map[string]any{
 				"PeerID":  msg.ReceivedFrom.String(),
-				"MsgID":   msg.ID,
+				"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 				"MsgSize": len(msg.Data),
 				"Topic":   msg.GetTopic(),
 				"Seq":     msg.GetSeqno(),

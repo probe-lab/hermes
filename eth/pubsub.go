@@ -2,6 +2,7 @@ package eth
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
@@ -145,7 +146,7 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":     msg.ReceivedFrom.String(),
-			"MsgID":      msg.ID,
+			"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 			"MsgSize":    len(msg.Data),
 			"Topic":      msg.GetTopic(),
 			"Seq":        msg.GetSeqno(),
