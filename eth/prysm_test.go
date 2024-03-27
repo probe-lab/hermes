@@ -14,7 +14,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/rpc/prysm/node"
+	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -31,48 +31,29 @@ func TestPrysmClient_AddTrustedPeer(t *testing.T) {
 	pid, err := peer.Decode("16Uiu2HAmBBTgCRezbBY8LbdfDN5PXYi3C1hwdoXJ9DZAorsWs4NR")
 	require.NoError(t, err)
 
-	addrInfo := peer.AddrInfo{
-		ID:    pid,
-		Addrs: []ma.Multiaddr{maddr},
-	}
-
 	tests := []struct {
 		name           string
 		respStatusCode int
 		respBody       string
-		payload        peer.AddrInfo
 		expectErr      bool
 	}{
 		{
 			name:           "success",
 			respStatusCode: http.StatusOK,
 			respBody:       "",
-			payload:        addrInfo,
 			expectErr:      false,
 		},
 		{
 			name:           "error_json_unmarshal",
 			respStatusCode: http.StatusBadRequest,
 			respBody:       "{invalid_json}",
-			payload:        addrInfo,
 			expectErr:      true,
 		},
 		{
 			name:           "invalid_response_status_code",
 			respStatusCode: http.StatusBadRequest,
 			respBody:       `{"message": "internal error"}`,
-			payload:        addrInfo,
 			expectErr:      true,
-		},
-		{
-			name:      "no_addrs",
-			payload:   peer.AddrInfo{ID: addrInfo.ID},
-			expectErr: true,
-		},
-		{
-			name:      "too_many_addrs",
-			payload:   peer.AddrInfo{ID: addrInfo.ID, Addrs: []ma.Multiaddr{maddr, maddr}},
-			expectErr: true,
 		},
 	}
 
@@ -87,14 +68,11 @@ func TestPrysmClient_AddTrustedPeer(t *testing.T) {
 				require.NoError(t, err)
 				defer assert.NoError(t, r.Body.Close())
 
-				reqData := &node.AddrRequest{}
+				reqData := &structs.AddrRequest{}
 				err = json.Unmarshal(data, reqData)
 				require.NoError(t, err)
 
-				maddrs, err := peer.AddrInfoToP2pAddrs(&tt.payload)
-				require.NoError(t, err)
-
-				assert.Equal(t, maddrs[0].String(), reqData.Addr)
+				assert.Equal(t, maddr.String()+"/p2p/"+pid.String(), reqData.Addr)
 
 				w.WriteHeader(tt.respStatusCode)
 				_, _ = fmt.Fprintln(w, tt.respBody)
@@ -111,7 +89,7 @@ func TestPrysmClient_AddTrustedPeer(t *testing.T) {
 			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second)
 			require.NoError(t, err)
 
-			err = p.AddTrustedPeer(context.Background(), tt.payload)
+			err = p.AddTrustedPeer(context.Background(), pid, maddr)
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
