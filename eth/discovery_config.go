@@ -22,8 +22,6 @@ type DiscoveryConfig struct {
 	TCPPort       int
 	Tracer        trace.Tracer
 	Meter         metric.Meter
-
-	forkDigest []byte
 }
 
 // enrEth2Entry generates an Ethereum 2.0 entry for the Ethereum Node Record

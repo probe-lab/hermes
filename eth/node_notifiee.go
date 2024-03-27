@@ -113,7 +113,5 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 		// the handshake failed, we disconnect and remove it from our pool
 		ps.RemovePeer(pid)
 		_ = n.host.Network().ClosePeer(pid)
-	} else {
-		// handshake succeeded, add this peer to our pool
 	}
 }

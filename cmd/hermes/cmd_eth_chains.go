@@ -33,7 +33,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("get config for %s: %w", chain, err)
 		}
-		slog.Info(fmt.Sprintf("%s", chain))
+		slog.Info(chain)
 
 		forkVersions := [][]byte{
 			beaConfig.GenesisForkVersion,

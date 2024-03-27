@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"github.com/prysmaticlabs/prysm/v5/network/forks"
 	"github.com/urfave/cli/v2"
@@ -227,20 +226,6 @@ func validateKeyFlag(c *cli.Context, s string) error {
 
 	if _, err := hex.DecodeString(s); err != nil {
 		return fmt.Errorf("private key not in hex format: %w", err)
-	}
-
-	return nil
-}
-
-// validateBeaconAddrInfoFlag verifies that if a addrinfo multi address was
-// given, that it has the correct format
-func validateBeaconAddrInfoFlag(c *cli.Context, s string) error {
-	if s == "" {
-		return nil
-	}
-
-	if _, err := peer.AddrInfoFromString(s); err != nil {
-		return fmt.Errorf("invalid delegate addrinfo: %w", err)
 	}
 
 	return nil

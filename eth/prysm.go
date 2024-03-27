@@ -240,7 +240,7 @@ func (p *PrysmClient) ChainHead(ctx context.Context) (chainHead *eth.ChainHead, 
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	return p.beaconClient.GetChainHead(ctx, &emptypb.Empty{})
+	return p.beaconClient.GetChainHead(ctx, &emptypb.Empty{}) //lint:ignore SA1019 I don't see an alternative
 }
 
 func (p *PrysmClient) Identity(ctx context.Context) (addrInfo *peer.AddrInfo, err error) {

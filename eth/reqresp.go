@@ -23,7 +23,6 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -59,7 +58,7 @@ type ReqResp struct {
 	metaData   *pb.MetaDataV1
 
 	statusMu  sync.RWMutex
-	status    *eth.Status
+	status    *pb.Status
 	statusLim *rate.Limiter
 
 	// metrics
@@ -124,7 +123,7 @@ func (r *ReqResp) SetMetaData(seq uint64) {
 	}
 }
 
-func (r *ReqResp) SetStatus(status *eth.Status) {
+func (r *ReqResp) SetStatus(status *pb.Status) {
 	r.statusMu.Lock()
 	defer r.statusMu.Unlock()
 
@@ -153,7 +152,7 @@ func (r *ReqResp) SetStatus(status *eth.Status) {
 	r.status = status
 }
 
-func (r *ReqResp) cpyStatus() *eth.Status {
+func (r *ReqResp) cpyStatus() *pb.Status {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
 
@@ -161,7 +160,7 @@ func (r *ReqResp) cpyStatus() *eth.Status {
 		return nil
 	}
 
-	return &eth.Status{
+	return &pb.Status{
 		ForkDigest:     bytes.Clone(r.status.ForkDigest),
 		FinalizedRoot:  bytes.Clone(r.status.FinalizedRoot),
 		FinalizedEpoch: r.status.FinalizedEpoch,
@@ -331,7 +330,7 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 }
 
 func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
-	statusTraceData := func(status *eth.Status) map[string]any {
+	statusTraceData := func(status *pb.Status) map[string]any {
 		return map[string]any{
 			"ForkDigest":     hex.EncodeToString(status.ForkDigest),
 			"HeadRoot":       hex.EncodeToString(status.HeadRoot),
@@ -345,7 +344,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 	// its own status back and update our latest known status.
 	if upstream.Conn().RemotePeer() == r.delegate {
 
-		resp := &eth.Status{}
+		resp := &pb.Status{}
 		if err := r.readRequest(ctx, upstream, resp); err != nil {
 			return nil, fmt.Errorf("read status data from delegate: %w", err)
 		}
@@ -367,7 +366,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 	}
 
 	// first, read the status from the remote peer
-	req := &eth.Status{}
+	req := &pb.Status{}
 	if err := r.readRequest(ctx, upstream, req); err != nil {
 		return nil, fmt.Errorf("read status data from delegate: %w", err)
 	}
@@ -547,7 +546,7 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 	return nil
 }
 
-func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, err error) {
+func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, err error) {
 	defer func() {
 		reqData := map[string]any{
 			"PeerID": pid.String(),
@@ -601,7 +600,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *eth.Status, 
 	}
 
 	// read and decode status response
-	resp := &eth.Status{}
+	resp := &pb.Status{}
 	if err := r.readResponse(ctx, stream, resp); err != nil {
 		return nil, fmt.Errorf("read status response: %w", err)
 	}
@@ -709,7 +708,7 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
 
 	// read and decode status response
-	resp = &eth.MetaDataV1{}
+	resp = &pb.MetaDataV1{}
 	if err := r.readResponse(ctx, stream, resp); err != nil {
 		return resp, fmt.Errorf("read ping response: %w", err)
 	}

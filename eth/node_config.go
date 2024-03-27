@@ -20,7 +20,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
@@ -243,7 +242,7 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		return nil, fmt.Errorf("construct libp2p listen maddr: %w", err)
 	}
 
-	str, err := rcmgrObs.NewStatsTraceReporter()
+	str, err := rcmgr.NewStatsTraceReporter()
 	if err != nil {
 		return nil, err
 	}

@@ -191,7 +191,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 			continue
 		}
 
-		if bytes.Compare(forkEntry.CurrentForkDigest, digest[:]) != 0 {
+		if !bytes.Equal(forkEntry.CurrentForkDigest, digest[:]) {
 			// irrelevant network
 			continue
 		}
@@ -225,7 +225,7 @@ func NewDiscoveredPeer(node *enode.Node) (*DiscoveredPeer, error) {
 		return nil, fmt.Errorf("no public key")
 	}
 
-	pubBytes := elliptic.Marshal(secp256k1.S256(), pubKey.X, pubKey.Y)
+	pubBytes := elliptic.Marshal(secp256k1.S256(), pubKey.X, pubKey.Y) //lint:ignore SA1019 couldn't figure out the alternative
 	secpKey, err := crypto.UnmarshalSecp256k1PublicKey(pubBytes)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal secp256k1 public key: %w", err)
