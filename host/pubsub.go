@@ -36,7 +36,7 @@ func (t *TopicSubscription) Serve(ctx context.Context) error {
 				return nil
 			}
 
-			return fmt.Errorf("failed to read next gossip message for topic %s: %w", t.Sub, err)
+			return fmt.Errorf("failed to read next gossip message for topic %s: %w", t.Sub.Topic(), err)
 		}
 
 		// check if it's our own event
@@ -45,7 +45,7 @@ func (t *TopicSubscription) Serve(ctx context.Context) error {
 		}
 
 		if err := t.Handler(ctx, msg); err != nil {
-			return fmt.Errorf("handle gossip message for topic %s: %w", t.Sub, err)
+			return fmt.Errorf("handle gossip message for topic %s: %w", t.Sub.Topic(), err)
 		}
 	}
 }
