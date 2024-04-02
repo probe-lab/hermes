@@ -15,7 +15,7 @@ import (
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
-	"github.com/libp2p/go-libp2p-pubsub"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -60,8 +60,9 @@ type NodeConfig struct {
 	Devp2pPort int
 
 	// The address information of the local libp2p host
-	Libp2pHost string
-	Libp2pPort int
+	Libp2pHost                  string
+	Libp2pPort                  int
+	Libp2pPeerscoreSnapshopFreq time.Duration
 
 	// The address information where the Beacon API or Prysm's custom API is accessible at
 	PrysmHost     string
@@ -132,6 +133,10 @@ func (n *NodeConfig) Validate() error {
 
 	if n.Libp2pPort < 0 {
 		return fmt.Errorf("libp2p port must be greater than or equal to 0, got %d", n.Devp2pPort)
+	}
+
+	if n.Libp2pPeerscoreSnapshopFreq < 0 {
+		return fmt.Errorf("libp2p peerscore snapshop fequency must be greater than or equal to 0, got %d", n.Libp2pPeerscoreSnapshopFreq)
 	}
 
 	if n.PrysmPortHTTP < 0 {

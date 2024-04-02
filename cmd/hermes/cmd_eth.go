@@ -17,33 +17,35 @@ import (
 )
 
 var ethConfig = &struct {
-	PrivateKeyStr   string
-	Chain           string
-	Attnets         string
-	Devp2pHost      string
-	Devp2pPort      int
-	Libp2pHost      string
-	Libp2pPort      int
-	PrysmHost       string
-	PrysmPortHTTP   int
-	PrysmPortGRPC   int
-	DialConcurrency int
-	DialTimeout     time.Duration
-	MaxPeers        int
+	PrivateKeyStr               string
+	Chain                       string
+	Attnets                     string
+	Devp2pHost                  string
+	Devp2pPort                  int
+	Libp2pHost                  string
+	Libp2pPort                  int
+	Libp2pPeerscoreSnapshopFreq int // seconds
+	PrysmHost                   string
+	PrysmPortHTTP               int
+	PrysmPortGRPC               int
+	DialConcurrency             int
+	DialTimeout                 time.Duration
+	MaxPeers                    int
 }{
-	PrivateKeyStr:   "", // unset means it'll be generated
-	Chain:           params.MainnetName,
-	Attnets:         "ffffffffffffffff", // subscribed to all attnets.
-	Devp2pHost:      "127.0.0.1",
-	Devp2pPort:      0,
-	Libp2pHost:      "127.0.0.1",
-	Libp2pPort:      0,
-	PrysmHost:       "",
-	PrysmPortHTTP:   3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	PrysmPortGRPC:   4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	DialConcurrency: 16,
-	DialTimeout:     5 * time.Second,
-	MaxPeers:        30, // arbitrary
+	PrivateKeyStr:               "", // unset means it'll be generated
+	Chain:                       params.MainnetName,
+	Attnets:                     "ffffffffffffffff", // subscribed to all attnets.
+	Devp2pHost:                  "127.0.0.1",
+	Devp2pPort:                  0,
+	Libp2pHost:                  "127.0.0.1",
+	Libp2pPort:                  0,
+	Libp2pPeerscoreSnapshopFreq: 5,
+	PrysmHost:                   "",
+	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	DialConcurrency:             16,
+	DialTimeout:                 5 * time.Second,
+	MaxPeers:                    30, // arbitrary
 }
 
 var cmdEth = &cli.Command{
@@ -127,6 +129,14 @@ var cmdEthFlags = []cli.Flag{
 		Destination: &ethConfig.Libp2pPort,
 		DefaultText: "random",
 	},
+	&cli.IntFlag{
+		Name:        "libp2p.peerscore.snapshot.frequency",
+		EnvVars:     []string{"HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
+		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
+		Value:       ethConfig.Libp2pPeerscoreSnapshopFreq,
+		Destination: &ethConfig.Libp2pPeerscoreSnapshopFreq,
+		DefaultText: "random",
+	},
 	&cli.StringFlag{
 		Name:        "prysm.host",
 		EnvVars:     []string{"HERMES_ETH_PRYSM_HOST"},
@@ -184,24 +194,25 @@ func cmdEthAction(c *cli.Context) error {
 	params.OverrideBeaconNetworkConfig(netConfig)
 
 	cfg := &eth.NodeConfig{
-		GenesisConfig:   genConfig,
-		NetworkConfig:   netConfig,
-		BeaconConfig:    beaConfig,
-		ForkDigest:      forkDigest,
-		PrivateKeyStr:   ethConfig.PrivateKeyStr,
-		DialTimeout:     ethConfig.DialTimeout,
-		Devp2pHost:      ethConfig.Devp2pHost,
-		Devp2pPort:      ethConfig.Devp2pPort,
-		Libp2pHost:      ethConfig.Libp2pHost,
-		Libp2pPort:      ethConfig.Libp2pPort,
-		PrysmHost:       ethConfig.PrysmHost,
-		PrysmPortHTTP:   ethConfig.PrysmPortHTTP,
-		PrysmPortGRPC:   ethConfig.PrysmPortGRPC,
-		AWSConfig:       rootConfig.awsConfig,
-		KinesisRegion:   rootConfig.KinesisRegion,
-		KinesisStream:   rootConfig.KinesisStream,
-		MaxPeers:        ethConfig.MaxPeers,
-		DialConcurrency: ethConfig.DialConcurrency,
+		GenesisConfig:               genConfig,
+		NetworkConfig:               netConfig,
+		BeaconConfig:                beaConfig,
+		ForkDigest:                  forkDigest,
+		PrivateKeyStr:               ethConfig.PrivateKeyStr,
+		DialTimeout:                 ethConfig.DialTimeout,
+		Devp2pHost:                  ethConfig.Devp2pHost,
+		Devp2pPort:                  ethConfig.Devp2pPort,
+		Libp2pHost:                  ethConfig.Libp2pHost,
+		Libp2pPort:                  ethConfig.Libp2pPort,
+		Libp2pPeerscoreSnapshopFreq: time.Duration(ethConfig.Libp2pPeerscoreSnapshopFreq) * time.Second,
+		PrysmHost:                   ethConfig.PrysmHost,
+		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
+		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,
+		AWSConfig:                   rootConfig.awsConfig,
+		KinesisRegion:               rootConfig.KinesisRegion,
+		KinesisStream:               rootConfig.KinesisStream,
+		MaxPeers:                    ethConfig.MaxPeers,
+		DialConcurrency:             ethConfig.DialConcurrency,
 		// PubSub config
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
 		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10
