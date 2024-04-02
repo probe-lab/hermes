@@ -3,15 +3,16 @@ package host
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-pubsub"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -26,7 +27,8 @@ import (
 )
 
 type Config struct {
-	DataStream DataStream
+	DataStream            DataStream
+	PeerscoreSnapshopFreq time.Duration
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -38,6 +40,7 @@ type Host struct {
 	cfg   *Config
 	ps    *pubsub.PubSub
 	avlru *lru.Cache[string, string]
+	sk    *ScoreKeeper
 
 	meterSubmittedTraces metric.Int64Counter
 }
@@ -57,6 +60,7 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 		Host:  h,
 		cfg:   cfg,
 		avlru: avlru,
+		sk:    newScoreKeeper(cfg.PeerscoreSnapshopFreq),
 	}
 
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
@@ -121,7 +125,12 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		return nil, fmt.Errorf("new gossip sub meter tracer: %w", err)
 	}
 
-	opts = append(opts, pubsub.WithRawTracer(h), pubsub.WithRawTracer(mt), pubsub.WithEventTracer(h))
+	opts = append(
+		opts,
+		pubsub.WithRawTracer(h),
+		pubsub.WithRawTracer(mt),
+		pubsub.WithEventTracer(h),
+		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq))
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new gossip sub: %w", err)
@@ -294,5 +303,36 @@ func MaddrFrom(ip string, port uint) (ma.Multiaddr, error) {
 		return ma.NewMultiaddr(fmt.Sprintf("/ip6/%s/tcp/%d", ip, port))
 	} else {
 		return nil, fmt.Errorf("invalid IP address: %s", ip)
+	}
+}
+
+func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
+	// get the event time
+	t := time.Now()
+
+	slog.Debug("updating local peerscore - len:", tele.LogAttrPeerScoresLen(scores))
+
+	// update local copy of the scores
+	h.sk.Update(scores)
+
+	// create and send a dedicated event per peer to the go-kinesis DataStream
+	// TODO: first guess -> this should be easier for the data-analysis later on
+	for pid, score := range scores {
+		// get the traceEvent from the raw score mapping
+		scoreEvent := composePeerScoreEventFromRawMap(pid, score)
+		jsonPayload, err := json.Marshal(scoreEvent)
+		if err != nil {
+			slog.Error("non jsoneable peerscore", slog.String("err", err.Error()))
+		}
+
+		trace := &TraceEvent{
+			Type:      PeerScoreEventType,
+			PeerID:    h.ID(),
+			Timestamp: t,
+			Payload:   jsonPayload,
+		}
+
+		traceCtx := context.Background()
+		h.cfg.DataStream.PutRecord(traceCtx, trace)
 	}
 }
