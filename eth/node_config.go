@@ -62,7 +62,7 @@ type NodeConfig struct {
 	// The address information of the local libp2p host
 	Libp2pHost                  string
 	Libp2pPort                  int
-	Libp2pPeerscoreSnapshopFreq time.Duration
+	Libp2pPeerscoreSnapshotFreq time.Duration
 
 	// The address information where the Beacon API or Prysm's custom API is accessible at
 	PrysmHost     string
@@ -135,8 +135,8 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("libp2p port must be greater than or equal to 0, got %d", n.Devp2pPort)
 	}
 
-	if n.Libp2pPeerscoreSnapshopFreq < 0 {
-		return fmt.Errorf("libp2p peerscore snapshop fequency must be greater than or equal to 0, got %d", n.Libp2pPeerscoreSnapshopFreq)
+	if n.Libp2pPeerscoreSnapshotFreq < 0 {
+		return fmt.Errorf("libp2p peerscore snapshop fequency must be positive")
 	}
 
 	if n.PrysmPortHTTP < 0 {

@@ -9,24 +9,24 @@ import (
 )
 
 type TopicScore struct {
-	Topic                    string        `json:"topic"`
-	TimeInMesh               time.Duration `json:"timeInMesh"`
-	FirstMessageDeliveries   float64       `json:"firstMessageDeliveries"`
-	MeshMessageDeliveries    float64       `json:"meshMessageDeliveries"`
-	InvalidMessageDeliveries float64       `json:"invalidMessageDeliveries"`
+	Topic                    string
+	TimeInMesh               time.Duration
+	FirstMessageDeliveries   float64
+	MeshMessageDeliveries    float64
+	InvalidMessageDeliveries float64
 }
 
 type TraceEventPeerScore struct {
-	PeerID             string       `json:"peerID"`
-	Score              float64      `json:"score"`
-	AppSpecificScore   float64      `json:"appSpecificScore"`
-	IPColocationFactor float64      `json:"ipColocationFactor"`
-	BehaviourPenalty   float64      `json:"behaviourPenalty"`
-	Topics             []TopicScore `json:"topics"`
+	PeerID             string
+	Score              float64
+	AppSpecificScore   float64
+	IPColocationFactor float64
+	BehaviourPenalty   float64
+	Topics             []TopicScore
 }
 
 func composePeerScoreEventFromRawMap(pid peer.ID, score *pubsub.PeerScoreSnapshot) TraceEventPeerScore {
-	var topics []TopicScore
+	topics := make([]TopicScore, len(score.Topics))
 	for topic, snapshot := range score.Topics {
 		topics = append(topics, TopicScore{
 			Topic:                    topic,

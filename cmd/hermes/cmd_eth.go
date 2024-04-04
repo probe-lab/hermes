@@ -24,7 +24,7 @@ var ethConfig = &struct {
 	Devp2pPort                  int
 	Libp2pHost                  string
 	Libp2pPort                  int
-	Libp2pPeerscoreSnapshopFreq int // seconds
+	Libp2pPeerscoreSnapshotFreq time.Duration
 	PrysmHost                   string
 	PrysmPortHTTP               int
 	PrysmPortGRPC               int
@@ -39,7 +39,7 @@ var ethConfig = &struct {
 	Devp2pPort:                  0,
 	Libp2pHost:                  "127.0.0.1",
 	Libp2pPort:                  0,
-	Libp2pPeerscoreSnapshopFreq: 5,
+	Libp2pPeerscoreSnapshotFreq: 5 * time.Second,
 	PrysmHost:                   "",
 	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
 	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
@@ -129,12 +129,12 @@ var cmdEthFlags = []cli.Flag{
 		Destination: &ethConfig.Libp2pPort,
 		DefaultText: "random",
 	},
-	&cli.IntFlag{
+	&cli.DurationFlag{
 		Name:        "libp2p.peerscore.snapshot.frequency",
 		EnvVars:     []string{"HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
 		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
-		Value:       ethConfig.Libp2pPeerscoreSnapshopFreq,
-		Destination: &ethConfig.Libp2pPeerscoreSnapshopFreq,
+		Value:       ethConfig.Libp2pPeerscoreSnapshotFreq,
+		Destination: &ethConfig.Libp2pPeerscoreSnapshotFreq,
 		DefaultText: "random",
 	},
 	&cli.StringFlag{
@@ -204,7 +204,7 @@ func cmdEthAction(c *cli.Context) error {
 		Devp2pPort:                  ethConfig.Devp2pPort,
 		Libp2pHost:                  ethConfig.Libp2pHost,
 		Libp2pPort:                  ethConfig.Libp2pPort,
-		Libp2pPeerscoreSnapshopFreq: time.Duration(ethConfig.Libp2pPeerscoreSnapshopFreq) * time.Second,
+		Libp2pPeerscoreSnapshotFreq: ethConfig.Libp2pPeerscoreSnapshotFreq,
 		PrysmHost:                   ethConfig.PrysmHost,
 		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
 		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,

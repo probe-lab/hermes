@@ -310,7 +310,7 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 	// get the event time
 	t := time.Now()
 
-	slog.Debug("updating local peerscore - len:", tele.LogAttrPeerScoresLen(scores))
+	slog.Debug("updating local peerscore:", tele.LogAttrPeerScoresLen(scores))
 
 	// update local copy of the scores
 	h.sk.Update(scores)
@@ -322,7 +322,7 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 		scoreEvent := composePeerScoreEventFromRawMap(pid, score)
 		jsonPayload, err := json.Marshal(scoreEvent)
 		if err != nil {
-			slog.Error("non jsoneable peerscore", slog.String("err", err.Error()))
+			slog.Error("non jsoneable peerscore", tele.LogAttrError(err))
 		}
 
 		trace := &TraceEvent{
@@ -332,7 +332,8 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 			Payload:   jsonPayload,
 		}
 
-		traceCtx := context.Background()
+		traceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		h.cfg.DataStream.PutRecord(traceCtx, trace)
 	}
 }
