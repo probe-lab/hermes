@@ -28,7 +28,7 @@ import (
 
 type Config struct {
 	DataStream            DataStream
-	PeerscoreSnapshopFreq time.Duration
+	PeerscoreSnapshotFreq time.Duration
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -60,7 +60,7 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 		Host:  h,
 		cfg:   cfg,
 		avlru: avlru,
-		sk:    newScoreKeeper(cfg.PeerscoreSnapshopFreq),
+		sk:    newScoreKeeper(cfg.PeerscoreSnapshotFreq),
 	}
 
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
@@ -323,6 +323,7 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 		jsonPayload, err := json.Marshal(scoreEvent)
 		if err != nil {
 			slog.Error("non jsoneable peerscore", tele.LogAttrError(err))
+			continue // do not trace events without payload :)
 		}
 
 		trace := &TraceEvent{

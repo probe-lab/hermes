@@ -110,9 +110,10 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	hostCfg := &host.Config{
-		DataStream: ds,
-		Tracer:     cfg.Tracer,
-		Meter:      cfg.Meter,
+		DataStream:            ds,
+		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
+		Tracer:                cfg.Tracer,
+		Meter:                 cfg.Meter,
 	}
 
 	// initialize libp2p host
