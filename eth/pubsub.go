@@ -20,7 +20,7 @@ import (
 )
 
 type PubSubConfig struct {
-	ForkDigest     [4]byte
+	ForkVersion    ForkVersion
 	Encoder        encoder.NetworkEncoding
 	SecondsPerSlot time.Duration
 	GenesisTime    time.Time

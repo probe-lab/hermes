@@ -23,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -42,7 +43,8 @@ type NodeConfig struct {
 	BeaconConfig *params.BeaconChainConfig
 
 	// The fork digest of the network Hermes participates in
-	ForkDigest [4]byte
+	ForkDigest  [4]byte
+	ForkVersion ForkVersion
 
 	// The private key for the libp2p host and local enode in hex format
 	PrivateKeyStr string
@@ -63,6 +65,10 @@ type NodeConfig struct {
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+
+	// Message encoders
+	GossipSubMessageEncoder encoder.NetworkEncoding
+	RPCEncoder              encoder.NetworkEncoding
 
 	// The address information where the Beacon API or Prysm's custom API is accessible at
 	PrysmHost     string
@@ -294,6 +300,9 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 }
 
 const (
+	// Chain consta699576nts
+	slotsPerEpoch  = 32
+	secondsPerSlot = 12
 
 	// decayToZero specifies the terminal value that we will use when decaying
 	// a value.

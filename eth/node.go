@@ -11,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/attribute"
@@ -73,6 +72,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
+
+	// configure the global variables for the network ForkVersions
+	initNetworkForkVersions(cfg.BeaconConfig)
 
 	var ds host.DataStream
 	if cfg.AWSConfig != nil {
@@ -151,7 +153,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	// initialize the request-response protocol handlers
 	reqRespCfg := &ReqRespConfig{
 		ForkDigest:   cfg.ForkDigest,
-		Encoder:      encoder.SszNetworkEncoder{},
+		Encoder:      cfg.RPCEncoder,
 		DataStream:   ds,
 		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
@@ -166,8 +168,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
-		ForkDigest:     cfg.ForkDigest,
-		Encoder:        encoder.SszNetworkEncoder{},
+		Topics:         cfg.getDesiredFullTopics(cfg.GossipSubMessageEncoder),
+		ForkVersion:    cfg.ForkVersion,
+		Encoder:        cfg.GossipSubMessageEncoder,
 		SecondsPerSlot: time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second,
 		GenesisTime:    cfg.GenesisConfig.GenesisTime,
 		DataStream:     ds,

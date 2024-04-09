@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
@@ -183,7 +185,18 @@ func cmdEthAction(c *cli.Context) error {
 	genesisRoot := genConfig.GenesisValidatorRoot
 	genesisTime := genConfig.GenesisTime
 
-	forkDigest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
+	// Temp
+	currentSlot := slots.Since(genesisTime)
+	currentEpoch := slots.ToEpoch(currentSlot)
+
+	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, beaConfig)
+	if err != nil {
+		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
+	}
+	// END Temp
+
+	forkDigest, err := signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
+	fmt.Println(ethConfig.Chain, hex.EncodeToString(forkDigest[:]))
 	if err != nil {
 		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
 	}
@@ -198,6 +211,7 @@ func cmdEthAction(c *cli.Context) error {
 		NetworkConfig:               netConfig,
 		BeaconConfig:                beaConfig,
 		ForkDigest:                  forkDigest,
+		ForkVersion:                 currentForkVersion,
 		PrivateKeyStr:               ethConfig.PrivateKeyStr,
 		DialTimeout:                 ethConfig.DialTimeout,
 		Devp2pHost:                  ethConfig.Devp2pHost,
@@ -205,6 +219,8 @@ func cmdEthAction(c *cli.Context) error {
 		Libp2pHost:                  ethConfig.Libp2pHost,
 		Libp2pPort:                  ethConfig.Libp2pPort,
 		Libp2pPeerscoreSnapshotFreq: ethConfig.Libp2pPeerscoreSnapshotFreq,
+		GossipSubMessageEncoder:     encoder.SszNetworkEncoder{},
+		RPCEncoder:                  encoder.SszNetworkEncoder{},
 		PrysmHost:                   ethConfig.PrysmHost,
 		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
 		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,
