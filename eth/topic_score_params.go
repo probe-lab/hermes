@@ -29,7 +29,7 @@ const (
 	maxInMeshScore        = 10
 	maxFirstDeliveryScore = 40
 
-	dampeningFactor = 90
+	// dampeningFactor = 90
 )
 
 var (
@@ -42,7 +42,7 @@ func topicToScoreParamsMapper(topic string) *pubsub.TopicScoreParams {
 		return defaultBlockTopicParams()
 		// TODO: extend this to more topics
 	default:
-		slog.Warn("unrecognized gossip-topic to apply peerscores", topic)
+		slog.Warn("unrecognized gossip-topic to apply peerscores", slog.Attr{Key: "topic", Value: slog.StringValue(topic)})
 		return defaultBlockTopicParams()
 	}
 }

@@ -401,7 +401,7 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 	for idx, topicBase := range desiredTopics {
 		topicFormat, err := topicFormatFromBase(topicBase)
 		if err != nil {
-			slog.Warn("invalid gossipsub topic", topicBase)
+			slog.Warn("invalid gossipsub topic", slog.Attr{Key: "topic", Value: slog.StringValue(topicBase)})
 			continue
 		}
 		fullTopics[idx] = n.composeEthTopic(topicFormat, encoder)
