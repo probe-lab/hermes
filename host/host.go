@@ -3,7 +3,6 @@ package host
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -319,18 +318,12 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 	// TODO: first guess -> this should be easier for the data-analysis later on
 	for pid, score := range scores {
 		// get the traceEvent from the raw score mapping
-		scoreEvent := composePeerScoreEventFromRawMap(pid, score)
-		jsonPayload, err := json.Marshal(scoreEvent)
-		if err != nil {
-			slog.Error("non jsoneable peerscore", tele.LogAttrError(err))
-			continue // do not trace events without payload :)
-		}
-
+		scoreData := composePeerScoreEventFromRawMap(pid, score)
 		trace := &TraceEvent{
 			Type:      PeerScoreEventType,
 			PeerID:    h.ID(),
 			Timestamp: t,
-			Payload:   jsonPayload,
+			Payload:   scoreData,
 		}
 
 		traceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

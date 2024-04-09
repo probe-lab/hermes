@@ -25,24 +25,25 @@ type TraceEventPeerScore struct {
 	Topics             []TopicScore
 }
 
-func composePeerScoreEventFromRawMap(pid peer.ID, score *pubsub.PeerScoreSnapshot) TraceEventPeerScore {
-	topics := make([]TopicScore, len(score.Topics))
+func composePeerScoreEventFromRawMap(pid peer.ID, score *pubsub.PeerScoreSnapshot) map[string]any {
+	topics := make([]any, len(score.Topics))
 	for topic, snapshot := range score.Topics {
-		topics = append(topics, TopicScore{
-			Topic:                    topic,
-			TimeInMesh:               snapshot.TimeInMesh,
-			FirstMessageDeliveries:   snapshot.FirstMessageDeliveries,
-			MeshMessageDeliveries:    snapshot.MeshMessageDeliveries,
-			InvalidMessageDeliveries: snapshot.InvalidMessageDeliveries,
-		})
+		topicScore := map[string]any{
+			"Topic":                    topic,
+			"TimeInMesh":               snapshot.TimeInMesh,
+			"FirstMessageDeliveries":   snapshot.FirstMessageDeliveries,
+			"MeshMessageDeliveries":    snapshot.MeshMessageDeliveries,
+			"InvalidMessageDeliveries": snapshot.InvalidMessageDeliveries,
+		}
+		topics = append(topics, topicScore)
 	}
-	return TraceEventPeerScore{
-		PeerID:             pid.String(),
-		Score:              score.Score,
-		AppSpecificScore:   score.AppSpecificScore,
-		IPColocationFactor: score.IPColocationFactor,
-		BehaviourPenalty:   score.BehaviourPenalty,
-		Topics:             topics,
+	return map[string]any{
+		"PeerID":             pid.String(),
+		"Score":              score.Score,
+		"AppSpecificScore":   score.AppSpecificScore,
+		"IPColocationFactor": score.IPColocationFactor,
+		"BehaviourPenalty":   score.BehaviourPenalty,
+		"Topics":             topics,
 	}
 }
 
