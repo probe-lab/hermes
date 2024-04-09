@@ -336,8 +336,9 @@ func (n *NodeConfig) peerScoringParams() (*pubsub.PeerScoreParams, *pubsub.PeerS
 		AcceptPXThreshold:           100,
 		OpportunisticGraftThreshold: 5,
 	}
+	topicScoreParams := n.getDefaultTopicScoreParams(n.GossipSubMessageEncoder)
 	scoreParams := &pubsub.PeerScoreParams{
-		Topics:        make(map[string]*pubsub.TopicScoreParams),
+		Topics:        topicScoreParams,
 		TopicScoreCap: 32.72,
 		AppSpecificScore: func(p peer.ID) float64 {
 			return 0
@@ -372,4 +373,49 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams.HistoryLength = gossipSubMcacheLen
 	gParams.HistoryGossip = gossipSubMcacheGossip
 	return gParams
+}
+
+func desiredPubSubBaseTopics() []string {
+	return []string{
+		p2p.GossipBlockMessage,
+	}
+}
+
+func topicFormatFromBase(topicBase string) (string, error) {
+	switch topicBase {
+	case p2p.GossipBlockMessage:
+		return p2p.BlockSubnetTopicFormat, nil
+	default:
+		return "", fmt.Errorf("unrecognized gossip topic base: %s", topicBase)
+	}
+}
+
+func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding) string {
+	return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
+}
+
+func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
+	desiredTopics := desiredPubSubBaseTopics()
+	fullTopics := make([]string, len(desiredTopics))
+
+	for idx, topicBase := range desiredTopics {
+		topicFormat, err := topicFormatFromBase(topicBase)
+		if err != nil {
+			slog.Warn("invalid gossipsub topic", topicBase)
+			continue
+		}
+		fullTopics[idx] = n.composeEthTopic(topicFormat, encoder)
+	}
+
+	return fullTopics
+}
+
+func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding) map[string]*pubsub.TopicScoreParams {
+	desiredTopics := n.getDesiredFullTopics(encoder)
+	topicScores := make(map[string]*pubsub.TopicScoreParams, len(desiredTopics))
+	for _, topic := range desiredTopics {
+		params := topicToScoreParamsMapper(topic)
+		topicScores[topic] = params
+	}
+	return topicScores
 }
