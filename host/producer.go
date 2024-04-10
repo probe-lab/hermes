@@ -2,24 +2,18 @@ package host
 
 import (
 	"context"
-
-	gk "github.com/dennis-tra/go-kinesis"
 )
 
 type DataStream interface {
 	Start(ctx context.Context) error
-	PutRecord(ctx context.Context, record gk.Record) error
+	Stop(ctx context.Context) error
+	PutEvent(ctx context.Context, event *TraceEvent) error
+	Type() DataStreamType
 }
 
-type NoopDataStream struct{}
+type DataStreamType int
 
-var _ DataStream = (*NoopDataStream)(nil)
-
-func (n NoopDataStream) Start(ctx context.Context) error {
-	<-ctx.Done()
-	return nil
-}
-
-func (n NoopDataStream) PutRecord(ctx context.Context, record gk.Record) error {
-	return ctx.Err()
-}
+const (
+	DataStreamTypeKinesis DataStreamType = iota
+	DataStreamTypeCallback
+)

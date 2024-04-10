@@ -274,7 +274,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 			Payload:   commonData,
 		}
 
-		if err := r.cfg.DataStream.PutRecord(ctx, traceEvt); err != nil {
+		if err := r.cfg.DataStream.PutEvent(ctx, traceEvt); err != nil {
 			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 
@@ -571,7 +571,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 		}
 
 		traceCtx := context.Background()
-		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+		if err := r.cfg.DataStream.PutEvent(traceCtx, traceEvt); err != nil {
 			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 
@@ -627,7 +627,7 @@ func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 			},
 		}
 		traceCtx := context.Background()
-		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+		if err := r.cfg.DataStream.PutEvent(traceCtx, traceEvt); err != nil {
 			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 
@@ -689,7 +689,7 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 			Payload:   reqData,
 		}
 		traceCtx := context.Background()
-		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+		if err := r.cfg.DataStream.PutEvent(traceCtx, traceEvt); err != nil {
 			slog.Warn("failed to put record", tele.LogAttrError(err))
 		}
 

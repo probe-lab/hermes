@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-pubsub"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -94,7 +94,7 @@ func (h *Host) Serve(ctx context.Context) error {
 			},
 		}
 
-		if err := h.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		if err := h.cfg.DataStream.PutEvent(ctx, evt); err != nil {
 			slog.Warn("Failed to put event payload", tele.LogAttrError(err))
 			return
 		}
@@ -275,7 +275,7 @@ func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 			},
 		}
 
-		if err := h.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		if err := h.cfg.DataStream.PutEvent(ctx, evt); err != nil {
 			slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
 		}
 
