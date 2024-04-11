@@ -141,7 +141,7 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 	slotStart := p.cfg.GenesisTime.Add(time.Duration(blockSlot) * p.cfg.SecondsPerSlot)
 
 	evt := &host.TraceEvent{
-		Type:      "HANDLE_MESSAGE",
+		Type:      host.EventTypeHandleAggregateAndProof,
 		PeerID:    p.host.ID(),
 		Timestamp: now,
 		Payload: map[string]any{

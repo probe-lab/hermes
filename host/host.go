@@ -72,7 +72,7 @@ func (h *Host) Serve(ctx context.Context) error {
 		return fmt.Errorf("host started without gossip sub initialization: %w", suture.ErrTerminateSupervisorTree)
 	}
 
-	eventHandler := func(n network.Network, c network.Conn, evtType string) {
+	eventHandler := func(n network.Network, c network.Conn, evtType EventType) {
 		evt := &TraceEvent{
 			Type:      evtType,
 			PeerID:    h.ID(),
@@ -103,8 +103,8 @@ func (h *Host) Serve(ctx context.Context) error {
 	}
 
 	notifiee := &network.NotifyBundle{
-		ConnectedF:    func(n network.Network, c network.Conn) { eventHandler(n, c, "CONNECTED") },
-		DisconnectedF: func(n network.Network, c network.Conn) { eventHandler(n, c, "DISCONNECTED") },
+		ConnectedF:    func(n network.Network, c network.Conn) { eventHandler(n, c, EventTypeConnected) },
+		DisconnectedF: func(n network.Network, c network.Conn) { eventHandler(n, c, EventTypeDisconnected) },
 	}
 	h.Host.Network().Notify(notifiee)
 

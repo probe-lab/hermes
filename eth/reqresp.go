@@ -245,12 +245,14 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 		}
 		end := time.Now()
 
-		traceType := "HANDLE_STREAM"
+		traceType := hermeshost.EventTypeHandleStream
+
+		protocol := string(s.Protocol())
 
 		// Usual protocol string: /eth2/beacon_chain/req/metadata/2/ssz_snappy
-		parts := strings.Split(string(s.Protocol()), "/")
+		parts := strings.Split(protocol, "/")
 		if len(parts) > 4 {
-			traceType = "HANDLE_" + strings.ToUpper(parts[4])
+			traceType = hermeshost.EventTypeFromBeaconChainProtocol(protocol)
 		}
 
 		commonData := map[string]any{
@@ -564,7 +566,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 		}
 
 		traceEvt := &hermeshost.TraceEvent{
-			Type:      "REQUEST_STATUS",
+			Type:      hermeshost.EventTypeRequestStatus,
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 			Payload:   reqData,
@@ -619,7 +621,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 	defer func() {
 		traceEvt := &hermeshost.TraceEvent{
-			Type:      "REQUEST_PING",
+			Type:      hermeshost.EventTypeRequestPing,
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]string{
@@ -683,7 +685,7 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 		}
 
 		traceEvt := &hermeshost.TraceEvent{
-			Type:      "REQUEST_METADATA",
+			Type:      hermeshost.EventTypeRequestMetadata,
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 			Payload:   reqData,

@@ -4,75 +4,75 @@ import (
 	"encoding/hex"
 	"log/slog"
 
-	"github.com/libp2p/go-libp2p-pubsub/pb"
+	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/probe-lab/hermes/tele"
 )
 
-type rpcMeta struct {
+type RpcMeta struct {
 	PeerID        peer.ID
-	Subscriptions []rpcMetaSub    `json:"Subs,omitempty"`
-	Messages      []rpcMetaMsg    `json:"Msgs,omitempty"`
-	Control       *rpcMetaControl `json:"Control,omitempty"`
+	Subscriptions []RpcMetaSub    `json:"Subs,omitempty"`
+	Messages      []RpcMetaMsg    `json:"Msgs,omitempty"`
+	Control       *RpcMetaControl `json:"Control,omitempty"`
 }
 
-type rpcMetaSub struct {
+type RpcMetaSub struct {
 	Subscribe bool
 	TopicID   string
 }
 
-type rpcMetaMsg struct {
+type RpcMetaMsg struct {
 	MsgID string `json:"MsgID,omitempty"`
 	Topic string `json:"Topic,omitempty"`
 }
 
-type rpcMetaControl struct {
-	IHave []rpcControlIHave `json:"IHave,omitempty"`
-	IWant []rpcControlIWant `json:"IWant,omitempty"`
-	Graft []rpcControlGraft `json:"Graft,omitempty"`
-	Prune []rpcControlPrune `json:"Prune,omitempty"`
+type RpcMetaControl struct {
+	IHave []RpcControlIHave `json:"IHave,omitempty"`
+	IWant []RpcControlIWant `json:"IWant,omitempty"`
+	Graft []RpcControlGraft `json:"Graft,omitempty"`
+	Prune []RpcControlPrune `json:"Prune,omitempty"`
 }
 
-type rpcControlIHave struct {
+type RpcControlIHave struct {
 	TopicID string
 	MsgIDs  []string
 }
 
-type rpcControlIWant struct {
+type RpcControlIWant struct {
 	MsgIDs []string
 }
 
-type rpcControlGraft struct {
+type RpcControlGraft struct {
 	TopicID string
 }
 
-type rpcControlPrune struct {
+type RpcControlPrune struct {
 	TopicID string
 	PeerIDs []peer.ID
 }
 
-func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *rpcMeta {
-	subs := make([]rpcMetaSub, len(meta.GetSubscription()))
+func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *RpcMeta {
+	subs := make([]RpcMetaSub, len(meta.GetSubscription()))
 	for i, subMeta := range meta.GetSubscription() {
-		subs[i] = rpcMetaSub{
+		subs[i] = RpcMetaSub{
 			Subscribe: subMeta.GetSubscribe(),
 			TopicID:   subMeta.GetTopic(),
 		}
 	}
 
-	msgs := make([]rpcMetaMsg, len(meta.GetMessages()))
+	msgs := make([]RpcMetaMsg, len(meta.GetMessages()))
 	for i, msg := range meta.GetMessages() {
-		msgs[i] = rpcMetaMsg{
+		msgs[i] = RpcMetaMsg{
 			MsgID: hex.EncodeToString(msg.GetMessageID()),
 			Topic: msg.GetTopic(),
 		}
 	}
 
-	controlMsg := &rpcMetaControl{
-		IHave: make([]rpcControlIHave, len(meta.GetControl().GetIhave())),
-		IWant: make([]rpcControlIWant, len(meta.GetControl().GetIwant())),
-		Graft: make([]rpcControlGraft, len(meta.GetControl().GetGraft())),
-		Prune: make([]rpcControlPrune, len(meta.GetControl().GetPrune())),
+	controlMsg := &RpcMetaControl{
+		IHave: make([]RpcControlIHave, len(meta.GetControl().GetIhave())),
+		IWant: make([]RpcControlIWant, len(meta.GetControl().GetIwant())),
+		Graft: make([]RpcControlGraft, len(meta.GetControl().GetGraft())),
+		Prune: make([]RpcControlPrune, len(meta.GetControl().GetPrune())),
 	}
 
 	for i, ihave := range meta.GetControl().GetIhave() {
@@ -81,7 +81,7 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *rpcMeta {
 			msgIDs[j] = hex.EncodeToString(msgID)
 		}
 
-		controlMsg.IHave[i] = rpcControlIHave{
+		controlMsg.IHave[i] = RpcControlIHave{
 			TopicID: ihave.GetTopic(),
 			MsgIDs:  msgIDs,
 		}
@@ -93,13 +93,13 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *rpcMeta {
 			msgIDs[j] = hex.EncodeToString(msgID)
 		}
 
-		controlMsg.IWant[i] = rpcControlIWant{
+		controlMsg.IWant[i] = RpcControlIWant{
 			MsgIDs: msgIDs,
 		}
 	}
 
 	for i, graft := range meta.GetControl().GetGraft() {
-		controlMsg.Graft[i] = rpcControlGraft{
+		controlMsg.Graft[i] = RpcControlGraft{
 			TopicID: graft.GetTopic(),
 		}
 	}
@@ -117,7 +117,7 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *rpcMeta {
 			peerIDs[j] = peerID
 		}
 
-		controlMsg.Prune[i] = rpcControlPrune{
+		controlMsg.Prune[i] = RpcControlPrune{
 			TopicID: prune.GetTopic(),
 			PeerIDs: peerIDs,
 		}
@@ -132,7 +132,7 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *rpcMeta {
 		slog.Warn("Failed parsing peer ID", tele.LogAttrError(err))
 	}
 
-	return &rpcMeta{
+	return &RpcMeta{
 		PeerID:        pid,
 		Subscriptions: subs,
 		Messages:      msgs,
