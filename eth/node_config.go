@@ -376,14 +376,14 @@ func desiredPubSubBaseTopics() []string {
 	return []string{
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
-		p2p.GossipAttestationMessage,
+		// p2p.GossipAttestationMessage,
 		p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
-		p2p.GossipSyncCommitteeMessage,
+		// p2p.GossipSyncCommitteeMessage,
 		p2p.GossipBlsToExecutionChangeMessage,
-		p2p.GossipBlobSidecarMessage,
+		// p2p.GossipBlobSidecarMessage,
 	}
 }
 

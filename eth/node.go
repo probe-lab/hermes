@@ -8,12 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/probe-lab/hermes/host"
@@ -77,39 +75,40 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	initNetworkForkVersions(cfg.BeaconConfig)
 
 	var ds host.DataStream
-	if cfg.AWSConfig != nil {
+	ds = host.NoopDataStream{}
+	// if cfg.AWSConfig != nil {
 
-		droppedTraces, err := cfg.Meter.Int64Counter("dropped_traces")
-		if err != nil {
-			return nil, fmt.Errorf("new dropped_traces counter: %w", err)
-		}
+	// 	droppedTraces, err := cfg.Meter.Int64Counter("dropped_traces")
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("new dropped_traces counter: %w", err)
+	// 	}
 
-		notifiee := &gk.NotifieeBundle{
-			DroppedRecordF: func(ctx context.Context, record gk.Record) {
-				tevt, ok := record.(*host.TraceEvent)
-				if !ok {
-					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", "UNKNOWN")))
-				} else {
-					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", tevt.Type)))
-				}
-				slog.Warn("Dropped record", "partition_key", record.PartitionKey(), "size", len(record.Data()))
-			},
-		}
+	// 	notifiee := &gk.NotifieeBundle{
+	// 		DroppedRecordF: func(ctx context.Context, record gk.Record) {
+	// 			tevt, ok := record.(*host.TraceEvent)
+	// 			if !ok {
+	// 				droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", "UNKNOWN")))
+	// 			} else {
+	// 				droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", tevt.Type)))
+	// 			}
+	// 			slog.Warn("Dropped record", "partition_key", record.PartitionKey(), "size", len(record.Data()))
+	// 		},
+	// 	}
 
-		pcfg := gk.DefaultProducerConfig()
-		pcfg.Log = slog.Default()
-		pcfg.Meter = cfg.Meter
-		pcfg.Notifiee = notifiee
-		pcfg.RetryLimit = 5
+	// 	pcfg := gk.DefaultProducerConfig()
+	// 	pcfg.Log = slog.Default()
+	// 	pcfg.Meter = cfg.Meter
+	// 	pcfg.Notifiee = notifiee
+	// 	pcfg.RetryLimit = 5
 
-		p, err := gk.NewProducer(kinesis.NewFromConfig(*cfg.AWSConfig), cfg.KinesisStream, pcfg)
-		if err != nil {
-			return nil, fmt.Errorf("new kinesis producer: %w", err)
-		}
-		ds = p
-	} else {
-		ds = host.NoopDataStream{}
-	}
+	// 	p, err := gk.NewProducer(kinesis.NewFromConfig(*cfg.AWSConfig), cfg.KinesisStream, pcfg)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("new kinesis producer: %w", err)
+	// 	}
+	// 	ds = p
+	// } else {
+	// 	ds = host.NoopDataStream{}
+	// }
 
 	hostCfg := &host.Config{
 		DataStream:            ds,

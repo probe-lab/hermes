@@ -41,7 +41,7 @@ var ethConfig = &struct {
 	Devp2pPort:                  0,
 	Libp2pHost:                  "127.0.0.1",
 	Libp2pPort:                  0,
-	Libp2pPeerscoreSnapshotFreq: 5 * time.Second,
+	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
 	PrysmHost:                   "",
 	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
 	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
