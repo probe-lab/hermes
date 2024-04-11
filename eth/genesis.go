@@ -23,15 +23,18 @@ var (
 	BellatrixForkVersion ForkVersion
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
+
+	currentBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
 
 // configure global ForkVersion variables
-func initNetworkForkVersions(network *params.BeaconChainConfig) {
-	Phase0ForkVersion = ForkVersion(network.GenesisForkVersion)
-	AltairForkVersion = ForkVersion(network.AltairForkVersion)
-	BellatrixForkVersion = ForkVersion(network.BellatrixForkVersion)
-	CapellaForkVersion = ForkVersion(network.CapellaForkVersion)
-	DenebForkVersion = ForkVersion(network.DenebForkVersion)
+func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
+	Phase0ForkVersion = ForkVersion(beaconConfig.GenesisForkVersion)
+	AltairForkVersion = ForkVersion(beaconConfig.AltairForkVersion)
+	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)
+	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
+	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
+	currentBeaconConfig = beaconConfig
 }
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root

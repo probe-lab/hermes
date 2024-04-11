@@ -185,7 +185,7 @@ func cmdEthAction(c *cli.Context) error {
 	genesisRoot := genConfig.GenesisValidatorRoot
 	genesisTime := genConfig.GenesisTime
 
-	// Temp
+	// compute fork version and fork digest
 	currentSlot := slots.Since(genesisTime)
 	currentEpoch := slots.ToEpoch(currentSlot)
 
@@ -193,10 +193,8 @@ func cmdEthAction(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
 	}
-	// END Temp
 
 	forkDigest, err := signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
-	fmt.Println(ethConfig.Chain, hex.EncodeToString(forkDigest[:]))
 	if err != nil {
 		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
 	}

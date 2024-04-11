@@ -283,3 +283,20 @@ func (p *PrysmClient) Identity(ctx context.Context) (addrInfo *peer.AddrInfo, er
 
 	return addrInfo, nil
 }
+
+func (p *PrysmClient) getActiveValidatorCount(ctx context.Context) (activeVals uint64, err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.active_validators")
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+	actVals, err := p.beaconClient.ListValidators(ctx, &eth.ListValidatorsRequest{Active: true})
+	if err != nil {
+		return 0, err
+	}
+	activeVals = uint64(actVals.GetTotalSize())
+	return activeVals, nil
+}

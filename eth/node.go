@@ -346,8 +346,14 @@ func (n *Node) Start(ctx context.Context) error {
 		return fmt.Errorf("register RPC handlers: %w", err)
 	}
 
+	// get chain parameters for scores
+	actVals, err := n.pryClient.getActiveValidatorCount(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch active validators: %w", err)
+	}
+
 	// initialize GossipSub
-	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n)...)
+	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n, actVals)...)
 	if err != nil {
 		return fmt.Errorf("init gossip sub: %w", err)
 	}
