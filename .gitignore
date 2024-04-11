@@ -148,7 +148,6 @@ fabric.properties
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,go,goland+all,git
 
-kinesis
 *.sh
 *.txt
 .vscode

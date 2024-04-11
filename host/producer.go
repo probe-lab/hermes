@@ -2,8 +2,6 @@ package host
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	gk "github.com/dennis-tra/go-kinesis"
 )
@@ -23,11 +21,5 @@ func (n NoopDataStream) Start(ctx context.Context) error {
 }
 
 func (n NoopDataStream) PutRecord(ctx context.Context, record gk.Record) error {
-	rec := record.(*TraceEvent)
-	bts, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("marshaling trace event to json: %w", err)
-	}
-	fmt.Println(string(bts))
 	return ctx.Err()
 }
