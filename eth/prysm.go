@@ -3,6 +3,7 @@ package eth
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,9 @@ import (
 	"strconv"
 	"time"
 
+	apiCli "github.com/prysmaticlabs/prysm/v5/api/client/beacon"
 	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -28,12 +31,13 @@ import (
 
 // PrysmClient is an HTTP client for Prysm's JSON RPC API.
 type PrysmClient struct {
-	host         string
-	port         int
-	nodeClient   eth.NodeClient
-	timeout      time.Duration
-	tracer       trace.Tracer
-	beaconClient eth.BeaconChainClient
+	host            string
+	port            int
+	nodeClient      eth.NodeClient
+	timeout         time.Duration
+	tracer          trace.Tracer
+	beaconClient    eth.BeaconChainClient
+	beaconApiClient *apiCli.Client
 }
 
 func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration) (*PrysmClient, error) {
@@ -45,14 +49,20 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 	if err != nil {
 		return nil, fmt.Errorf("new grpc connection: %w", err)
 	}
+	// get connection to HTTP API
+	apiCli, err := apiCli.NewClient(fmt.Sprintf("%s:%d", host, portHTTP))
+	if err != nil {
+		return nil, fmt.Errorf("new http api client: %w", err)
+	}
 
 	return &PrysmClient{
-		host:         host,
-		port:         portHTTP,
-		nodeClient:   eth.NewNodeClient(conn),
-		beaconClient: eth.NewBeaconChainClient(conn),
-		timeout:      timeout,
-		tracer:       tracer,
+		host:            host,
+		port:            portHTTP,
+		nodeClient:      eth.NewNodeClient(conn),
+		beaconClient:    eth.NewBeaconChainClient(conn),
+		beaconApiClient: apiCli,
+		timeout:         timeout,
+		tracer:          tracer,
 	}, nil
 }
 
@@ -299,4 +309,42 @@ func (p *PrysmClient) getActiveValidatorCount(ctx context.Context) (activeVals u
 	}
 	activeVals = uint64(actVals.GetTotalSize())
 	return activeVals, nil
+}
+
+func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte) (onNetwork bool, err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.check_on_same_fork_digest")
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+	// this checks whether the local fork_digest at hermes matches the one that the remote node keeps
+	// request the genesis
+	nodeCnf, err := p.beaconApiClient.GetConfigSpec(ctx)
+	if err != nil {
+		return false, fmt.Errorf("request prysm node config to compose forkdigest: %w", err)
+	}
+	cnf := nodeCnf.Data.(map[string]interface{})
+	genesisConf, _, _, err := GetConfigsByNetworkName(cnf["CONFIG_NAME"].(string))
+	if err != nil {
+		return false, fmt.Errorf("not identified network from trusted node (%s): %w", cnf["CONFIG_NAME"].(string), err)
+	}
+
+	nodeFork, err := p.beaconApiClient.GetFork(ctx, apiCli.StateOrBlockId("head"))
+	if err != nil {
+		return false, fmt.Errorf("request beacon fork to compose forkdigest: %w", err)
+	}
+
+	forkDigest, err := signing.ComputeForkDigest(nodeFork.CurrentVersion, genesisConf.GenesisValidatorRoot)
+	if err != nil {
+		return false, fmt.Errorf("create fork digest (%s, %x): %w", hex.EncodeToString(nodeFork.CurrentVersion), genesisConf.GenesisValidatorRoot, err)
+	}
+	// check if our version is within the versions of the node
+	if forkDigest == hermesForkDigest {
+		return true, nil
+	}
+	return false, nil
+
 }

@@ -186,6 +186,16 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new prysm client")
 	}
+	// check if Prysm is valid
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
+	if err != nil {
+		return nil, fmt.Errorf("prysm client: %w", err)
+	}
+	if !onNetwork {
+		return nil, fmt.Errorf("prysm client not in correct fork_digest")
+	}
 
 	// finally, initialize hermes node
 	n := &Node{
