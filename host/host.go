@@ -263,7 +263,7 @@ func (h *Host) PrivateListenMaddr() (ma.Multiaddr, error) {
 func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 	return func(ctx context.Context, msg *pubsub.Message) error {
 		evt := &TraceEvent{
-			Type:      "HANDLE_MESSAGE",
+			Type:      EventTypeHandleMessage,
 			PeerID:    h.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]any{

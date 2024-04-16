@@ -48,45 +48,6 @@ const (
 	EventTypeRequestPing     EventType = "REQUEST_PING"
 )
 
-// AllValidEvents returns all valid event types.
-func AllValidEvents() []EventType {
-	return []EventType{
-		EventTypeUnknown,
-		EventTypeConnected,
-		EventTypeDisconnected,
-		EventTypeAddPeer,
-		EventTypeRemovePeer,
-		EventTypePublishMessage,
-		EventTypeRejectMessage,
-		EventTypeDuplicateMessage,
-		EventTypeDeliverMessage,
-		EventTypeRecvRPC,
-		EventTypeSendRPC,
-		EventTypeDropRPC,
-		EventTypeJoin,
-		EventTypeLeave,
-		EventTypeGraft,
-		EventTypePrune,
-		EventTypeValidateMessage,
-		EventTypeThrottlePeer,
-		EventTypeUndeliverableMessage,
-		EventTypeHandleMessage,
-		EventTypeHandleStream,
-		EventTypeHandleStatus,
-		EventTypeHandleMetadata,
-		EventTypeHandleAggregateAndProof,
-		EventTypeHandleBlobSidecarsByRange,
-		EventTypeHandleBlobSidecarsByRoot,
-		EventTypeHandlePing,
-		EventTypeHandleGoodbye,
-		EventTypeHandleBeaconBlocksByRange,
-		EventTypeHandleBeaconBlocksByRoot,
-		EventTypeRequestMetadata,
-		EventTypeRequestStatus,
-		EventTypeRequestPing,
-	}
-}
-
 // EventTypeFromBeaconChainProtocol returns the EventType for a given protocol string.
 func EventTypeFromBeaconChainProtocol(protocol string) EventType {
 	// Usual protocol string: /eth2/beacon_chain/req/metadata/2/ssz_snappy
