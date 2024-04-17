@@ -11,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/attribute"
@@ -74,6 +73,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
 
+	// configure the global variables for the network ForkVersions
+	initNetworkForkVersions(cfg.BeaconConfig)
+
 	var ds host.DataStream
 	if cfg.AWSConfig != nil {
 
@@ -110,9 +112,10 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	hostCfg := &host.Config{
-		DataStream: ds,
-		Tracer:     cfg.Tracer,
-		Meter:      cfg.Meter,
+		DataStream:            ds,
+		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
+		Tracer:                cfg.Tracer,
+		Meter:                 cfg.Meter,
 	}
 
 	// initialize libp2p host
@@ -150,7 +153,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	// initialize the request-response protocol handlers
 	reqRespCfg := &ReqRespConfig{
 		ForkDigest:   cfg.ForkDigest,
-		Encoder:      encoder.SszNetworkEncoder{},
+		Encoder:      cfg.RPCEncoder,
 		DataStream:   ds,
 		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
@@ -165,8 +168,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
-		ForkDigest:     cfg.ForkDigest,
-		Encoder:        encoder.SszNetworkEncoder{},
+		Topics:         cfg.getDesiredFullTopics(cfg.GossipSubMessageEncoder),
+		ForkVersion:    cfg.ForkVersion,
+		Encoder:        cfg.GossipSubMessageEncoder,
 		SecondsPerSlot: time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second,
 		GenesisTime:    cfg.GenesisConfig.GenesisTime,
 		DataStream:     ds,
@@ -181,6 +185,16 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("new prysm client")
+	}
+	// check if Prysm is valid
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
+	if err != nil {
+		return nil, fmt.Errorf("prysm client: %w", err)
+	}
+	if !onNetwork {
+		return nil, fmt.Errorf("prysm client not in correct fork_digest")
 	}
 
 	// finally, initialize hermes node
@@ -342,8 +356,14 @@ func (n *Node) Start(ctx context.Context) error {
 		return fmt.Errorf("register RPC handlers: %w", err)
 	}
 
+	// get chain parameters for scores
+	actVals, err := n.pryClient.getActiveValidatorCount(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch active validators: %w", err)
+	}
+
 	// initialize GossipSub
-	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n)...)
+	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n, actVals)...)
 	if err != nil {
 		return fmt.Errorf("init gossip sub: %w", err)
 	}

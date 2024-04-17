@@ -15,7 +15,7 @@ import (
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
-	"github.com/libp2p/go-libp2p-pubsub"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -23,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -42,7 +43,8 @@ type NodeConfig struct {
 	BeaconConfig *params.BeaconChainConfig
 
 	// The fork digest of the network Hermes participates in
-	ForkDigest [4]byte
+	ForkDigest  [4]byte
+	ForkVersion ForkVersion
 
 	// The private key for the libp2p host and local enode in hex format
 	PrivateKeyStr string
@@ -60,8 +62,13 @@ type NodeConfig struct {
 	Devp2pPort int
 
 	// The address information of the local libp2p host
-	Libp2pHost string
-	Libp2pPort int
+	Libp2pHost                  string
+	Libp2pPort                  int
+	Libp2pPeerscoreSnapshotFreq time.Duration
+
+	// Message encoders
+	GossipSubMessageEncoder encoder.NetworkEncoding
+	RPCEncoder              encoder.NetworkEncoding
 
 	// The address information where the Beacon API or Prysm's custom API is accessible at
 	PrysmHost     string
@@ -132,6 +139,10 @@ func (n *NodeConfig) Validate() error {
 
 	if n.Libp2pPort < 0 {
 		return fmt.Errorf("libp2p port must be greater than or equal to 0, got %d", n.Devp2pPort)
+	}
+
+	if n.Libp2pPeerscoreSnapshotFreq < 0 {
+		return fmt.Errorf("libp2p peerscore snapshop fequency must be positive")
 	}
 
 	if n.PrysmPortHTTP < 0 {
@@ -269,7 +280,7 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	return opts, nil
 }
 
-func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub.Option {
+func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeValidators uint64) []pubsub.Option {
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithNoAuthor(),
@@ -280,7 +291,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		pubsub.WithPeerOutboundQueueSize(n.PubSubQueueSize),
 		pubsub.WithMaxMessageSize(int(n.BeaconConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(n.PubSubQueueSize),
-		pubsub.WithPeerScore(n.peerScoringParams()),
+		pubsub.WithPeerScore(n.peerScoringParams(activeValidators)),
 		// pubsub.WithPeerScoreInspect(s.peerInspector, time.Minute),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
 		// pubsub.WithRawTracer(gossipTracer{host: s.host}),
@@ -289,7 +300,6 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 }
 
 const (
-
 	// decayToZero specifies the terminal value that we will use when decaying
 	// a value.
 	decayToZero = 0.01
@@ -314,7 +324,7 @@ func (n *NodeConfig) oneSlotDuration() time.Duration {
 	return time.Duration(n.BeaconConfig.SecondsPerSlot) * time.Second
 }
 
-func (n *NodeConfig) peerScoringParams() (*pubsub.PeerScoreParams, *pubsub.PeerScoreThresholds) {
+func (n *NodeConfig) peerScoringParams(activeValidtors uint64) (*pubsub.PeerScoreParams, *pubsub.PeerScoreThresholds) {
 	thresholds := &pubsub.PeerScoreThresholds{
 		GossipThreshold:             -4000,
 		PublishThreshold:            -8000,
@@ -322,8 +332,9 @@ func (n *NodeConfig) peerScoringParams() (*pubsub.PeerScoreParams, *pubsub.PeerS
 		AcceptPXThreshold:           100,
 		OpportunisticGraftThreshold: 5,
 	}
+	topicScoreParams := n.getDefaultTopicScoreParams(n.GossipSubMessageEncoder, activeValidtors)
 	scoreParams := &pubsub.PeerScoreParams{
-		Topics:        make(map[string]*pubsub.TopicScoreParams),
+		Topics:        topicScoreParams,
 		TopicScoreCap: 32.72,
 		AppSpecificScore: func(p peer.ID) float64 {
 			return 0
@@ -358,4 +369,114 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams.HistoryLength = gossipSubMcacheLen
 	gParams.HistoryGossip = gossipSubMcacheGossip
 	return gParams
+}
+
+// desiredPubSubBaseTopics returns the list of gossip_topics we want to subscribe to
+func desiredPubSubBaseTopics() []string {
+	return []string{
+		p2p.GossipBlockMessage,
+		p2p.GossipAggregateAndProofMessage,
+		// p2p.GossipAttestationMessage,
+		p2p.GossipExitMessage,
+		p2p.GossipAttesterSlashingMessage,
+		p2p.GossipProposerSlashingMessage,
+		p2p.GossipContributionAndProofMessage,
+		// p2p.GossipSyncCommitteeMessage,
+		p2p.GossipBlsToExecutionChangeMessage,
+		// p2p.GossipBlobSidecarMessage,
+	}
+}
+
+func topicFormatFromBase(topicBase string) (string, error) {
+	switch topicBase {
+	case p2p.GossipBlockMessage:
+		return p2p.BlockSubnetTopicFormat, nil
+
+	case p2p.GossipAggregateAndProofMessage:
+		return p2p.AggregateAndProofSubnetTopicFormat, nil
+
+	case p2p.GossipAttestationMessage:
+		return p2p.AttestationSubnetTopicFormat, nil
+
+	case p2p.GossipExitMessage:
+		return p2p.ExitSubnetTopicFormat, nil
+
+	case p2p.GossipAttesterSlashingMessage:
+		return p2p.AttesterSlashingSubnetTopicFormat, nil
+
+	case p2p.GossipProposerSlashingMessage:
+		return p2p.ProposerSlashingSubnetTopicFormat, nil
+
+	case p2p.GossipContributionAndProofMessage:
+		return p2p.SyncContributionAndProofSubnetTopicFormat, nil
+
+	case p2p.GossipSyncCommitteeMessage:
+		return p2p.SyncCommitteeSubnetTopicFormat, nil
+
+	case p2p.GossipBlsToExecutionChangeMessage:
+		return p2p.BlsToExecutionChangeSubnetTopicFormat, nil
+
+	case p2p.GossipBlobSidecarMessage:
+		return p2p.BlobSubnetTopicFormat, nil
+
+	default:
+		return "", fmt.Errorf("unrecognized gossip topic base: %s", topicBase)
+	}
+}
+
+func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
+	switch topic {
+	case p2p.GossipAttestationMessage:
+		return currentBeaconConfig.AttestationSubnetCount, true
+
+	case p2p.GossipSyncCommitteeMessage:
+		return currentBeaconConfig.SyncCommitteeSubnetCount, true
+
+	case p2p.GossipBlobSidecarMessage:
+		return currentBeaconConfig.BlobsidecarSubnetCount, true
+
+	default:
+		return uint64(0), false
+	}
+}
+
+func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
+	if subnet > 1 { // as far as I know, there aren't subnets with index 0
+		return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
+	} else {
+		return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
+	}
+}
+
+func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
+	desiredTopics := desiredPubSubBaseTopics()
+	fullTopics := make([]string, 0)
+
+	for _, topicBase := range desiredTopics {
+		topicFormat, err := topicFormatFromBase(topicBase)
+		if err != nil {
+			slog.Warn("invalid gossipsub topic", slog.Attr{Key: "topic", Value: slog.StringValue(topicBase)})
+			continue
+		}
+		subnets, withSubnets := hasSubnets(topicBase)
+		if withSubnets {
+			for subnet := uint64(1); subnet <= subnets; subnet++ {
+				fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder, subnet))
+			}
+		} else {
+			fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder, 0))
+		}
+	}
+
+	return fullTopics
+}
+
+func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding, activeValidators uint64) map[string]*pubsub.TopicScoreParams {
+	desiredTopics := n.getDesiredFullTopics(encoder)
+	topicScores := make(map[string]*pubsub.TopicScoreParams, len(desiredTopics))
+	for _, topic := range desiredTopics {
+		params := topicToScoreParamsMapper(topic, activeValidators)
+		topicScores[topic] = params
+	}
+	return topicScores
 }

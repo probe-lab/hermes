@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/libp2p/go-libp2p-pubsub"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/probe-lab/hermes/tele"
 )
 
 type TopicHandler = func(context.Context, *pubsub.Message) error
@@ -45,7 +46,8 @@ func (t *TopicSubscription) Serve(ctx context.Context) error {
 		}
 
 		if err := t.Handler(ctx, msg); err != nil {
-			return fmt.Errorf("handle gossip message for topic %s: %w", t.Sub.Topic(), err)
+			slog.Error("handle gossip message for", slog.Attr{Key: "topic", Value: slog.StringValue(t.Sub.Topic())}, tele.LogAttrError(err))
+			continue
 		}
 	}
 }

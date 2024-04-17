@@ -6,7 +6,36 @@ import (
 	"time"
 
 	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
 )
+
+// list of ForkVersions
+// 1st byte trick
+type ForkVersion [4]byte
+
+func (fv ForkVersion) String() string {
+	return hex.EncodeToString([]byte(fv[:]))
+}
+
+var (
+	Phase0ForkVersion    ForkVersion
+	AltairForkVersion    ForkVersion
+	BellatrixForkVersion ForkVersion
+	CapellaForkVersion   ForkVersion
+	DenebForkVersion     ForkVersion
+
+	currentBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
+)
+
+// configure global ForkVersion variables
+func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
+	Phase0ForkVersion = ForkVersion(beaconConfig.GenesisForkVersion)
+	AltairForkVersion = ForkVersion(beaconConfig.AltairForkVersion)
+	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)
+	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
+	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
+	currentBeaconConfig = beaconConfig
+}
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root
 // at Genesis and the Time at Genesis.
@@ -57,4 +86,26 @@ func hexToBytes(s string) []byte {
 		panic(err)
 	}
 	return data
+}
+
+func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconChainConfig) ([4]byte, error) {
+	switch {
+	case epoch < beaconConfg.AltairForkEpoch:
+		return [4]byte(beaconConfg.GenesisForkVersion), nil
+
+	case epoch < beaconConfg.BellatrixForkEpoch:
+		return [4]byte(beaconConfg.AltairForkVersion), nil
+
+	case epoch < beaconConfg.CapellaForkEpoch:
+		return [4]byte(beaconConfg.BellatrixForkVersion), nil
+
+	case epoch < beaconConfg.DenebForkEpoch:
+		return [4]byte(beaconConfg.CapellaForkVersion), nil
+
+	case epoch >= beaconConfg.DenebForkEpoch:
+		return [4]byte(beaconConfg.DenebForkVersion), nil
+
+	default:
+		return [4]byte{}, fmt.Errorf("not recognized case for epoch %d", epoch)
+	}
 }
