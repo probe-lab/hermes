@@ -75,7 +75,7 @@ func (h *Host) Serve(ctx context.Context) error {
 		return fmt.Errorf("host started without gossip sub initialization: %w", suture.ErrTerminateSupervisorTree)
 	}
 
-	eventHandler := func(n network.Network, c network.Conn, evtType EventType) {
+	eventHandler := func(n network.Network, c network.Conn, evtType string) {
 		evt := &TraceEvent{
 			Type:      evtType,
 			PeerID:    h.ID(),
@@ -106,8 +106,8 @@ func (h *Host) Serve(ctx context.Context) error {
 	}
 
 	notifiee := &network.NotifyBundle{
-		ConnectedF:    func(n network.Network, c network.Conn) { eventHandler(n, c, EventTypeConnected) },
-		DisconnectedF: func(n network.Network, c network.Conn) { eventHandler(n, c, EventTypeDisconnected) },
+		ConnectedF:    func(n network.Network, c network.Conn) { eventHandler(n, c, "CONNECTED") },
+		DisconnectedF: func(n network.Network, c network.Conn) { eventHandler(n, c, "DISCONNECTED") },
 	}
 	h.Host.Network().Notify(notifiee)
 
@@ -271,7 +271,7 @@ func (h *Host) PrivateListenMaddr() (ma.Multiaddr, error) {
 func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 	return func(ctx context.Context, msg *pubsub.Message) error {
 		evt := &TraceEvent{
-			Type:      EventTypeHandleMessage,
+			Type:      "HANDLE_MESSAGE",
 			PeerID:    h.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]any{

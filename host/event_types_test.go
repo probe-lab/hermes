@@ -10,17 +10,17 @@ func TestEventTypeFromBeaconChainProtocol(t *testing.T) {
 	tests := []struct {
 		name     string
 		protocol string
-		expected host.EventType
+		expected string
 	}{
 		{
 			name:     "Valid protocol with metadata",
 			protocol: "/eth2/beacon_chain/req/metadata/2/ssz_snappy",
-			expected: host.EventTypeHandleMetadata,
+			expected: "HANDLE_METADATA",
 		},
 		{
 			name:     "Invalid protocol",
 			protocol: "/invalid/protocol",
-			expected: host.EventTypeUnknown,
+			expected: "UNKNOWN",
 		},
 	}
 

@@ -247,7 +247,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 		}
 		end := time.Now()
 
-		traceType := hermeshost.EventTypeHandleStream
+		traceType := "HANDLE_STREAM"
 
 		protocol := string(s.Protocol())
 
@@ -568,7 +568,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 		}
 
 		traceEvt := &hermeshost.TraceEvent{
-			Type:      hermeshost.EventTypeRequestStatus,
+			Type:      "REQUEST_STATUS",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 			Payload:   reqData,
@@ -623,7 +623,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 	defer func() {
 		traceEvt := &hermeshost.TraceEvent{
-			Type:      hermeshost.EventTypeRequestPing,
+			Type:      "REQUEST_PING",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]string{
@@ -687,7 +687,7 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 		}
 
 		traceEvt := &hermeshost.TraceEvent{
-			Type:      hermeshost.EventTypeRequestMetadata,
+			Type:      "REQUEST_METADATA",
 			PeerID:    r.host.ID(),
 			Timestamp: time.Now(),
 			Payload:   reqData,

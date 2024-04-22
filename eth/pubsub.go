@@ -143,7 +143,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 	slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
 
 	evt := &host.TraceEvent{
-		Type:      host.EventTypeHandleAggregateAndProof,
+		Type:      "HANDLE_BEACON_BLOCK", // TODO(sam.calder-mason): Change to BEACON_BLOCKS_BY
 		PeerID:    p.host.ID(),
 		Timestamp: now,
 		Payload: map[string]any{

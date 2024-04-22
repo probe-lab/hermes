@@ -90,9 +90,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 			DroppedRecordF: func(ctx context.Context, record gk.Record) {
 				tevt, ok := record.(*host.TraceEvent)
 				if !ok {
-					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", string(host.EventTypeUnknown))))
+					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", "UNKNOWN")))
 				} else {
-					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", string(tevt.Type))))
+					droppedTraces.Add(ctx, 1, metric.WithAttributes(attribute.String("evt_type", tevt.Type)))
 				}
 				slog.Warn("Dropped record", "partition_key", record.PartitionKey(), "size", len(record.Data()))
 			},
