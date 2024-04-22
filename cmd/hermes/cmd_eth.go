@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
@@ -17,33 +19,35 @@ import (
 )
 
 var ethConfig = &struct {
-	PrivateKeyStr   string
-	Chain           string
-	Attnets         string
-	Devp2pHost      string
-	Devp2pPort      int
-	Libp2pHost      string
-	Libp2pPort      int
-	PrysmHost       string
-	PrysmPortHTTP   int
-	PrysmPortGRPC   int
-	DialConcurrency int
-	DialTimeout     time.Duration
-	MaxPeers        int
+	PrivateKeyStr               string
+	Chain                       string
+	Attnets                     string
+	Devp2pHost                  string
+	Devp2pPort                  int
+	Libp2pHost                  string
+	Libp2pPort                  int
+	Libp2pPeerscoreSnapshotFreq time.Duration
+	PrysmHost                   string
+	PrysmPortHTTP               int
+	PrysmPortGRPC               int
+	DialConcurrency             int
+	DialTimeout                 time.Duration
+	MaxPeers                    int
 }{
-	PrivateKeyStr:   "", // unset means it'll be generated
-	Chain:           params.MainnetName,
-	Attnets:         "ffffffffffffffff", // subscribed to all attnets.
-	Devp2pHost:      "127.0.0.1",
-	Devp2pPort:      0,
-	Libp2pHost:      "127.0.0.1",
-	Libp2pPort:      0,
-	PrysmHost:       "",
-	PrysmPortHTTP:   3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	PrysmPortGRPC:   4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	DialConcurrency: 16,
-	DialTimeout:     5 * time.Second,
-	MaxPeers:        30, // arbitrary
+	PrivateKeyStr:               "", // unset means it'll be generated
+	Chain:                       params.MainnetName,
+	Attnets:                     "ffffffffffffffff", // subscribed to all attnets.
+	Devp2pHost:                  "127.0.0.1",
+	Devp2pPort:                  0,
+	Libp2pHost:                  "127.0.0.1",
+	Libp2pPort:                  0,
+	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
+	PrysmHost:                   "",
+	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	DialConcurrency:             16,
+	DialTimeout:                 5 * time.Second,
+	MaxPeers:                    30, // arbitrary
 }
 
 var cmdEth = &cli.Command{
@@ -127,6 +131,14 @@ var cmdEthFlags = []cli.Flag{
 		Destination: &ethConfig.Libp2pPort,
 		DefaultText: "random",
 	},
+	&cli.DurationFlag{
+		Name:        "libp2p.peerscore.snapshot.frequency",
+		EnvVars:     []string{"HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
+		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
+		Value:       ethConfig.Libp2pPeerscoreSnapshotFreq,
+		Destination: &ethConfig.Libp2pPeerscoreSnapshotFreq,
+		DefaultText: "random",
+	},
 	&cli.StringFlag{
 		Name:        "prysm.host",
 		EnvVars:     []string{"HERMES_ETH_PRYSM_HOST"},
@@ -173,7 +185,16 @@ func cmdEthAction(c *cli.Context) error {
 	genesisRoot := genConfig.GenesisValidatorRoot
 	genesisTime := genConfig.GenesisTime
 
-	forkDigest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
+	// compute fork version and fork digest
+	currentSlot := slots.Since(genesisTime)
+	currentEpoch := slots.ToEpoch(currentSlot)
+
+	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, beaConfig)
+	if err != nil {
+		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
+	}
+
+	forkDigest, err := signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
 	if err != nil {
 		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
 	}
@@ -184,24 +205,28 @@ func cmdEthAction(c *cli.Context) error {
 	params.OverrideBeaconNetworkConfig(netConfig)
 
 	cfg := &eth.NodeConfig{
-		GenesisConfig:   genConfig,
-		NetworkConfig:   netConfig,
-		BeaconConfig:    beaConfig,
-		ForkDigest:      forkDigest,
-		PrivateKeyStr:   ethConfig.PrivateKeyStr,
-		DialTimeout:     ethConfig.DialTimeout,
-		Devp2pHost:      ethConfig.Devp2pHost,
-		Devp2pPort:      ethConfig.Devp2pPort,
-		Libp2pHost:      ethConfig.Libp2pHost,
-		Libp2pPort:      ethConfig.Libp2pPort,
-		PrysmHost:       ethConfig.PrysmHost,
-		PrysmPortHTTP:   ethConfig.PrysmPortHTTP,
-		PrysmPortGRPC:   ethConfig.PrysmPortGRPC,
-		AWSConfig:       rootConfig.awsConfig,
-		KinesisRegion:   rootConfig.KinesisRegion,
-		KinesisStream:   rootConfig.KinesisStream,
-		MaxPeers:        ethConfig.MaxPeers,
-		DialConcurrency: ethConfig.DialConcurrency,
+		GenesisConfig:               genConfig,
+		NetworkConfig:               netConfig,
+		BeaconConfig:                beaConfig,
+		ForkDigest:                  forkDigest,
+		ForkVersion:                 currentForkVersion,
+		PrivateKeyStr:               ethConfig.PrivateKeyStr,
+		DialTimeout:                 ethConfig.DialTimeout,
+		Devp2pHost:                  ethConfig.Devp2pHost,
+		Devp2pPort:                  ethConfig.Devp2pPort,
+		Libp2pHost:                  ethConfig.Libp2pHost,
+		Libp2pPort:                  ethConfig.Libp2pPort,
+		Libp2pPeerscoreSnapshotFreq: ethConfig.Libp2pPeerscoreSnapshotFreq,
+		GossipSubMessageEncoder:     encoder.SszNetworkEncoder{},
+		RPCEncoder:                  encoder.SszNetworkEncoder{},
+		PrysmHost:                   ethConfig.PrysmHost,
+		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
+		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,
+		AWSConfig:                   rootConfig.awsConfig,
+		KinesisRegion:               rootConfig.KinesisRegion,
+		KinesisStream:               rootConfig.KinesisStream,
+		MaxPeers:                    ethConfig.MaxPeers,
+		DialConcurrency:             ethConfig.DialConcurrency,
 		// PubSub config
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
 		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10

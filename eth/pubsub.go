@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -12,7 +13,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	ethtypes "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
@@ -20,7 +22,8 @@ import (
 )
 
 type PubSubConfig struct {
-	ForkDigest     [4]byte
+	Topics         []string
+	ForkVersion    ForkVersion
 	Encoder        encoder.NetworkEncoding
 	SecondsPerSlot time.Duration
 	GenesisTime    time.Time
@@ -71,28 +74,17 @@ func (p *PubSub) Serve(ctx context.Context) error {
 		return fmt.Errorf("node's pubsub service uninitialized gossip sub: %w", suture.ErrTerminateSupervisorTree)
 	}
 
-	topicHandlers := map[string]host.TopicHandler{
-		p2p.BlockSubnetTopicFormat:                    p.host.TracedTopicHandler(host.NoopHandler),
-		p2p.AggregateAndProofSubnetTopicFormat:        p.handleAggregateAndProof,
-		p2p.ExitSubnetTopicFormat:                     p.host.TracedTopicHandler(host.NoopHandler),
-		p2p.ProposerSlashingSubnetTopicFormat:         p.host.TracedTopicHandler(host.NoopHandler),
-		p2p.AttesterSlashingSubnetTopicFormat:         p.host.TracedTopicHandler(host.NoopHandler),
-		p2p.SyncContributionAndProofSubnetTopicFormat: p.host.TracedTopicHandler(host.NoopHandler),
-		p2p.BlsToExecutionChangeSubnetTopicFormat:     p.host.TracedTopicHandler(host.NoopHandler),
-		// p2p.AttestationSubnetTopicFormat:              p.host.TracedTopicHandler(host.NoopHandler),
-		// p2p.SyncCommitteeSubnetTopicFormat:            p.host.TracedTopicHandler(host.NoopHandler),
-		// p2p.BlobSubnetTopicFormat:                     p.host.TracedTopicHandler(host.NoopHandler),
-	}
-
 	supervisor := suture.NewSimple("pubsub")
 
-	for topicFormat, topicHandler := range topicHandlers {
-		topicName := fmt.Sprintf(topicFormat, p.cfg.ForkDigest) + p.cfg.Encoder.ProtocolSuffix()
+	for _, topicName := range p.cfg.Topics {
 		topic, err := p.gs.Join(topicName)
 		if err != nil {
 			return fmt.Errorf("join pubsub topic %s: %w", topicName, err)
 		}
 		defer logDeferErr(topic.Close, fmt.Sprintf("failed closing %s topic", topicName))
+
+		// get the handler for the specific topic
+		topicHandler := p.mapPubSubTopicWithHandlers(topicName)
 
 		sub, err := topic.Subscribe()
 		if err != nil {
@@ -112,6 +104,15 @@ func (p *PubSub) Serve(ctx context.Context) error {
 	return supervisor.Serve(ctx)
 }
 
+func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
+	switch {
+	case strings.Contains(topic, p2p.GossipBlockMessage):
+		return p.handleBeaconBlock
+	default:
+		return p.host.TracedTopicHandler(host.NoopHandler)
+	}
+}
+
 var _ pubsub.SubscriptionFilter = (*Node)(nil)
 
 // CanSubscribe originally returns true if the topic is of interest, and we could subscribe to it.
@@ -129,16 +130,17 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 	return pubsub.FilterSubscriptions(subs, n.CanSubscribe), nil
 }
 
-func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Message) error {
-	sbb := eth.SignedBeaconBlock{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, &sbb); err != nil {
-		return fmt.Errorf("decode beacon block gossip message: %w", err)
+func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) error {
+	genericBlock, err := p.getSignedBeaconBlockForForkDigest(msg.Data)
+	if err != nil {
+		return err
 	}
 
-	blockSlot := sbb.GetBlock().GetSlot()
+	slot := genericBlock.GetSlot()
+	ProposerIndex := genericBlock.GetProposerIndex()
 
 	now := time.Now()
-	slotStart := p.cfg.GenesisTime.Add(time.Duration(blockSlot) * p.cfg.SecondsPerSlot)
+	slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
 
 	evt := &host.TraceEvent{
 		Type:      host.EventTypeHandleAggregateAndProof,
@@ -150,8 +152,8 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 			"MsgSize":    len(msg.Data),
 			"Topic":      msg.GetTopic(),
 			"Seq":        msg.GetSeqno(),
-			"ValIdx":     sbb.GetBlock().GetProposerIndex(),
-			"Slot":       blockSlot,
+			"ValIdx":     ProposerIndex,
+			"Slot":       slot,
 			"TimeInSlot": now.Sub(slotStart).Seconds(),
 		},
 	}
@@ -161,4 +163,67 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 	}
 
 	return nil
+}
+
+type GenericSignedBeaconBlock interface {
+	GetBlock() GenericBeaconBlock
+}
+
+type GenericBeaconBlock interface {
+	GetSlot() primitives.Slot
+	GetProposerIndex() primitives.ValidatorIndex
+}
+
+func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb GenericBeaconBlock, err error) {
+	// get the correct fork
+
+	switch p.cfg.ForkVersion {
+	case Phase0ForkVersion:
+		phase0Sbb := ethtypes.SignedBeaconBlock{}
+		err = p.cfg.Encoder.DecodeGossip(msgData, &phase0Sbb)
+		if err != nil {
+			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+		}
+		genericSbb = phase0Sbb.GetBlock()
+		return genericSbb, err
+
+	case AltairForkVersion:
+		altairSbb := ethtypes.SignedBeaconBlockAltair{}
+		err = p.cfg.Encoder.DecodeGossip(msgData, &altairSbb)
+		if err != nil {
+			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+		}
+		genericSbb = altairSbb.GetBlock()
+		return genericSbb, err
+
+	case BellatrixForkVersion:
+		BellatrixSbb := ethtypes.SignedBeaconBlockBellatrix{}
+		err = p.cfg.Encoder.DecodeGossip(msgData, &BellatrixSbb)
+		if err != nil {
+			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+		}
+		genericSbb = BellatrixSbb.GetBlock()
+		return genericSbb, err
+
+	case CapellaForkVersion:
+		capellaSbb := ethtypes.SignedBeaconBlockCapella{}
+		err = p.cfg.Encoder.DecodeGossip(msgData, &capellaSbb)
+		if err != nil {
+			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+		}
+		genericSbb = capellaSbb.GetBlock()
+		return genericSbb, err
+
+	case DenebForkVersion:
+		denebSbb := ethtypes.SignedBeaconBlockDeneb{}
+		err = p.cfg.Encoder.DecodeGossip(msgData, &denebSbb)
+		if err != nil {
+			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+		}
+		genericSbb = denebSbb.GetBlock()
+		return genericSbb, err
+
+	default:
+		return genericSbb, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
+	}
 }

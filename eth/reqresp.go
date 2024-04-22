@@ -127,6 +127,12 @@ func (r *ReqResp) SetStatus(status *pb.Status) {
 	r.statusMu.Lock()
 	defer r.statusMu.Unlock()
 
+	// if the ForkDigest is not the same, we should drop updating the local status
+	// TODO: this might be re-checked for hardforks (make the client resilient to them)
+	if r.status != nil && !bytes.Equal(r.status.ForkDigest, status.ForkDigest) {
+		return
+	}
+
 	// check if anything has changed. Prevents the below log message to pollute
 	// the log output.
 	if r.status != nil && bytes.Equal(r.status.ForkDigest, status.ForkDigest) &&
@@ -136,10 +142,6 @@ func (r *ReqResp) SetStatus(status *pb.Status) {
 		r.status.HeadSlot == status.HeadSlot {
 		// nothing has changed -> return
 		return
-	}
-
-	if r.status != nil && !bytes.Equal(r.status.ForkDigest, status.ForkDigest) {
-		slog.Warn("reqresp status updated with different fork digests", "old", hex.EncodeToString(r.status.ForkDigest), "new", hex.EncodeToString(status.ForkDigest))
 	}
 
 	slog.Info("New status:")

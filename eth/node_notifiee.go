@@ -84,7 +84,7 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	valid := true
 	ps := n.host.Peerstore()
 
-	_, err := n.reqResp.Status(ctx, pid)
+	st, err := n.reqResp.Status(ctx, pid)
 	if err != nil {
 		valid = false
 	} else {
@@ -104,7 +104,7 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 					slog.Warn("Failed to store handshaked marker in peerstore", tele.LogAttrError(err))
 				}
 
-				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", av)
+				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", av, "fork-digest", hex.EncodeToString(st.ForkDigest))
 			}
 		}
 	}
