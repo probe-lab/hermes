@@ -131,7 +131,9 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 }
 
 func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) error {
-	genericBlock, err := p.getSignedBeaconBlockForForkDigest(msg.Data)
+	now := time.Now()
+
+	genericBlock, root, err := p.getSignedBeaconBlockForForkDigest(msg.Data)
 	if err != nil {
 		return err
 	}
@@ -139,11 +141,10 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 	slot := genericBlock.GetSlot()
 	ProposerIndex := genericBlock.GetProposerIndex()
 
-	now := time.Now()
 	slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
 
 	evt := &host.TraceEvent{
-		Type:      "HANDLE_BEACON_BLOCK", // TODO(sam.calder-mason): Change to BEACON_BLOCKS_BY
+		Type:      "HANDLE_MESSAGE",
 		PeerID:    p.host.ID(),
 		Timestamp: now,
 		Payload: map[string]any{
@@ -154,6 +155,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 			"Seq":        msg.GetSeqno(),
 			"ValIdx":     ProposerIndex,
 			"Slot":       slot,
+			"Root":       root,
 			"TimeInSlot": now.Sub(slotStart).Seconds(),
 		},
 	}
@@ -174,7 +176,7 @@ type GenericBeaconBlock interface {
 	GetProposerIndex() primitives.ValidatorIndex
 }
 
-func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb GenericBeaconBlock, err error) {
+func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb GenericBeaconBlock, root [32]byte, err error) {
 	// get the correct fork
 
 	switch p.cfg.ForkVersion {
@@ -182,48 +184,68 @@ func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb G
 		phase0Sbb := ethtypes.SignedBeaconBlock{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &phase0Sbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding phase0 beacon block gossip message: %w", err)
 		}
 		genericSbb = phase0Sbb.GetBlock()
-		return genericSbb, err
+		root, err = phase0Sbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case AltairForkVersion:
 		altairSbb := ethtypes.SignedBeaconBlockAltair{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &altairSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding altair beacon block gossip message: %w", err)
 		}
 		genericSbb = altairSbb.GetBlock()
-		return genericSbb, err
+		root, err = altairSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case BellatrixForkVersion:
 		BellatrixSbb := ethtypes.SignedBeaconBlockBellatrix{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &BellatrixSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding bellatrix beacon block gossip message: %w", err)
 		}
 		genericSbb = BellatrixSbb.GetBlock()
-		return genericSbb, err
+		root, err = BellatrixSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case CapellaForkVersion:
 		capellaSbb := ethtypes.SignedBeaconBlockCapella{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &capellaSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding capella beacon block gossip message: %w", err)
 		}
 		genericSbb = capellaSbb.GetBlock()
-		return genericSbb, err
+		root, err = capellaSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case DenebForkVersion:
 		denebSbb := ethtypes.SignedBeaconBlockDeneb{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &denebSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding deneb beacon block gossip message: %w", err)
 		}
 		genericSbb = denebSbb.GetBlock()
-		return genericSbb, err
+		root, err = denebSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	default:
-		return genericSbb, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
+		return genericSbb, [32]byte{}, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
 	}
 }
