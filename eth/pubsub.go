@@ -106,6 +106,9 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	switch {
+	// Ensure hotter topics are at the top of the switch statement.
+	case strings.Contains(topic, p2p.GossipAttestationMessage):
+		return p.handleBeaconAttestation
 	case strings.Contains(topic, p2p.GossipBlockMessage):
 		return p.handleBeaconBlock
 	default:
@@ -127,7 +130,39 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 	if len(subs) > n.cfg.PubSubSubscriptionRequestLimit {
 		return nil, pubsub.ErrTooManySubscriptions
 	}
+
 	return pubsub.FilterSubscriptions(subs, n.CanSubscribe), nil
+}
+
+func (p *PubSub) handleBeaconAttestation(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
+	attestation := &ethtypes.Attestation{}
+	if err := p.cfg.Encoder.DecodeGossip(msg.Data, attestation); err != nil {
+		return fmt.Errorf("error decoding phase0 attestation gossip message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      "HANDLE_MESSAGE",
+		PeerID:    p.host.ID(),
+		Timestamp: now,
+		Payload: map[string]any{
+			"PeerID":      msg.ReceivedFrom.String(),
+			"MsgID":       hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":     len(msg.Data),
+			"Topic":       msg.GetTopic(),
+			"Seq":         msg.GetSeqno(),
+			"Attestation": attestation,
+			"Timestamp":   now,
+		},
+	}
+
+	if err := p.cfg.DataStream.PutEvent(ctx, evt); err != nil {
+		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+	}
+
+	return nil
+
 }
 
 func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) error {
