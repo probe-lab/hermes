@@ -25,6 +25,7 @@ const (
 	proposerSlashingWeight     = 0.05
 	voluntaryExitWeight        = 0.05
 	blsToExecutionChangeWeight = 0.05
+	attestationWeight          = 0.05
 
 	// mesh-related params
 	maxInMeshScore        = 10
@@ -42,11 +43,12 @@ func topicToScoreParamsMapper(topic string, activeValidators uint64) *pubsub.Top
 	switch {
 	case strings.Contains(topic, p2p.GossipBlockMessage):
 		return defaultBlockTopicParams()
-
+	case strings.Contains(topic, p2p.GossipAttestationMessage):
+		return defaultAttestationTopicParams()
 	case strings.Contains(topic, p2p.GossipAggregateAndProofMessage):
 		return defaultAggregateTopicParams(activeValidators)
 
-	case strings.Contains(topic, p2p.GossipAttestationMessage):
+	case strings.Contains(topic, p2p.GossipAggregateAndProofMessage):
 		return defaultAggregateSubnetTopicParams(activeValidators)
 
 	case strings.Contains(topic, p2p.GossipExitMessage):
@@ -188,7 +190,7 @@ func defaultAggregateSubnetTopicParams(activeValidators uint64) *pubsub.TopicSco
 		return nil
 	}
 	// Determine the amount of validators expected in a subnet in a single slot.
-	numPerSlot := time.Duration(subnetWeight / uint64(currentBeaconConfig.SlotsPerEpoch))
+	numPerSlot := subnetWeight / uint64(currentBeaconConfig.SlotsPerEpoch)
 	if numPerSlot == 0 {
 		slog.Warn("numPerSlot is 0, skipping initializing topic scoring")
 		return nil
@@ -369,6 +371,28 @@ func defaultVoluntaryExitTopicParams() *pubsub.TopicScoreParams {
 func defaultBlsToExecutionChangeTopicParams() *pubsub.TopicScoreParams {
 	return &pubsub.TopicScoreParams{
 		TopicWeight:                     blsToExecutionChangeWeight,
+		TimeInMeshWeight:                maxInMeshScore / inMeshCap(),
+		TimeInMeshQuantum:               inMeshTime(),
+		TimeInMeshCap:                   inMeshCap(),
+		FirstMessageDeliveriesWeight:    2,
+		FirstMessageDeliveriesDecay:     scoreDecay(oneHundredEpochs),
+		FirstMessageDeliveriesCap:       5,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      0,
+		MeshMessageDeliveriesCap:        0,
+		MeshMessageDeliveriesThreshold:  0,
+		MeshMessageDeliveriesWindow:     0,
+		MeshMessageDeliveriesActivation: 0,
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         0,
+		InvalidMessageDeliveriesWeight:  -2000,
+		InvalidMessageDeliveriesDecay:   scoreDecay(invalidDecayPeriod),
+	}
+}
+
+func defaultAttestationTopicParams() *pubsub.TopicScoreParams {
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     attestationWeight,
 		TimeInMeshWeight:                maxInMeshScore / inMeshCap(),
 		TimeInMeshQuantum:               inMeshTime(),
 		TimeInMeshCap:                   inMeshCap(),
