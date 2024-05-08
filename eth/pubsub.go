@@ -109,6 +109,8 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	// Ensure hotter topics are at the top of the switch statement.
 	case strings.Contains(topic, p2p.GossipAttestationMessage):
 		return p.handleBeaconAttestation
+	case strings.Contains(topic, p2p.GossipDataColumnSidecarMessage):
+		return p.handleBeaconDataColumnSidecar
 	case strings.Contains(topic, p2p.GossipBlockMessage):
 		return p.handleBeaconBlock
 	default:
@@ -154,6 +156,37 @@ func (p *PubSub) handleBeaconAttestation(ctx context.Context, msg *pubsub.Messag
 			"Seq":         msg.GetSeqno(),
 			"Attestation": attestation,
 			"Timestamp":   now,
+		},
+	}
+
+	if err := p.cfg.DataStream.PutEvent(ctx, evt); err != nil {
+		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+	}
+
+	return nil
+
+}
+
+func (p *PubSub) handleBeaconDataColumnSidecar(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
+	sidecar := &ethtypes.DataColumnSidecar{}
+	if err := p.cfg.Encoder.DecodeGossip(msg.Data, sidecar); err != nil {
+		return fmt.Errorf("error decoding electra data column sidecar gossip message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      "HANDLE_MESSAGE",
+		PeerID:    p.host.ID(),
+		Timestamp: now,
+		Payload: map[string]any{
+			"PeerID":    msg.ReceivedFrom.String(),
+			"MsgID":     hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":   len(msg.Data),
+			"Topic":     msg.GetTopic(),
+			"Seq":       msg.GetSeqno(),
+			"Sidecar":   sidecar,
+			"Timestamp": now,
 		},
 	}
 

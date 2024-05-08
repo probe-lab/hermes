@@ -20,7 +20,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.12.2
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
-	github.com/prysmaticlabs/prysm/v5 v5.0.2
+	github.com/prysmaticlabs/prysm/v5 v5.0.4-0.20240507051732-39060d20cdd9
 	github.com/stretchr/testify v1.9.0
 	github.com/thejerf/suture/v4 v4.0.5
 	github.com/urfave/cli/v2 v2.27.1
@@ -73,7 +73,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/elastic/gosigar v0.14.2 // indirect
-	github.com/ethereum/c-kzg-4844 v0.4.0 // indirect
+	github.com/ethereum/c-kzg-4844 v1.0.1-0.20240422190800-13be436f5927 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
