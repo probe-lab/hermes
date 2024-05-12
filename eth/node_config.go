@@ -419,6 +419,9 @@ func topicFormatFromBase(topicBase string) (string, error) {
 	case p2p.GossipBlobSidecarMessage:
 		return p2p.BlobSubnetTopicFormat, nil
 
+	case p2p.GossipDataColumnSidecarMessage:
+		return p2p.DataColumnSubnetTopicFormat, nil
+
 	default:
 		return "", fmt.Errorf("unrecognized gossip topic base: %s", topicBase)
 	}
@@ -434,6 +437,9 @@ func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 
 	case p2p.GossipBlobSidecarMessage:
 		return currentBeaconConfig.BlobsidecarSubnetCount, true
+
+	case p2p.GossipDataColumnSidecarMessage:
+		return currentBeaconConfig.DataColumnSidecarSubnetCount, true
 
 	default:
 		return uint64(0), false

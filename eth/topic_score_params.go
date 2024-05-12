@@ -26,6 +26,7 @@ const (
 	voluntaryExitWeight        = 0.05
 	blsToExecutionChangeWeight = 0.05
 	attestationWeight          = 0.05
+	dataColumnSidecarWeight    = 0.05
 
 	// mesh-related params
 	maxInMeshScore        = 10
@@ -43,8 +44,10 @@ func topicToScoreParamsMapper(topic string, activeValidators uint64) *pubsub.Top
 	switch {
 	case strings.Contains(topic, p2p.GossipBlockMessage):
 		return defaultBlockTopicParams()
+
 	case strings.Contains(topic, p2p.GossipAttestationMessage):
 		return defaultAttestationTopicParams()
+
 	case strings.Contains(topic, p2p.GossipAggregateAndProofMessage):
 		return defaultAggregateTopicParams(activeValidators)
 
@@ -71,6 +74,9 @@ func topicToScoreParamsMapper(topic string, activeValidators uint64) *pubsub.Top
 
 	case strings.Contains(topic, p2p.GossipBlobSidecarMessage):
 		return defaultBlockTopicParams()
+
+	case strings.Contains(topic, p2p.GossipDataColumnSidecarMessage):
+		return defaultDataColumnSidecarTopicParams()
 
 	default:
 		slog.Warn("unrecognized gossip-topic to apply peerscores", slog.Attr{Key: "topic", Value: slog.StringValue(topic)})
@@ -393,6 +399,28 @@ func defaultBlsToExecutionChangeTopicParams() *pubsub.TopicScoreParams {
 func defaultAttestationTopicParams() *pubsub.TopicScoreParams {
 	return &pubsub.TopicScoreParams{
 		TopicWeight:                     attestationWeight,
+		TimeInMeshWeight:                maxInMeshScore / inMeshCap(),
+		TimeInMeshQuantum:               inMeshTime(),
+		TimeInMeshCap:                   inMeshCap(),
+		FirstMessageDeliveriesWeight:    2,
+		FirstMessageDeliveriesDecay:     scoreDecay(oneHundredEpochs),
+		FirstMessageDeliveriesCap:       5,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      0,
+		MeshMessageDeliveriesCap:        0,
+		MeshMessageDeliveriesThreshold:  0,
+		MeshMessageDeliveriesWindow:     0,
+		MeshMessageDeliveriesActivation: 0,
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         0,
+		InvalidMessageDeliveriesWeight:  -2000,
+		InvalidMessageDeliveriesDecay:   scoreDecay(invalidDecayPeriod),
+	}
+}
+
+func defaultDataColumnSidecarTopicParams() *pubsub.TopicScoreParams {
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     dataColumnSidecarWeight,
 		TimeInMeshWeight:                maxInMeshScore / inMeshCap(),
 		TimeInMeshQuantum:               inMeshTime(),
 		TimeInMeshCap:                   inMeshCap(),

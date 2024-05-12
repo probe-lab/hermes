@@ -22,7 +22,6 @@ func cmdEthChainsAction(c *cli.Context) error {
 	chains := []string{
 		params.MainnetName,
 		params.SepoliaName,
-		params.PraterName,
 		params.HoleskyName,
 	}
 
