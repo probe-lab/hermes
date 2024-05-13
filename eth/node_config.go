@@ -383,6 +383,7 @@ func desiredPubSubBaseTopics() []string {
 		p2p.GossipContributionAndProofMessage,
 		// p2p.GossipSyncCommitteeMessage,
 		p2p.GossipBlsToExecutionChangeMessage,
+		p2p.GossipDataColumnSidecarMessage,
 		// p2p.GossipBlobSidecarMessage,
 	}
 }
