@@ -490,6 +490,42 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 }
 
 func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pubsub.Message) error {
+	pb := &ethtypes.BLSToExecutionChange{}
+	if err := p.cfg.Encoder.DecodeGossip(msg.Data, pb); err != nil {
+		return fmt.Errorf("decode bls to execution change message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"PeerID":             msg.ReceivedFrom.String(),
+			"MsgID":              hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":            len(msg.Data),
+			"Topic":              msg.GetTopic(),
+			"Seq":                msg.GetSeqno(),
+			"ValIdx":             pb.GetValidatorIndex(),
+			"FromBlsPubkey":      hexutil.Encode(pb.GetFromBlsPubkey()),
+			"ToExecutionAddress": hexutil.Encode(pb.GetToExecutionAddress()),
+		},
+	}
+	slog.Info(
+		"Handling bls to execution change message",
+		"PeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"ValIdx", pb.GetValidatorIndex(),
+		"FromBlsPubkey", hexutil.Encode(pb.GetFromBlsPubkey()),
+		"ToExecutionAddress", hexutil.Encode(pb.GetToExecutionAddress()),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting bls to execution change event", tele.LogAttrError(err))
+	}
+
 	return nil
 }
 
