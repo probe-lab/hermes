@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -20,6 +21,8 @@ import (
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
+
+const eventTypeHandleMessage = "HANDLE_MESSAGE"
 
 type PubSubConfig struct {
 	Topics         []string
@@ -108,6 +111,8 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	switch {
 	case strings.Contains(topic, p2p.GossipBlockMessage):
 		return p.handleBeaconBlock
+	case strings.Contains(topic, p2p.GossipAggregateAndProofMessage):
+		return p.handleAggregateAndProof
 	default:
 		return p.host.TracedTopicHandler(host.NoopHandler)
 	}
@@ -143,7 +148,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 	slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
 
 	evt := &host.TraceEvent{
-		Type:      "HANDLE_MESSAGE",
+		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
 		Timestamp: now,
 		Payload: map[string]any{
@@ -160,6 +165,51 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+	}
+
+	return nil
+}
+
+func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Message) error {
+	ap := &ethtypes.SignedAggregateAttestationAndProof{}
+	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ap); err != nil {
+		return fmt.Errorf("decode aggregate and proof message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"PeerID":         msg.ReceivedFrom.String(),
+			"MsgID":          hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":        len(msg.Data),
+			"Topic":          msg.GetTopic(),
+			"Seq":            msg.GetSeqno(),
+			"Sig":            hexutil.Encode(ap.GetSignature()),
+			"AggIdx":         ap.GetMessage().GetAggregatorIndex(),
+			"SelectionProof": hexutil.Encode(ap.GetMessage().GetSelectionProof()),
+			// There are other details in the SignedAggregateAttestationAndProof message, add them when needed.
+		},
+	}
+	slog.Info(
+		"Handling aggregate and proof message",
+		"PeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"Sig", hexutil.Encode(ap.GetSignature()),
+		"AggIdx", ap.GetMessage().GetAggregatorIndex(),
+		"SelectionProof", hexutil.Encode(ap.GetMessage().GetSelectionProof()),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn(
+			"failed putting topic handler event",
+			"topic", msg.GetTopic(),
+			"err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
