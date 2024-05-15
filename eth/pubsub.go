@@ -115,6 +115,8 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 		return p.handleAggregateAndProof
 	case strings.Contains(topic, p2p.GossipAttestationMessage):
 		return p.handleAttestation
+	case strings.Contains(topic, p2p.GossipSyncCommitteeMessage) && !strings.Contains(topic, p2p.GossipContributionAndProofMessage):
+		return p.handleSyncCommitteeMessage
 	default:
 		return p.host.TracedTopicHandler(host.NoopHandler)
 	}
@@ -185,7 +187,7 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 
 	now := time.Now()
 	evt := &host.TraceEvent{
-		Type:      "HANDLE_MESSAGE",
+		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
 		Timestamp: now,
 		Payload: map[string]any{
@@ -262,6 +264,49 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 			"topic", msg.GetTopic(),
 			"err", tele.LogAttrError(err),
 		)
+	}
+
+	return nil
+}
+
+func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Message) error {
+	sc := &ethtypes.SyncCommitteeMessage{}
+	err := p.cfg.Encoder.DecodeGossip(msg.Data, sc)
+	if err != nil {
+		return fmt.Errorf("decode sync committee message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"PeerID":    msg.ReceivedFrom.String(),
+			"MsgID":     hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":   len(msg.Data),
+			"Topic":     msg.GetTopic(),
+			"Seq":       msg.GetSeqno(),
+			"Slot":      sc.GetSlot(),
+			"ValIdx":    sc.GetValidatorIndex(),
+			"BlockRoot": hexutil.Encode(sc.GetBlockRoot()),
+			"Signature": hexutil.Encode(sc.GetSignature()),
+		},
+	}
+	slog.Info(
+		"Handling sync committee message",
+		"PeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"Slot", sc.GetSlot(),
+		"ValIdx", sc.GetValidatorIndex(),
+		"BlockRoot", hexutil.Encode(sc.GetBlockRoot()),
+		"Signature", hexutil.Encode(sc.GetSignature()),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting sync committee event", tele.LogAttrError(err))
 	}
 
 	return nil
