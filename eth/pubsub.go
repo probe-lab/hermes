@@ -362,10 +362,88 @@ func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) err
 }
 
 func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
+	as := &ethtypes.AttesterSlashing{}
+	err := p.cfg.Encoder.DecodeGossip(msg.Data, as)
+	if err != nil {
+		return fmt.Errorf("decode voluntary exit message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"PeerID":       msg.ReceivedFrom.String(),
+			"MsgID":        hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":      len(msg.Data),
+			"Topic":        msg.GetTopic(),
+			"Seq":          msg.GetSeqno(),
+			"Att1_indices": as.GetAttestation_1().GetAttestingIndices(),
+			"Att2_indices": as.GetAttestation_2().GetAttestingIndices(),
+		},
+	}
+	slog.Info(
+		"Handling voluntary exit message",
+		"PeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"Att1_indices", as.GetAttestation_1().GetAttestingIndices(),
+		"Att2_indices", as.GetAttestation_2().GetAttestingIndices(),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting attester slashing event", tele.LogAttrError(err))
+	}
+
 	return nil
 }
 
 func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
+	ps := &ethtypes.ProposerSlashing{}
+	err := p.cfg.Encoder.DecodeGossip(msg.Data, ps)
+	if err != nil {
+		return fmt.Errorf("decode voluntary exit message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"PeerID":                msg.ReceivedFrom.String(),
+			"MsgID":                 hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":               len(msg.Data),
+			"Topic":                 msg.GetTopic(),
+			"Seq":                   msg.GetSeqno(),
+			"Header1_Slot":          ps.GetHeader_1().GetHeader().GetSlot(),
+			"Header1_ProposerIndex": ps.GetHeader_1().GetHeader().GetProposerIndex(),
+			"Header1_StateRoot":     hexutil.Encode(ps.GetHeader_1().GetHeader().GetStateRoot()),
+			"Header2_Slot":          ps.GetHeader_2().GetHeader().GetSlot(),
+			"Header2_ProposerIndex": ps.GetHeader_2().GetHeader().GetProposerIndex(),
+			"Header2_StateRoot":     hexutil.Encode(ps.GetHeader_2().GetHeader().GetStateRoot()),
+		},
+	}
+	slog.Info(
+		"Handling voluntary exit message",
+		"PeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"Header1_Slot", ps.GetHeader_1().GetHeader().GetSlot(),
+		"Header1_ProposerIndex", ps.GetHeader_1().GetHeader().GetProposerIndex(),
+		"Header1_StateRoot", hexutil.Encode(ps.GetHeader_1().GetHeader().GetStateRoot()),
+		"Header2_Slot", ps.GetHeader_2().GetHeader().GetSlot(),
+		"Header2_ProposerIndex", ps.GetHeader_2().GetHeader().GetProposerIndex(),
+		"Header2_StateRoot", hexutil.Encode(ps.GetHeader_2().GetHeader().GetStateRoot()),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting proposer slashing event", tele.LogAttrError(err))
+	}
+
 	return nil
 }
 
