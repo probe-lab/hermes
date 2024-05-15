@@ -213,19 +213,6 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 			"Target":          attestation.GetData().GetTarget(),
 		},
 	}
-	slog.Info(
-		"Handling attestation gossip message",
-		"PeerID", p.host.ID(),
-		"RemotePeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"CommIdx", attestation.GetData().GetCommitteeIndex(),
-		"Slot", attestation.GetData().GetSlot(),
-		"BeaconBlockRoot", attestation.GetData().GetBeaconBlockRoot(),
-		// There are other details in the Attestation message, add them when needed.
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
@@ -256,17 +243,6 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 			// There are other details in the SignedAggregateAttestationAndProof message, add them when needed.
 		},
 	}
-	slog.Info(
-		"Handling aggregate and proof message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"Sig", hexutil.Encode(ap.GetSignature()),
-		"AggIdx", ap.GetMessage().GetAggregatorIndex(),
-		"SelectionProof", hexutil.Encode(ap.GetMessage().GetSelectionProof()),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn(
@@ -299,16 +275,6 @@ func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) err
 			"ValIdx":  ve.GetValidatorIndex(),
 		},
 	}
-	slog.Info(
-		"Handling voluntary exit message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"Epoch", ve.GetEpoch(),
-		"ValIdx", ve.GetValidatorIndex(),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting voluntary exit event", tele.LogAttrError(err))
@@ -337,16 +303,6 @@ func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.
 			"Att2_indices": as.GetAttestation_2().GetAttestingIndices(),
 		},
 	}
-	slog.Info(
-		"Handling attester slashing message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"Att1_indices", as.GetAttestation_1().GetAttestingIndices(),
-		"Att2_indices", as.GetAttestation_2().GetAttestingIndices(),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting attester slashing event", tele.LogAttrError(err))
@@ -379,20 +335,6 @@ func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.
 			"Header2_StateRoot":     hexutil.Encode(ps.GetHeader_2().GetHeader().GetStateRoot()),
 		},
 	}
-	slog.Info(
-		"Handling proposer slashing message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"Header1_Slot", ps.GetHeader_1().GetHeader().GetSlot(),
-		"Header1_ProposerIndex", ps.GetHeader_1().GetHeader().GetProposerIndex(),
-		"Header1_StateRoot", hexutil.Encode(ps.GetHeader_1().GetHeader().GetStateRoot()),
-		"Header2_Slot", ps.GetHeader_2().GetHeader().GetSlot(),
-		"Header2_ProposerIndex", ps.GetHeader_2().GetHeader().GetProposerIndex(),
-		"Header2_StateRoot", hexutil.Encode(ps.GetHeader_2().GetHeader().GetStateRoot()),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting proposer slashing event", tele.LogAttrError(err))
@@ -402,12 +344,10 @@ func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.
 }
 
 func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pubsub.Message) error {
-	cp := &ethtypes.ContributionAndProof{}
+	cp := &ethtypes.SignedContributionAndProof{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, cp); err != nil {
 		return fmt.Errorf("decode contribution and proof message: %w", err)
 	}
-	cp.GetAggregatorIndex()
-	cp.GetContribution()
 
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
@@ -419,26 +359,13 @@ func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pu
 			"MsgSize":                 len(msg.Data),
 			"Topic":                   msg.GetTopic(),
 			"Seq":                     msg.GetSeqno(),
-			"AggIdx":                  cp.GetAggregatorIndex(),
-			"Contrib_Slot":            cp.GetContribution().GetSlot(),
-			"Contrib_SubCommitteeIdx": cp.GetContribution().GetSubcommitteeIndex(),
-			"Contrib_BlockRoot":       cp.GetContribution().GetBlockRoot(),
-			"Contrib_Signature":       hexutil.Encode(cp.GetContribution().GetSignature()),
+			"Sig":                     hexutil.Encode(cp.GetSignature()),
+			"AggIdx":                  cp.GetMessage().GetAggregatorIndex(),
+			"Contrib_Slot":            cp.GetMessage().GetContribution().GetSlot(),
+			"Contrib_SubCommitteeIdx": cp.GetMessage().GetContribution().GetSubcommitteeIndex(),
+			"Contrib_BlockRoot":       cp.GetMessage().GetContribution().GetBlockRoot(),
 		},
 	}
-	slog.Info(
-		"Handling contribution and proof message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"AggIdx", cp.GetAggregatorIndex(),
-		"Contrib_Slot", cp.GetContribution().GetSlot(),
-		"Contrib_SubCommitteeIdx", cp.GetContribution().GetSubcommitteeIndex(),
-		"Contrib_BlockRoot", cp.GetContribution().GetBlockRoot(),
-		"Contrib_Signature", hexutil.Encode(cp.GetContribution().GetSignature()),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting contribution and proof event", tele.LogAttrError(err))
@@ -469,18 +396,6 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 			"Signature": hexutil.Encode(sc.GetSignature()),
 		},
 	}
-	slog.Info(
-		"Handling sync committee message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"Slot", sc.GetSlot(),
-		"ValIdx", sc.GetValidatorIndex(),
-		"BlockRoot", hexutil.Encode(sc.GetBlockRoot()),
-		"Signature", hexutil.Encode(sc.GetSignature()),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting sync committee event", tele.LogAttrError(err))
@@ -510,17 +425,6 @@ func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pub
 			"ToExecutionAddress": hexutil.Encode(pb.GetToExecutionAddress()),
 		},
 	}
-	slog.Info(
-		"Handling bls to execution change message",
-		"PeerID", msg.ReceivedFrom.String(),
-		"MsgID", hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize", len(msg.Data),
-		"Topic", msg.GetTopic(),
-		"Seq", msg.GetSeqno(),
-		"ValIdx", pb.GetValidatorIndex(),
-		"FromBlsPubkey", hexutil.Encode(pb.GetFromBlsPubkey()),
-		"ToExecutionAddress", hexutil.Encode(pb.GetToExecutionAddress()),
-	)
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting bls to execution change event", tele.LogAttrError(err))
