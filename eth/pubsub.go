@@ -115,8 +115,18 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 		return p.handleAggregateAndProof
 	case strings.Contains(topic, p2p.GossipAttestationMessage):
 		return p.handleAttestation
-	case strings.Contains(topic, p2p.GossipSyncCommitteeMessage) && !strings.Contains(topic, p2p.GossipContributionAndProofMessage):
+	case strings.Contains(topic, p2p.GossipExitMessage):
+		return p.handleExitMessage
+	case strings.Contains(topic, p2p.GossipAttesterSlashingMessage):
+		return p.handleAttesterSlashingMessage
+	case strings.Contains(topic, p2p.GossipProposerSlashingMessage):
+		return p.handleProposerSlashingMessage
+	case strings.Contains(topic, p2p.GossipContributionAndProofMessage):
+		return p.handleContributtionAndProofMessage
+	case strings.Contains(topic, p2p.GossipSyncCommitteeMessage):
 		return p.handleSyncCommitteeMessage
+	case strings.Contains(topic, p2p.GossipBlsToExecutionChangeMessage):
+		return p.handleBlsToExecutionChangeMessage
 	default:
 		return p.host.TracedTopicHandler(host.NoopHandler)
 	}
@@ -309,6 +319,61 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 		slog.Warn("failed putting sync committee event", tele.LogAttrError(err))
 	}
 
+	return nil
+}
+
+func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) error {
+	ve := &ethtypes.VoluntaryExit{}
+	err := p.cfg.Encoder.DecodeGossip(msg.Data, ve)
+	if err != nil {
+		return fmt.Errorf("decode voluntary exit message: %w", err)
+	}
+
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"PeerID":  msg.ReceivedFrom.String(),
+			"MsgID":   hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize": len(msg.Data),
+			"Topic":   msg.GetTopic(),
+			"Seq":     msg.GetSeqno(),
+			"Epoch":   ve.GetEpoch(),
+			"ValIdx":  ve.GetValidatorIndex(),
+		},
+	}
+	slog.Info(
+		"Handling voluntary exit message",
+		"PeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"Epoch", ve.GetEpoch(),
+		"ValIdx", ve.GetValidatorIndex(),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting voluntary exit event", tele.LogAttrError(err))
+	}
+
+	return nil
+}
+
+func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
+	return nil
+}
+
+func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
+	return nil
+}
+
+func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pubsub.Message) error {
+	return nil
+}
+
+func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pubsub.Message) error {
 	return nil
 }
 
