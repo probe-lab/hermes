@@ -383,7 +383,7 @@ func desiredPubSubBaseTopics() []string {
 		p2p.GossipContributionAndProofMessage,
 		// p2p.GossipSyncCommitteeMessage,
 		p2p.GossipBlsToExecutionChangeMessage,
-		// p2p.GossipBlobSidecarMessage,
+		p2p.GossipBlobSidecarMessage,
 	}
 }
 
@@ -441,7 +441,7 @@ func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 }
 
 func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
-	if subnet > 1 { // as far as I know, there aren't subnets with index 0
+	if subnet > 0 { // as far as I know, there aren't subnets with index 0
 		return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
 	} else {
 		return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
