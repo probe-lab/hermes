@@ -127,6 +127,8 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 		return p.handleSyncCommitteeMessage
 	case strings.Contains(topic, p2p.GossipBlsToExecutionChangeMessage):
 		return p.handleBlsToExecutionChangeMessage
+	case strings.Contains(topic, p2p.GossipBlobSidecarMessage):
+		return p.handleBlobSidecar
 	default:
 		return p.host.TracedTopicHandler(host.NoopHandler)
 	}
@@ -428,6 +430,50 @@ func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pub
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting bls to execution change event", tele.LogAttrError(err))
+	}
+
+	return nil
+}
+
+func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) error {
+	switch p.cfg.ForkVersion {
+	case DenebForkVersion:
+		var blob ethtypes.BlobSidecar
+		err := p.cfg.Encoder.DecodeGossip(msg.Data, &blob)
+		if err != nil {
+			slog.Error("decode blob sidecar gossip message", tele.LogAttrError(err))
+			return err
+		}
+
+		slot := blob.GetSignedBlockHeader().GetHeader().GetSlot()
+		slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
+		proposerIndex := blob.GetSignedBlockHeader().GetHeader().GetProposerIndex()
+
+		now := time.Now()
+		evt := &host.TraceEvent{
+			Type:      "HANDLE_MESSAGE",
+			PeerID:    p.host.ID(),
+			Timestamp: now,
+			Payload: map[string]any{
+				"PeerID":     msg.ReceivedFrom.String(),
+				"MsgID":      hex.EncodeToString([]byte(msg.ID)),
+				"MsgSize":    len(msg.Data),
+				"Topic":      msg.GetTopic(),
+				"Seq":        msg.GetSeqno(),
+				"Slot":       slot,
+				"ValIdx":     proposerIndex,
+				"TimeInSlot": now.Sub(slotStart).Seconds(),
+				"StateRoot":  hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetStateRoot()),
+				"BodyRoot":   hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetBodyRoot()),
+				"ParentRoot": hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetParentRoot()),
+			},
+		}
+
+		if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+			slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+		}
+	default:
+		return fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
 	}
 
 	return nil
