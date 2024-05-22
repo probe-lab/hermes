@@ -201,15 +201,15 @@ You can find the UI at [`http://localhost:16686`](http://localhost:16686). Port 
 Run Hermes with the `--tracing` flag. To change the address of the trace collector, you can also specify `--tracing.addr` and `--tracing.port`.
 
 ## Differences with other tools
-Hermes jumps to the web3/blockchain/libp2p ecosystem with a pretty consolidated tooling around it, such as the existing variety of network crawlers or light clients for most mature networks. Despite it could look competence for other toolings, there was still a large incentive to develop it. 
-Hermes was designed to behave as a light node in each supported network, where, on top of being an honest participant supporting all the protocols and RPC endpoints, allowing the streaming of custom internal events (mostly Libp2p-related).
+Hermes jumps to the web3/blockchain/libp2p ecosystem despite a large variety of tools around it, such as the many existing network crawlers or light clients for most mature networks. Although at first sight it might look like a competitor to those, there was still a large incentive to develop it. Here, we describe the gap that Hermes fills as well as the use-cases that it is suitable for.
+Hermes was designed to behave as a light node in each supported network, where, in addition to being an honest participant in the network and supporting all the protocols and RPC endpoints, it also allows streaming of custom internal events (mostly libp2p-related).
 
-It avoids updating and maintaining a custom fork of existing full/light clients, which complicates the control of events and upgradeability of new features.    
+Hermes avoids being based on a custom fork of existing full/light clients, which would come with non-negligible maintenance baggage and would complicate having control of events.    
 
 Currently available similar tools:
 
-### Armiarma Crawler from MigaLabs
-Although both tools seem to be focusing on the same goals at first sight, they have significant differences in their use cases and their targets in data collection and metrics.
+### Armiarma Crawler from MigaLabs vs Hermes from ProbeLab
+Although both Hermes and Armiarma seem to be focusing on the same goals at first sight, they have significant differences in their use cases and their targets in data collection and metrics.
 
 [Armiarma](https://github.com/migalabs/armiarma) is a network crawler that relies on running discv5 peer discovery service and a libp2p host 24/7 to establish connections. However, significant modifications have been made to connect to as many peers as possible (custom peering module). This way, it tries to identify as many peers as possible in the network periodically. Thus, its focus is mainly on opening and identifying as many peers as possible, rather than maintaining stable connections to other peers in the network.
 
