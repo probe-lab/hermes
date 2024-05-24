@@ -462,6 +462,7 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 				"Seq":        msg.GetSeqno(),
 				"Slot":       slot,
 				"ValIdx":     proposerIndex,
+				"index":      blob.GetIndex(),
 				"TimeInSlot": now.Sub(slotStart).Seconds(),
 				"StateRoot":  hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetStateRoot()),
 				"BodyRoot":   hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetBodyRoot()),
