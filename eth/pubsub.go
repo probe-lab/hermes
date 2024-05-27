@@ -214,7 +214,7 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 	// that denotes _which_ aggregation bit is set. This is required to determine which validator created the attestation.
 	// In the pursuit of reducing the amount of data stored in the data stream we omit this field if the attestation is
 	// aggregated.
-	if len(attestation.GetAggregationBits()) == 1 {
+	if attestation.GetAggregationBits().Count() == 1 {
 		payload["AggregatePos"] = attestation.AggregationBits.BitIndices()[0]
 	}
 
