@@ -376,14 +376,17 @@ func desiredPubSubBaseTopics() []string {
 	return []string{
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
-		// p2p.GossipAttestationMessage,
-		p2p.GossipExitMessage,
+		p2p.GossipAttestationMessage,
+		// In relation to https://github.com/probe-lab/hermes/issues/24
+		// we unfortunatelly can't validate the messages (yet)
+		// thus, better not to forward invalid messages
+		//p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
-		// p2p.GossipSyncCommitteeMessage,
+		p2p.GossipSyncCommitteeMessage,
 		p2p.GossipBlsToExecutionChangeMessage,
-		// p2p.GossipBlobSidecarMessage,
+		p2p.GossipBlobSidecarMessage,
 	}
 }
 
@@ -441,7 +444,7 @@ func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 }
 
 func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
-	if subnet > 1 { // as far as I know, there aren't subnets with index 0
+	if subnet > 0 { // as far as I know, there aren't subnets with index 0
 		return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
 	} else {
 		return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
@@ -475,8 +478,9 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	desiredTopics := n.getDesiredFullTopics(encoder)
 	topicScores := make(map[string]*pubsub.TopicScoreParams, len(desiredTopics))
 	for _, topic := range desiredTopics {
-		params := topicToScoreParamsMapper(topic, activeValidators)
-		topicScores[topic] = params
+		if params := topicToScoreParamsMapper(topic, activeValidators); params != nil {
+			topicScores[topic] = params
+		}
 	}
 	return topicScores
 }

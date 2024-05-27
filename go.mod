@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kinesis v1.27.3
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
 	github.com/dennis-tra/go-kinesis v0.0.0-20240326083914-7acf5f8dc24e
-	github.com/ethereum/go-ethereum v1.13.14
+	github.com/ethereum/go-ethereum v1.13.15
 	github.com/ferranbt/fastssz v0.1.3
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
