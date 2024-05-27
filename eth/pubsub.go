@@ -197,13 +197,25 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		return fmt.Errorf("decode attestation gossip message: %w", err)
 	}
 
+	payload := map[string]any{
+		"PeerID":          msg.ReceivedFrom.String(),
+		"MsgID":           hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":         len(msg.Data),
+		"Topic":           msg.GetTopic(),
+		"Seq":             msg.GetSeqno(),
+		"CommIdx":         attestation.GetData().GetCommitteeIndex(),
+		"Slot":            attestation.GetData().GetSlot(),
+		"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
+		"Source":          attestation.GetData().GetSource(),
+		"Target":          attestation.GetData().GetTarget(),
+	}
+
 	// If the attestation only has one aggregation bit set, we can add an additional field to the payload
 	// that denotes _which_ aggregation bit is set. This is required to determine which validator created the attestation.
 	// In the pursuit of reducing the amount of data stored in the data stream we omit this field if the attestation is
 	// aggregated.
-	aggregatePosition := -1
 	if len(attestation.GetAggregationBits()) == 1 {
-		aggregatePosition = attestation.AggregationBits.BitIndices()[0]
+		payload["AggregatePos"] = attestation.AggregationBits.BitIndices()[0]
 	}
 
 	now := time.Now()
@@ -211,19 +223,7 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
 		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":          msg.ReceivedFrom.String(),
-			"MsgID":           hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":         len(msg.Data),
-			"Topic":           msg.GetTopic(),
-			"Seq":             msg.GetSeqno(),
-			"CommIdx":         attestation.GetData().GetCommitteeIndex(),
-			"Slot":            attestation.GetData().GetSlot(),
-			"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
-			"Source":          attestation.GetData().GetSource(),
-			"Target":          attestation.GetData().GetTarget(),
-			"AggregatePos":    aggregatePosition,
-		},
+		Payload:   payload,
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
