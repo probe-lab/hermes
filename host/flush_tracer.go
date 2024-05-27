@@ -72,39 +72,39 @@ func (h *Host) FlushTraceWithTimestamp(evtType string, timestamp time.Time, payl
 }
 
 func (h *Host) AddPeer(p peer.ID, proto protocol.ID) {
-	h.FlushTrace("ADD_PEER", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_ADD_PEER.String(), map[string]any{
 		"PeerID":   p,
 		"Protocol": proto,
 	})
 }
 
 func (h *Host) RemovePeer(p peer.ID) {
-	h.FlushTrace("REMOVE_PEER", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_REMOVE_PEER.String(), map[string]any{
 		"PeerID": p,
 	})
 }
 
 func (h *Host) Join(topic string) {
-	h.FlushTrace("JOIN", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_JOIN.String(), map[string]any{
 		"Topic": topic,
 	})
 }
 
 func (h *Host) Leave(topic string) {
-	h.FlushTrace("LEAVE", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_LEAVE.String(), map[string]any{
 		"Topic": topic,
 	})
 }
 
 func (h *Host) Graft(p peer.ID, topic string) {
-	h.FlushTrace("GRAFT", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_GRAFT.String(), map[string]any{
 		"PeerID": p,
 		"Topic":  topic,
 	})
 }
 
 func (h *Host) Prune(p peer.ID, topic string) {
-	h.FlushTrace("PRUNE", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_PRUNE.String(), map[string]any{
 		"PeerID": p,
 		"Topic":  topic,
 	})
@@ -122,7 +122,7 @@ func (h *Host) ValidateMessage(msg *pubsub.Message) {
 }
 
 func (h *Host) DeliverMessage(msg *pubsub.Message) {
-	h.FlushTrace("DELIVER_MESSAGE", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_DELIVER_MESSAGE.String(), map[string]any{
 		"PeerID":  msg.ReceivedFrom,
 		"Topic":   msg.GetTopic(),
 		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
@@ -133,7 +133,7 @@ func (h *Host) DeliverMessage(msg *pubsub.Message) {
 }
 
 func (h *Host) RejectMessage(msg *pubsub.Message, reason string) {
-	h.FlushTrace("REJECT_MESSAGE", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_REJECT_MESSAGE.String(), map[string]any{
 		"PeerID":  msg.ReceivedFrom,
 		"Topic":   msg.GetTopic(),
 		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
@@ -145,7 +145,7 @@ func (h *Host) RejectMessage(msg *pubsub.Message, reason string) {
 }
 
 func (h *Host) DuplicateMessage(msg *pubsub.Message) {
-	h.FlushTrace("DUPLICATE_MESSAGE", map[string]any{
+	h.FlushTrace(pubsubpb.TraceEvent_DUPLICATE_MESSAGE.String(), map[string]any{
 		"PeerID":  msg.ReceivedFrom,
 		"Topic":   msg.GetTopic(),
 		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
@@ -186,18 +186,18 @@ func (h *Host) Trace(evt *pubsubpb.TraceEvent) {
 	ts := time.Unix(0, evt.GetTimestamp())
 	switch evt.GetType() {
 	case pubsubpb.TraceEvent_PUBLISH_MESSAGE:
-		h.FlushTraceWithTimestamp("PUBLISH_MESSAGE", ts, map[string]any{
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_PUBLISH_MESSAGE.String(), ts, map[string]any{
 			"MsgID": evt.GetPublishMessage().GetMessageID(),
 			"Topic": evt.GetPublishMessage().GetTopic(),
 		})
 	case pubsubpb.TraceEvent_RECV_RPC:
 		payload := newRPCMeta(evt.GetRecvRPC().GetReceivedFrom(), evt.GetRecvRPC().GetMeta())
-		h.FlushTraceWithTimestamp("RECV_RPC", ts, payload)
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_RECV_RPC.String(), ts, payload)
 	case pubsubpb.TraceEvent_SEND_RPC:
 		payload := newRPCMeta(evt.GetSendRPC().GetSendTo(), evt.GetSendRPC().GetMeta())
-		h.FlushTraceWithTimestamp("SEND_RPC", ts, payload)
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_SEND_RPC.String(), ts, payload)
 	case pubsubpb.TraceEvent_DROP_RPC:
 		payload := newRPCMeta(evt.GetDropRPC().GetSendTo(), evt.GetDropRPC().GetMeta())
-		h.FlushTraceWithTimestamp("DROP_RPC", ts, payload)
+		h.FlushTraceWithTimestamp(pubsubpb.TraceEvent_DROP_RPC.String(), ts, payload)
 	}
 }
