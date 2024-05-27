@@ -312,8 +312,6 @@ func (p *PrysmClient) getActiveValidatorCount(ctx context.Context) (activeVals u
 }
 
 func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte) (onNetwork bool, err error) {
-	return true, nil
-
 	ctx, span := p.tracer.Start(ctx, "prysm_client.check_on_same_fork_digest")
 	defer func() {
 		if err != nil {
