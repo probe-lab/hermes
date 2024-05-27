@@ -67,8 +67,8 @@ func (k *KinesisDataStream) Stop(ctx context.Context) error {
 	return k.producer.WaitIdle(ctx)
 }
 
-// PutEvent sends an event to the Kinesis data stream.
-func (k *KinesisDataStream) PutEvent(ctx context.Context, event *TraceEvent) error {
+// PutRecord sends an event to the Kinesis data stream.
+func (k *KinesisDataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
 	if event != nil {
 		kRecord := gk.Record(event)
 

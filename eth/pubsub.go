@@ -182,7 +182,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 		},
 	}
 
-	if err := p.cfg.DataStream.PutEvent(ctx, evt); err != nil {
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
 	}
 

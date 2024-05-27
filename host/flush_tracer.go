@@ -63,7 +63,7 @@ func (h *Host) FlushTraceWithTimestamp(evtType string, timestamp time.Time, payl
 	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Second)
 	defer cancel()
 
-	if err := h.cfg.DataStream.PutEvent(ctx, evt); err != nil {
+	if err := h.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn("Failed to put trace event payload", tele.LogAttrError(err))
 		return
 	}

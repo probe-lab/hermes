@@ -47,8 +47,8 @@ func (c *CallbackDataStream) Stop(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// PutEvent sends an event to the callback if the stream has not been stopped.
-func (c *CallbackDataStream) PutEvent(ctx context.Context, event *TraceEvent) error {
+// PutRecord sends an event to the callback if the stream has not been stopped.
+func (c *CallbackDataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
 	if c.stopped {
 		return ctx.Err()
 	}
