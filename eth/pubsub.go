@@ -197,6 +197,15 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		return fmt.Errorf("decode attestation gossip message: %w", err)
 	}
 
+	// If the attestation only has one aggregation bit set, we can add an additional field to the payload
+	// that denotes _which_ aggregation bit is set. This is required to determine which validator created the attestation.
+	// In the pursuit of reducing the amount of data stored in the data stream we omit this field if the attestation is
+	// aggregated.
+	aggregatePosition := -1
+	if len(attestation.GetAggregationBits()) == 1 {
+		aggregatePosition = attestation.AggregationBits.BitIndices()[0]
+	}
+
 	now := time.Now()
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
@@ -213,6 +222,7 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 			"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
 			"Source":          attestation.GetData().GetSource(),
 			"Target":          attestation.GetData().GetTarget(),
+			"AggregatePos":    aggregatePosition,
 		},
 	}
 
