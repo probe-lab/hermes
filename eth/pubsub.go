@@ -178,7 +178,6 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 			"Slot":       slot,
 			"Root":       root,
 			"TimeInSlot": now.Sub(slotStart).Seconds(),
-			"Timestamp":  now,
 		},
 	}
 

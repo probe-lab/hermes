@@ -36,8 +36,11 @@ func (k *KinesisDataStream) Start(ctx context.Context) error {
 	dsCtx, dsCancel := context.WithCancel(ctx)
 
 	k.ctx = dsCtx
-
 	k.cancelFn = dsCancel
+
+	if err := k.producer.Start(ctx); err != nil {
+		return err
+	}
 
 	<-dsCtx.Done()
 
