@@ -54,7 +54,7 @@ func (k *KinesisDataStream) Stop(ctx context.Context) error {
 	if err := k.producer.WaitIdle(timeoutCtx); err != nil {
 		slog.Info("Error waiting for producer to become idle", tele.LogAttrError(err))
 	}
-
+	timeoutCncl()
 	// stop the producer
 	k.cancelFn()
 
