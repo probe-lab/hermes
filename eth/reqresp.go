@@ -249,10 +249,12 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 
 		traceType := "HANDLE_STREAM"
 
+		protocol := string(s.Protocol())
+
 		// Usual protocol string: /eth2/beacon_chain/req/metadata/2/ssz_snappy
-		parts := strings.Split(string(s.Protocol()), "/")
+		parts := strings.Split(protocol, "/")
 		if len(parts) > 4 {
-			traceType = "HANDLE_" + strings.ToUpper(parts[4])
+			traceType = hermeshost.EventTypeFromBeaconChainProtocol(protocol)
 		}
 
 		commonData := map[string]any{

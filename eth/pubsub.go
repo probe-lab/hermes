@@ -152,7 +152,9 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 }
 
 func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) error {
-	genericBlock, err := p.getSignedBeaconBlockForForkDigest(msg.Data)
+	now := time.Now()
+
+	genericBlock, root, err := p.getSignedBeaconBlockForForkDigest(msg.Data)
 	if err != nil {
 		return err
 	}
@@ -160,7 +162,6 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 	slot := genericBlock.GetSlot()
 	ProposerIndex := genericBlock.GetProposerIndex()
 
-	now := time.Now()
 	slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
 
 	evt := &host.TraceEvent{
@@ -175,6 +176,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 			"Seq":        msg.GetSeqno(),
 			"ValIdx":     ProposerIndex,
 			"Slot":       slot,
+			"Root":       root,
 			"TimeInSlot": now.Sub(slotStart).Seconds(),
 		},
 	}
@@ -187,6 +189,8 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 }
 
 func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
 		return fmt.Errorf("nil message or topic")
 	}
@@ -218,7 +222,6 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		payload["AggregatePos"] = attestation.AggregationBits.BitIndices()[0]
 	}
 
-	now := time.Now()
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
@@ -234,6 +237,8 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 }
 
 func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	ap := &ethtypes.SignedAggregateAttestationAndProof{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ap); err != nil {
 		return fmt.Errorf("decode aggregate and proof message: %w", err)
@@ -242,7 +247,7 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":         msg.ReceivedFrom.String(),
 			"MsgID":          hex.EncodeToString([]byte(msg.ID)),
@@ -268,6 +273,8 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 }
 
 func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	ve := &ethtypes.VoluntaryExit{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ve); err != nil {
 		return fmt.Errorf("decode voluntary exit message: %w", err)
@@ -276,7 +283,7 @@ func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) err
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":  msg.ReceivedFrom.String(),
 			"MsgID":   hex.EncodeToString([]byte(msg.ID)),
@@ -296,6 +303,8 @@ func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) err
 }
 
 func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	as := &ethtypes.AttesterSlashing{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, as); err != nil {
 		return fmt.Errorf("decode attester slashing message: %w", err)
@@ -304,7 +313,7 @@ func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":       msg.ReceivedFrom.String(),
 			"MsgID":        hex.EncodeToString([]byte(msg.ID)),
@@ -324,6 +333,8 @@ func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.
 }
 
 func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	ps := &ethtypes.ProposerSlashing{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ps); err != nil {
 		return fmt.Errorf("decode proposer slashing message: %w", err)
@@ -332,7 +343,7 @@ func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":                msg.ReceivedFrom.String(),
 			"MsgID":                 hex.EncodeToString([]byte(msg.ID)),
@@ -356,6 +367,8 @@ func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.
 }
 
 func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	cp := &ethtypes.SignedContributionAndProof{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, cp); err != nil {
 		return fmt.Errorf("decode contribution and proof message: %w", err)
@@ -364,7 +377,7 @@ func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pu
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":                  msg.ReceivedFrom.String(),
 			"MsgID":                   hex.EncodeToString([]byte(msg.ID)),
@@ -387,6 +400,8 @@ func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pu
 }
 
 func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	sc := &ethtypes.SyncCommitteeMessage{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, sc); err != nil {
 		return fmt.Errorf("decode sync committee message: %w", err)
@@ -395,7 +410,7 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":    msg.ReceivedFrom.String(),
 			"MsgID":     hex.EncodeToString([]byte(msg.ID)),
@@ -417,6 +432,8 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 }
 
 func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	pb := &ethtypes.BLSToExecutionChange{}
 	if err := p.cfg.Encoder.DecodeGossip(msg.Data, pb); err != nil {
 		return fmt.Errorf("decode bls to execution change message: %w", err)
@@ -425,7 +442,7 @@ func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pub
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Payload: map[string]any{
 			"PeerID":             msg.ReceivedFrom.String(),
 			"MsgID":              hex.EncodeToString([]byte(msg.ID)),
@@ -446,6 +463,8 @@ func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pub
 }
 
 func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) error {
+	now := time.Now()
+
 	switch p.cfg.ForkVersion {
 	case DenebForkVersion:
 		var blob ethtypes.BlobSidecar
@@ -459,7 +478,6 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 		slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
 		proposerIndex := blob.GetSignedBlockHeader().GetHeader().GetProposerIndex()
 
-		now := time.Now()
 		evt := &host.TraceEvent{
 			Type:      "HANDLE_MESSAGE",
 			PeerID:    p.host.ID(),
@@ -499,7 +517,7 @@ type GenericBeaconBlock interface {
 	GetProposerIndex() primitives.ValidatorIndex
 }
 
-func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb GenericBeaconBlock, err error) {
+func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb GenericBeaconBlock, root [32]byte, err error) {
 	// get the correct fork
 
 	switch p.cfg.ForkVersion {
@@ -507,48 +525,68 @@ func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb G
 		phase0Sbb := ethtypes.SignedBeaconBlock{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &phase0Sbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding phase0 beacon block gossip message: %w", err)
 		}
 		genericSbb = phase0Sbb.GetBlock()
-		return genericSbb, err
+		root, err = phase0Sbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case AltairForkVersion:
 		altairSbb := ethtypes.SignedBeaconBlockAltair{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &altairSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding altair beacon block gossip message: %w", err)
 		}
 		genericSbb = altairSbb.GetBlock()
-		return genericSbb, err
+		root, err = altairSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case BellatrixForkVersion:
 		BellatrixSbb := ethtypes.SignedBeaconBlockBellatrix{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &BellatrixSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding bellatrix beacon block gossip message: %w", err)
 		}
 		genericSbb = BellatrixSbb.GetBlock()
-		return genericSbb, err
+		root, err = BellatrixSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case CapellaForkVersion:
 		capellaSbb := ethtypes.SignedBeaconBlockCapella{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &capellaSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding capella beacon block gossip message: %w", err)
 		}
 		genericSbb = capellaSbb.GetBlock()
-		return genericSbb, err
+		root, err = capellaSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	case DenebForkVersion:
 		denebSbb := ethtypes.SignedBeaconBlockDeneb{}
 		err = p.cfg.Encoder.DecodeGossip(msgData, &denebSbb)
 		if err != nil {
-			return genericSbb, fmt.Errorf("decode beacon block gossip message: %w", err)
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding deneb beacon block gossip message: %w", err)
 		}
 		genericSbb = denebSbb.GetBlock()
-		return genericSbb, err
+		root, err = denebSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 
 	default:
-		return genericSbb, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
+		return genericSbb, [32]byte{}, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
 	}
 }
