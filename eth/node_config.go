@@ -443,12 +443,12 @@ func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 	}
 }
 
-func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
-	if subnet > 0 { // as far as I know, there aren't subnets with index 0
-		return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
-	} else {
+func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding) string {
 		return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
 	}
+
+func (n *NodeConfig) composeEthTopicWithSubnet(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
+	return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
 }
 
 func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
@@ -463,11 +463,11 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 		}
 		subnets, withSubnets := hasSubnets(topicBase)
 		if withSubnets {
-			for subnet := uint64(1); subnet <= subnets; subnet++ {
-				fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder, subnet))
+			for subnet := uint64(0); subnet < subnets; subnet++ {
+				fullTopics = append(fullTopics, n.composeEthTopicWithSubnet(topicFormat, encoder, subnet))
 			}
 		} else {
-			fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder, 0))
+			fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder))
 		}
 	}
 
