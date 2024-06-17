@@ -374,18 +374,18 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 // desiredPubSubBaseTopics returns the list of gossip_topics we want to subscribe to
 func desiredPubSubBaseTopics() []string {
 	return []string{
-		p2p.GossipBlockMessage,
-		p2p.GossipAggregateAndProofMessage,
-		p2p.GossipAttestationMessage,
+		// p2p.GossipBlockMessage,
+		// p2p.GossipAggregateAndProofMessage,
+		// p2p.GossipAttestationMessage,
 		// In relation to https://github.com/probe-lab/hermes/issues/24
 		// we unfortunatelly can't validate the messages (yet)
 		// thus, better not to forward invalid messages
-		//p2p.GossipExitMessage,
-		p2p.GossipAttesterSlashingMessage,
-		p2p.GossipProposerSlashingMessage,
-		p2p.GossipContributionAndProofMessage,
-		p2p.GossipSyncCommitteeMessage,
-		p2p.GossipBlsToExecutionChangeMessage,
+		// p2p.GossipExitMessage,
+		// p2p.GossipAttesterSlashingMessage,
+		// p2p.GossipProposerSlashingMessage,
+		// p2p.GossipContributionAndProofMessage,
+		// p2p.GossipSyncCommitteeMessage,
+		// p2p.GossipBlsToExecutionChangeMessage,
 		p2p.GossipBlobSidecarMessage,
 	}
 }
@@ -443,12 +443,12 @@ func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 	}
 }
 
-func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
-	if subnet > 0 { // as far as I know, there aren't subnets with index 0
-		return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
-	} else {
-		return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
-	}
+func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding) string {
+	return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
+}
+
+func (n *NodeConfig) composeEthTopicWithSubnet(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
+	return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
 }
 
 func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
@@ -463,11 +463,11 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 		}
 		subnets, withSubnets := hasSubnets(topicBase)
 		if withSubnets {
-			for subnet := uint64(1); subnet <= subnets; subnet++ {
-				fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder, subnet))
+			for subnet := uint64(0); subnet < subnets; subnet++ {
+				fullTopics = append(fullTopics, n.composeEthTopicWithSubnet(topicFormat, encoder, subnet))
 			}
 		} else {
-			fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder, 0))
+			fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder))
 		}
 	}
 
