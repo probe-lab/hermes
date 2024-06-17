@@ -374,18 +374,18 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 // desiredPubSubBaseTopics returns the list of gossip_topics we want to subscribe to
 func desiredPubSubBaseTopics() []string {
 	return []string{
-		p2p.GossipBlockMessage,
-		p2p.GossipAggregateAndProofMessage,
-		p2p.GossipAttestationMessage,
+		// p2p.GossipBlockMessage,
+		// p2p.GossipAggregateAndProofMessage,
+		// p2p.GossipAttestationMessage,
 		// In relation to https://github.com/probe-lab/hermes/issues/24
 		// we unfortunatelly can't validate the messages (yet)
 		// thus, better not to forward invalid messages
-		//p2p.GossipExitMessage,
-		p2p.GossipAttesterSlashingMessage,
-		p2p.GossipProposerSlashingMessage,
-		p2p.GossipContributionAndProofMessage,
-		p2p.GossipSyncCommitteeMessage,
-		p2p.GossipBlsToExecutionChangeMessage,
+		// p2p.GossipExitMessage,
+		// p2p.GossipAttesterSlashingMessage,
+		// p2p.GossipProposerSlashingMessage,
+		// p2p.GossipContributionAndProofMessage,
+		// p2p.GossipSyncCommitteeMessage,
+		// p2p.GossipBlsToExecutionChangeMessage,
 		p2p.GossipBlobSidecarMessage,
 	}
 }
@@ -444,8 +444,8 @@ func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 }
 
 func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding) string {
-		return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
-	}
+	return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
+}
 
 func (n *NodeConfig) composeEthTopicWithSubnet(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
 	return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
