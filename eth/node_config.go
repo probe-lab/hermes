@@ -71,9 +71,10 @@ type NodeConfig struct {
 	RPCEncoder              encoder.NetworkEncoding
 
 	// The address information where the Beacon API or Prysm's custom API is accessible at
-	PrysmHost     string
-	PrysmPortHTTP int
-	PrysmPortGRPC int
+	LocalTrustedAddr bool
+	PrysmHost        string
+	PrysmPortHTTP    int
+	PrysmPortGRPC    int
 
 	// The AWS Kinesis Data Stream configuration
 	AWSConfig     *aws.Config // if set, we consider Kinesis to be enabled
