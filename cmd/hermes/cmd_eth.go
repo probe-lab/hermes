@@ -233,7 +233,7 @@ func cmdEthAction(c *cli.Context) error {
 			GenesisSSZURL:           ethConfig.GenesisSSZURL,
 		})
 		if err != nil {
-			return fmt.Errorf("derive network config: %w", err)
+			return fmt.Errorf("failed to derive devnet network config: %w", err)
 		}
 		config = c
 	}

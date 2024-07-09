@@ -61,7 +61,31 @@ type DevnetOptions struct {
 	GenesisSSZURL           string
 }
 
+func (o *DevnetOptions) Validate() error {
+	if o.ConfigURL == "" {
+		return errors.New("config URL is required")
+	}
+
+	if o.BootnodesURL == "" {
+		return errors.New("bootnodes URL is required")
+	}
+
+	if o.DepositContractBlockURL == "" {
+		return errors.New("deposit contract block URL is required")
+	}
+
+	if o.GenesisSSZURL == "" {
+		return errors.New("genesis SSZ URL is required")
+	}
+
+	return nil
+}
+
 func DeriveDevnetConfig(ctx context.Context, options DevnetOptions) (*NetworkConfig, error) {
+	if err := options.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid options: %w", err)
+	}
+
 	// Fetch the beacon chain config from the provided URL
 	beaconConfig, err := FetchConfigFromURL(ctx, options.ConfigURL)
 	if err != nil {
