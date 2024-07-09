@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // FetchConfigFromURL fetches the beacon chain config from a given URL.
