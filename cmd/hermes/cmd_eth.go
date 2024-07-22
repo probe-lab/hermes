@@ -33,6 +33,10 @@ var ethConfig = &struct {
 	DialConcurrency             int
 	DialTimeout                 time.Duration
 	MaxPeers                    int
+	GenesisSSZURL               string
+	ConfigURL                   string
+	BootnodesURL                string
+	DepositContractBlockURL     string
 }{
 	PrivateKeyStr:               "", // unset means it'll be generated
 	Chain:                       params.MainnetName,
@@ -48,6 +52,10 @@ var ethConfig = &struct {
 	DialConcurrency:             16,
 	DialTimeout:                 5 * time.Second,
 	MaxPeers:                    30, // arbitrary
+	GenesisSSZURL:               "",
+	ConfigURL:                   "",
+	BootnodesURL:                "",
+	DepositContractBlockURL:     "",
 }
 
 var cmdEth = &cli.Command{
@@ -167,6 +175,34 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.MaxPeers,
 		Destination: &ethConfig.MaxPeers,
 	},
+	&cli.StringFlag{
+		Name:        "genesis.ssz.url",
+		EnvVars:     []string{"HERMES_ETH_GENESIS_SSZ_URL"},
+		Usage:       "The .ssz URL from which to fetch the genesis data, requires 'chain=devnet'",
+		Value:       ethConfig.GenesisSSZURL,
+		Destination: &ethConfig.GenesisSSZURL,
+	},
+	&cli.StringFlag{
+		Name:        "config.yaml.url",
+		EnvVars:     []string{"HERMES_ETH_CONFIG_URL"},
+		Usage:       "The .yaml URL from which to fetch the beacon chain config, requires 'chain=devnet'",
+		Value:       ethConfig.ConfigURL,
+		Destination: &ethConfig.ConfigURL,
+	},
+	&cli.StringFlag{
+		Name:        "bootnodes.yaml.url",
+		EnvVars:     []string{"HERMES_ETH_BOOTNODES_URL"},
+		Usage:       "The .yaml URL from which to fetch the bootnode ENRs, requires 'chain=devnet'",
+		Value:       ethConfig.BootnodesURL,
+		Destination: &ethConfig.BootnodesURL,
+	},
+	&cli.StringFlag{
+		Name:        "deposit-contract-block.txt.url",
+		EnvVars:     []string{"HERMES_ETH_DEPOSIT_CONTRACT_BLOCK_URL"},
+		Usage:       "The .txt URL from which to fetch the deposit contract block. Requires 'chain=devnet'",
+		Value:       ethConfig.DepositContractBlockURL,
+		Destination: &ethConfig.DepositContractBlockURL,
+	},
 }
 
 func cmdEthAction(c *cli.Context) error {
@@ -176,20 +212,45 @@ func cmdEthAction(c *cli.Context) error {
 	// Print hermes configuration for debugging purposes
 	printEthConfig()
 
-	// Extract chain configuration parameters based on the given chain name
-	genConfig, netConfig, beaConfig, err := eth.GetConfigsByNetworkName(ethConfig.Chain)
-	if err != nil {
-		return fmt.Errorf("get config for %s: %w", ethConfig.Chain, err)
+	var config *eth.NetworkConfig
+	// Derive network configuration
+	if ethConfig.Chain != params.DevnetName {
+		slog.Info("Deriving known network config:", "chain", ethConfig.Chain)
+
+		c, err := eth.DeriveKnownNetworkConfig(c.Context, ethConfig.Chain)
+		if err != nil {
+			return fmt.Errorf("derive network config: %w", err)
+		}
+
+		config = c
+	} else {
+		slog.Info("Deriving devnet network config")
+
+		c, err := eth.DeriveDevnetConfig(c.Context, eth.DevnetOptions{
+			ConfigURL:               ethConfig.ConfigURL,
+			BootnodesURL:            ethConfig.BootnodesURL,
+			DepositContractBlockURL: ethConfig.DepositContractBlockURL,
+			GenesisSSZURL:           ethConfig.GenesisSSZURL,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to derive devnet network config: %w", err)
+		}
+		config = c
 	}
 
-	genesisRoot := genConfig.GenesisValidatorRoot
-	genesisTime := genConfig.GenesisTime
+	// Overriding configuration so that functions like ComputForkDigest take the
+	// correct input data from the global configuration.
+	params.OverrideBeaconConfig(config.Beacon)
+	params.OverrideBeaconNetworkConfig(config.Network)
+
+	genesisRoot := config.Genesis.GenesisValidatorRoot
+	genesisTime := config.Genesis.GenesisTime
 
 	// compute fork version and fork digest
 	currentSlot := slots.Since(genesisTime)
 	currentEpoch := slots.ToEpoch(currentSlot)
 
-	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, beaConfig)
+	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, config.Beacon)
 	if err != nil {
 		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
 	}
@@ -201,13 +262,13 @@ func cmdEthAction(c *cli.Context) error {
 
 	// Overriding configuration so that functions like ComputForkDigest take the
 	// correct input data from the global configuration.
-	params.OverrideBeaconConfig(beaConfig)
-	params.OverrideBeaconNetworkConfig(netConfig)
+	params.OverrideBeaconConfig(config.Beacon)
+	params.OverrideBeaconNetworkConfig(config.Network)
 
 	cfg := &eth.NodeConfig{
-		GenesisConfig:               genConfig,
-		NetworkConfig:               netConfig,
-		BeaconConfig:                beaConfig,
+		GenesisConfig:               config.Genesis,
+		NetworkConfig:               config.Network,
+		BeaconConfig:                config.Beacon,
 		ForkDigest:                  forkDigest,
 		ForkVersion:                 currentForkVersion,
 		PrivateKeyStr:               ethConfig.PrivateKeyStr,
