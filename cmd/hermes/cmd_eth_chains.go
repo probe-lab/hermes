@@ -27,28 +27,27 @@ func cmdEthChainsAction(c *cli.Context) error {
 
 	slog.Info("Supported chains:")
 	for _, chain := range chains {
-
-		genConfig, _, beaConfig, err := eth.GetConfigsByNetworkName(chain)
+		config, err := eth.DeriveKnownNetworkConfig(c.Context, chain)
 		if err != nil {
 			return fmt.Errorf("get config for %s: %w", chain, err)
 		}
 		slog.Info(chain)
 
 		forkVersions := [][]byte{
-			beaConfig.GenesisForkVersion,
-			beaConfig.AltairForkVersion,
-			beaConfig.BellatrixForkVersion,
-			beaConfig.CapellaForkVersion,
-			beaConfig.DenebForkVersion,
+			config.Beacon.GenesisForkVersion,
+			config.Beacon.AltairForkVersion,
+			config.Beacon.BellatrixForkVersion,
+			config.Beacon.CapellaForkVersion,
+			config.Beacon.DenebForkVersion,
 		}
 
 		for _, forkVersion := range forkVersions {
-			epoch, found := beaConfig.ForkVersionSchedule[[4]byte(forkVersion)]
+			epoch, found := config.Beacon.ForkVersionSchedule[[4]byte(forkVersion)]
 			if !found {
 				return fmt.Errorf("fork version schedule not found for %x", forkVersion)
 			}
 
-			forkName, found := beaConfig.ForkVersionNames[[4]byte(forkVersion)]
+			forkName, found := config.Beacon.ForkVersionNames[[4]byte(forkVersion)]
 			if !found {
 				return fmt.Errorf("fork version name not found for %x", forkVersion)
 			}
@@ -57,7 +56,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 				continue
 			}
 
-			digest, err := signing.ComputeForkDigest(forkVersion, genConfig.GenesisValidatorRoot)
+			digest, err := signing.ComputeForkDigest(forkVersion, config.Genesis.GenesisValidatorRoot)
 			if err != nil {
 				return err
 			}

@@ -38,9 +38,10 @@ type PrysmClient struct {
 	tracer          trace.Tracer
 	beaconClient    eth.BeaconChainClient
 	beaconApiClient *apiCli.Client
+	genesis         *GenesisConfig
 }
 
-func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration) (*PrysmClient, error) {
+func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration, genesis *GenesisConfig) (*PrysmClient, error) {
 	tracer := otel.GetTracerProvider().Tracer("prysm_client")
 
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, portGRPC),
@@ -63,6 +64,7 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 		beaconApiClient: apiCli,
 		timeout:         timeout,
 		tracer:          tracer,
+		genesis:         genesis,
 	}, nil
 }
 
@@ -320,26 +322,17 @@ func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte)
 		}
 		span.End()
 	}()
+
 	// this checks whether the local fork_digest at hermes matches the one that the remote node keeps
 	// request the genesis
-	nodeCnf, err := p.beaconApiClient.GetConfigSpec(ctx)
-	if err != nil {
-		return false, fmt.Errorf("request prysm node config to compose forkdigest: %w", err)
-	}
-	cnf := nodeCnf.Data.(map[string]interface{})
-	genesisConf, _, _, err := GetConfigsByNetworkName(cnf["CONFIG_NAME"].(string))
-	if err != nil {
-		return false, fmt.Errorf("not identified network from trusted node (%s): %w", cnf["CONFIG_NAME"].(string), err)
-	}
-
 	nodeFork, err := p.beaconApiClient.GetFork(ctx, apiCli.StateOrBlockId("head"))
 	if err != nil {
 		return false, fmt.Errorf("request beacon fork to compose forkdigest: %w", err)
 	}
 
-	forkDigest, err := signing.ComputeForkDigest(nodeFork.CurrentVersion, genesisConf.GenesisValidatorRoot)
+	forkDigest, err := signing.ComputeForkDigest(nodeFork.CurrentVersion, p.genesis.GenesisValidatorRoot)
 	if err != nil {
-		return false, fmt.Errorf("create fork digest (%s, %x): %w", hex.EncodeToString(nodeFork.CurrentVersion), genesisConf.GenesisValidatorRoot, err)
+		return false, fmt.Errorf("create fork digest (%s, %x): %w", hex.EncodeToString(nodeFork.CurrentVersion), p.genesis.GenesisValidatorRoot, err)
 	}
 	// check if our version is within the versions of the node
 	if forkDigest == hermesForkDigest {

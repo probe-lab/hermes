@@ -44,21 +44,6 @@ type GenesisConfig struct {
 	GenesisTime          time.Time // Time at Genesis
 }
 
-// GetConfigsByNetworkName returns the GenesisConfig, NetworkConfig,
-// BeaconChainConfig and any error based on the input network name
-func GetConfigsByNetworkName(net string) (*GenesisConfig, *params.NetworkConfig, *params.BeaconChainConfig, error) {
-	switch net {
-	case params.MainnetName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.MainnetConfig(), nil
-	case params.SepoliaName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.SepoliaConfig(), nil
-	case params.HoleskyName:
-		return GenesisConfigs[net], params.BeaconNetworkConfig(), params.HoleskyConfig(), nil
-	default:
-		return nil, nil, nil, fmt.Errorf("network %s not found", net)
-	}
-}
-
 var GenesisConfigs = map[string]*GenesisConfig{
 	params.MainnetName: {
 		GenesisValidatorRoot: hexToBytes("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),

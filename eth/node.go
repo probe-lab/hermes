@@ -185,7 +185,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	// initialize the custom Prysm client to communicate with its API
-	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout)
+	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout, cfg.GenesisConfig)
 	if err != nil {
 		return nil, fmt.Errorf("new prysm client")
 	}

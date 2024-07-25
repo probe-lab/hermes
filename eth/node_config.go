@@ -381,10 +381,10 @@ func desiredPubSubBaseTopics() []string {
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
-		// p2p.GossipSyncCommitteeMessage,
+		p2p.GossipSyncCommitteeMessage,
 		p2p.GossipBlsToExecutionChangeMessage,
+		p2p.GossipBlobSidecarMessage,
 		p2p.GossipDataColumnSidecarMessage,
-		// p2p.GossipBlobSidecarMessage,
 	}
 }
 
@@ -451,7 +451,7 @@ func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncodin
 	return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
 }
 
-func (n *NodeConfig) composeSubnettedEthTopic(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
+func (n *NodeConfig) composeEthTopicWithSubnet(base string, encoder encoder.NetworkEncoding, subnet uint64) string {
 	return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
 }
 
@@ -467,8 +467,8 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 		}
 		subnets, withSubnets := hasSubnets(topicBase)
 		if withSubnets {
-			for subnet := uint64(1); subnet <= subnets; subnet++ {
-				fullTopics = append(fullTopics, n.composeSubnettedEthTopic(topicFormat, encoder, subnet))
+			for subnet := uint64(0); subnet < subnets; subnet++ {
+				fullTopics = append(fullTopics, n.composeEthTopicWithSubnet(topicFormat, encoder, subnet))
 			}
 		} else {
 			fullTopics = append(fullTopics, n.composeEthTopic(topicFormat, encoder))
@@ -482,8 +482,9 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	desiredTopics := n.getDesiredFullTopics(encoder)
 	topicScores := make(map[string]*pubsub.TopicScoreParams, len(desiredTopics))
 	for _, topic := range desiredTopics {
-		params := topicToScoreParamsMapper(topic, activeValidators)
-		topicScores[topic] = params
+		if params := topicToScoreParamsMapper(topic, activeValidators); params != nil {
+			topicScores[topic] = params
+		}
 	}
 	return topicScores
 }

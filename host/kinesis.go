@@ -36,8 +36,11 @@ func (k *KinesisDataStream) Start(ctx context.Context) error {
 	dsCtx, dsCancel := context.WithCancel(ctx)
 
 	k.ctx = dsCtx
-
 	k.cancelFn = dsCancel
+
+	if err := k.producer.Start(ctx); err != nil {
+		return err
+	}
 
 	<-dsCtx.Done()
 
@@ -51,7 +54,7 @@ func (k *KinesisDataStream) Stop(ctx context.Context) error {
 	if err := k.producer.WaitIdle(timeoutCtx); err != nil {
 		slog.Info("Error waiting for producer to become idle", tele.LogAttrError(err))
 	}
-
+	timeoutCncl()
 	// stop the producer
 	k.cancelFn()
 
@@ -67,8 +70,8 @@ func (k *KinesisDataStream) Stop(ctx context.Context) error {
 	return k.producer.WaitIdle(ctx)
 }
 
-// PutEvent sends an event to the Kinesis data stream.
-func (k *KinesisDataStream) PutEvent(ctx context.Context, event *TraceEvent) error {
+// PutRecord sends an event to the Kinesis data stream.
+func (k *KinesisDataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
 	if event != nil {
 		kRecord := gk.Record(event)
 
