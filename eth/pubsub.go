@@ -110,14 +110,16 @@ func (p *PubSub) Serve(ctx context.Context) error {
 func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	switch {
 	// Ensure hotter topics are at the top of the switch statement.
-	case strings.Contains(topic, p2p.GossipDataColumnSidecarMessage):
-		return p.handleBeaconDataColumnSidecar
-	case strings.Contains(topic, p2p.GossipBlockMessage):
-		return p.handleBeaconBlock
-	case strings.Contains(topic, p2p.GossipAggregateAndProofMessage):
-		return p.handleAggregateAndProof
 	case strings.Contains(topic, p2p.GossipAttestationMessage):
 		return p.handleAttestation
+	case strings.Contains(topic, p2p.GossipDataColumnSidecarMessage):
+		return p.handleBeaconDataColumnSidecar
+	case strings.Contains(topic, p2p.GossipAggregateAndProofMessage):
+		return p.handleAggregateAndProof
+	case strings.Contains(topic, p2p.GossipBlockMessage):
+		return p.handleBeaconBlock
+	case strings.Contains(topic, p2p.GossipBlobSidecarMessage):
+		return p.handleBlobSidecar
 	case strings.Contains(topic, p2p.GossipExitMessage):
 		return p.handleExitMessage
 	case strings.Contains(topic, p2p.GossipAttesterSlashingMessage):
@@ -130,8 +132,6 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 		return p.handleSyncCommitteeMessage
 	case strings.Contains(topic, p2p.GossipBlsToExecutionChangeMessage):
 		return p.handleBlsToExecutionChangeMessage
-	case strings.Contains(topic, p2p.GossipBlobSidecarMessage):
-		return p.handleBlobSidecar
 	default:
 		return p.host.TracedTopicHandler(host.NoopHandler)
 	}
