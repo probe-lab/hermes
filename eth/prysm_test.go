@@ -86,7 +86,7 @@ func TestPrysmClient_AddTrustedPeer(t *testing.T) {
 			port, err := strconv.Atoi(serverURL.Port())
 			require.NoError(t, err)
 
-			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second)
+			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second, nil)
 			require.NoError(t, err)
 
 			err = p.AddTrustedPeer(context.Background(), pid, maddr)
@@ -150,7 +150,7 @@ func TestPrysmClient_RemoveTrustedPeer(t *testing.T) {
 			port, err := strconv.Atoi(serverURL.Port())
 			require.NoError(t, err)
 
-			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second)
+			p, err := NewPrysmClient(serverURL.Hostname(), port, 0, time.Second, nil)
 			require.NoError(t, err)
 
 			err = p.RemoveTrustedPeer(context.Background(), pid)
