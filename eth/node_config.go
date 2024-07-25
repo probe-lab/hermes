@@ -381,7 +381,6 @@ func desiredPubSubBaseTopics() []string {
 		// we unfortunatelly can't validate the messages (yet)
 		// thus, better not to forward invalid messages
 		// p2p.GossipExitMessage,
-		p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
