@@ -268,6 +268,17 @@ func (h *Host) PrivateListenMaddr() (ma.Multiaddr, error) {
 	return nil, fmt.Errorf("no private multi address found in %s", h.Addrs())
 }
 
+// LocalListenMaddr returns the first multiaddress in a localhost IP range that
+// this host is listening on.
+func (h *Host) LocalListenMaddr() (ma.Multiaddr, error) {
+	for _, maddr := range h.Addrs() {
+		if manet.IsIPLoopback(maddr) {
+			return maddr, nil
+		}
+	}
+	return nil, fmt.Errorf("no local multi address found in %s", h.Addrs())
+}
+
 func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 	return func(ctx context.Context, msg *pubsub.Message) error {
 		slog.Debug("Handling gossip message", "topic", msg.GetTopic())
