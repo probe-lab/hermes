@@ -27,6 +27,7 @@ var ethConfig = &struct {
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+	LocalTrustedAddr            bool
 	PrysmHost                   string
 	PrysmPortHTTP               int
 	PrysmPortGRPC               int
@@ -46,6 +47,7 @@ var ethConfig = &struct {
 	Libp2pHost:                  "127.0.0.1",
 	Libp2pPort:                  0,
 	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
+	LocalTrustedAddr:            false, // default -> advertise the private multiaddress to our trusted Prysm node
 	PrysmHost:                   "",
 	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
 	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
@@ -146,6 +148,13 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.Libp2pPeerscoreSnapshotFreq,
 		Destination: &ethConfig.Libp2pPeerscoreSnapshotFreq,
 		DefaultText: "random",
+	},
+	&cli.BoolFlag{
+		Name:        "local.trusted.addr",
+		EnvVars:     []string{"HERMES_ETH_LOCAL_TRUSTED_ADDRESS"},
+		Usage:       "To advertise the localhost multiaddress to our trusted control Prysm node",
+		Value:       ethConfig.LocalTrustedAddr,
+		Destination: &ethConfig.LocalTrustedAddr,
 	},
 	&cli.StringFlag{
 		Name:        "prysm.host",
@@ -280,6 +289,7 @@ func cmdEthAction(c *cli.Context) error {
 		Libp2pPeerscoreSnapshotFreq: ethConfig.Libp2pPeerscoreSnapshotFreq,
 		GossipSubMessageEncoder:     encoder.SszNetworkEncoder{},
 		RPCEncoder:                  encoder.SszNetworkEncoder{},
+		LocalTrustedAddr:            ethConfig.LocalTrustedAddr,
 		PrysmHost:                   ethConfig.PrysmHost,
 		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
 		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,

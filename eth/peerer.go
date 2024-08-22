@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 	"github.com/thejerf/suture/v4"
@@ -17,8 +18,9 @@ import (
 // [PeererClient] implementations can be used. In the case of Prysm, use the
 // [PrysmClient] implementation as it implements [PeererClient].
 type Peerer struct {
-	host      *host.Host
-	pryClient *PrysmClient
+	host             *host.Host
+	pryClient        *PrysmClient
+	localTrustedAddr bool
 }
 
 var _ suture.Service = (*Peerer)(nil)
@@ -26,7 +28,7 @@ var _ suture.Service = (*Peerer)(nil)
 // NewPeerer creates a new instance of the Peerer struct.
 // It takes a pointer to a *host.Host and a [PeererClient] implementation as parameters.
 // It returns a pointer to the newly created Peerer instance.
-func NewPeerer(h *host.Host, pryClient *PrysmClient) *Peerer {
+func NewPeerer(h *host.Host, pryClient *PrysmClient, localTrustedAddr bool) *Peerer {
 	return &Peerer{
 		host:      h,
 		pryClient: pryClient,
@@ -69,15 +71,22 @@ func (p *Peerer) Serve(ctx context.Context) error {
 
 			slog.Warn("Not registered as a trusted peer")
 
-			// we're not in the list of trusted peers
-			// get our private liste multiaddress and register again
-			privateMaddr, err := p.host.PrivateListenMaddr()
-			if err != nil {
-				return err
-			}
-
 			// register ourselves as a trusted peer
-			if err := p.pryClient.AddTrustedPeer(ctx, p.host.ID(), privateMaddr); err != nil {
+			// register ourselves as a trusted peer by submitting our private ip address
+			var trustedMaddr ma.Multiaddr
+			if p.localTrustedAddr {
+				trustedMaddr, err = p.host.LocalListenMaddr()
+				if err != nil {
+					return err
+				}
+			} else {
+				trustedMaddr, err = p.host.PrivateListenMaddr()
+				if err != nil {
+					return err
+				}
+			}
+			slog.Info("ensuring we are trusted by trusted Prysm with peer_id:", tele.LogAttrPeerID(p.host.ID()), "on local maddr", trustedMaddr)
+			if err := p.pryClient.AddTrustedPeer(ctx, p.host.ID(), trustedMaddr); err != nil {
 				return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 			}
 
