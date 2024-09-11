@@ -53,10 +53,6 @@ var GenesisConfigs = map[string]*GenesisConfig{
 		GenesisValidatorRoot: hexToBytes("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
 		GenesisTime:          time.Unix(1655733600, 0),
 	},
-	params.PraterName: {
-		GenesisValidatorRoot: hexToBytes("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
-		GenesisTime:          time.Unix(1616508000, 0), // https://github.com/eth-clients/goerli
-	},
 	params.HoleskyName: {
 		GenesisValidatorRoot: hexToBytes("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
 		GenesisTime:          time.Unix(1695902400, 0),

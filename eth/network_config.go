@@ -35,12 +35,6 @@ func DeriveKnownNetworkConfig(ctx context.Context, network string) (*NetworkConf
 			Beacon:  params.SepoliaConfig(),
 			Network: defaultBeaconNetworkConfig,
 		}, nil
-	case params.PraterName:
-		return &NetworkConfig{
-			Genesis: GenesisConfigs[network],
-			Beacon:  params.PraterConfig(),
-			Network: defaultBeaconNetworkConfig,
-		}, nil
 	case params.HoleskyName:
 		return &NetworkConfig{
 			Genesis: GenesisConfigs[network],
