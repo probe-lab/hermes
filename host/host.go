@@ -93,7 +93,6 @@ func (h *Host) Serve(ctx context.Context) error {
 				AgentVersion: h.AgentVersion(c.RemotePeer()),
 				Direction:    c.Stat().Direction.String(),
 				Opened:       c.Stat().Opened,
-				Transient:    c.Stat().Transient,
 			},
 		}
 
