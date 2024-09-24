@@ -339,5 +339,4 @@ func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte)
 		return true, nil
 	}
 	return false, nil
-
 }
