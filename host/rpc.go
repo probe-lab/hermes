@@ -27,10 +27,11 @@ type RpcMetaMsg struct {
 }
 
 type RpcMetaControl struct {
-	IHave []RpcControlIHave `json:"IHave,omitempty"`
-	IWant []RpcControlIWant `json:"IWant,omitempty"`
-	Graft []RpcControlGraft `json:"Graft,omitempty"`
-	Prune []RpcControlPrune `json:"Prune,omitempty"`
+	IHave     []RpcControlIHave     `json:"IHave,omitempty"`
+	IWant     []RpcControlIWant     `json:"IWant,omitempty"`
+	Graft     []RpcControlGraft     `json:"Graft,omitempty"`
+	Prune     []RpcControlPrune     `json:"Prune,omitempty"`
+	Idontwant []RpcControlIdontWant `json:"Idontwant,omitempty"`
 }
 
 type RpcControlIHave struct {
@@ -51,6 +52,10 @@ type RpcControlPrune struct {
 	PeerIDs []peer.ID
 }
 
+type RpcControlIdontWant struct {
+	MsgIDs []string
+}
+
 func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *RpcMeta {
 	subs := make([]RpcMetaSub, len(meta.GetSubscription()))
 	for i, subMeta := range meta.GetSubscription() {
@@ -69,10 +74,11 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *RpcMeta {
 	}
 
 	controlMsg := &RpcMetaControl{
-		IHave: make([]RpcControlIHave, len(meta.GetControl().GetIhave())),
-		IWant: make([]RpcControlIWant, len(meta.GetControl().GetIwant())),
-		Graft: make([]RpcControlGraft, len(meta.GetControl().GetGraft())),
-		Prune: make([]RpcControlPrune, len(meta.GetControl().GetPrune())),
+		IHave:     make([]RpcControlIHave, len(meta.GetControl().GetIhave())),
+		IWant:     make([]RpcControlIWant, len(meta.GetControl().GetIwant())),
+		Graft:     make([]RpcControlGraft, len(meta.GetControl().GetGraft())),
+		Prune:     make([]RpcControlPrune, len(meta.GetControl().GetPrune())),
+		Idontwant: make([]RpcControlIdontWant, len(meta.GetControl().GetIdontwant())),
 	}
 
 	for i, ihave := range meta.GetControl().GetIhave() {
@@ -105,7 +111,6 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *RpcMeta {
 	}
 
 	for i, prune := range meta.GetControl().GetPrune() {
-
 		peerIDs := make([]peer.ID, len(prune.GetPeers()))
 		for j, peerIDBytes := range prune.GetPeers() {
 			peerID, err := peer.IDFromBytes(peerIDBytes)
@@ -123,7 +128,18 @@ func newRPCMeta(pidBytes []byte, meta *pubsub_pb.TraceEvent_RPCMeta) *RpcMeta {
 		}
 	}
 
-	if len(controlMsg.IWant) == 0 && len(controlMsg.IHave) == 0 && len(controlMsg.Prune) == 0 && len(controlMsg.Graft) == 0 {
+	for i, idontwant := range meta.GetControl().GetIdontwant() {
+		msgIDs := make([]string, len(idontwant.GetMessageIDs()))
+		for j, msgID := range idontwant.GetMessageIDs() {
+			msgIDs[j] = hex.EncodeToString(msgID)
+		}
+
+		controlMsg.Idontwant[i] = RpcControlIdontWant{
+			MsgIDs: msgIDs,
+		}
+	}
+
+	if len(controlMsg.IWant) == 0 && len(controlMsg.IHave) == 0 && len(controlMsg.Prune) == 0 && len(controlMsg.Graft) == 0 && len(controlMsg.Idontwant) == 0 {
 		controlMsg = nil
 	}
 
