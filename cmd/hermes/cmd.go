@@ -18,6 +18,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
+	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
 
@@ -39,6 +40,7 @@ var rootConfig = struct {
 	TracingEnabled bool
 	TracingAddr    string
 	TracingPort    int
+	DataStreamType string
 	KinesisRegion  string
 	KinesisStream  string
 
@@ -61,6 +63,7 @@ var rootConfig = struct {
 	TracingEnabled: false,
 	TracingAddr:    "localhost",
 	TracingPort:    4317, // default jaeger port
+	DataStreamType: host.DataStreamTypeLogger.String(),
 	KinesisRegion:  "",
 	KinesisStream:  "",
 
@@ -170,6 +173,14 @@ var rootFlags = []cli.Flag{
 		Category:    flagCategoryTelemetry,
 	},
 	&cli.StringFlag{
+		Name:        "data.stream.type",
+		EnvVars:     []string{"HERMES_DATA_STREAM_TYPE"},
+		Usage:       "Format where the traces will be submitted.",
+		Value:       rootConfig.DataStreamType,
+		Destination: &rootConfig.DataStreamType,
+		Category:    flagCategoryTelemetry,
+	},
+	&cli.StringFlag{
 		Name:        "kinesis.region",
 		EnvVars:     []string{"HERMES_KINESIS_REGION"},
 		Usage:       "The region of the AWS Kinesis Data Stream",
@@ -232,12 +243,17 @@ func rootBefore(c *cli.Context) error {
 	}
 
 	// if either parameter is set explicitly, we consider Kinesis to be enabled
-	if c.IsSet("kinesis.region") || c.IsSet("kinesis.stream") {
-		awsConfig, err := config.LoadDefaultConfig(c.Context, config.WithRegion(rootConfig.KinesisRegion))
-		if err != nil {
-			return fmt.Errorf("load AWS configuration: %w", err)
+	if c.IsSet("data.stream.type") {
+		dataStreamType := host.DataStreamtypeFromStr(c.String("data.stream.type"))
+		if dataStreamType == host.DataStreamTypeKinesis {
+			if c.IsSet("kinesis.region") || c.IsSet("kinesis.stream") {
+				awsConfig, err := config.LoadDefaultConfig(c.Context, config.WithRegion(rootConfig.KinesisRegion))
+				if err != nil {
+					return fmt.Errorf("load AWS configuration: %w", err)
+				}
+				rootConfig.awsConfig = &awsConfig
+			}
 		}
-		rootConfig.awsConfig = &awsConfig
 	}
 
 	return nil

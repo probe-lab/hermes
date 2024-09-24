@@ -13,7 +13,34 @@ type DataStream interface {
 
 type DataStreamType int
 
+func (ds DataStreamType) String() string {
+	switch ds {
+	case DataStreamTypeLogger:
+		return "logger"
+	case DataStreamTypeKinesis:
+		return "kinesis"
+	case DataStreamTypeCallback:
+		return "callback"
+	default:
+		return "logger"
+	}
+}
+
 const (
 	DataStreamTypeKinesis DataStreamType = iota
 	DataStreamTypeCallback
+	DataStreamTypeLogger
 )
+
+func DataStreamtypeFromStr(str string) DataStreamType {
+	switch str {
+	case "logger":
+		return DataStreamTypeLogger
+	case "kinesis":
+		return DataStreamTypeKinesis
+	case "callback":
+		return DataStreamTypeCallback
+	default:
+		return DataStreamTypeLogger
+	}
+}

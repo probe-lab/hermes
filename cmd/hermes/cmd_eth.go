@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/probe-lab/hermes/eth"
+	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
 
@@ -294,6 +295,7 @@ func cmdEthAction(c *cli.Context) error {
 		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
 		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,
 		AWSConfig:                   rootConfig.awsConfig,
+		DataStreamType:              host.DataStreamtypeFromStr(rootConfig.DataStreamType),
 		KinesisRegion:               rootConfig.KinesisRegion,
 		KinesisStream:               rootConfig.KinesisStream,
 		MaxPeers:                    ethConfig.MaxPeers,

@@ -81,7 +81,11 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	initNetworkForkVersions(cfg.BeaconConfig)
 
 	var ds host.DataStream
-	if cfg.AWSConfig != nil {
+	switch cfg.DataStreamType {
+	case host.DataStreamTypeLogger:
+		ds = new(host.TraceLogger)
+
+	case host.DataStreamTypeKinesis:
 		droppedTraces, err := cfg.Meter.Int64Counter("dropped_traces")
 		if err != nil {
 			return nil, fmt.Errorf("new dropped_traces counter: %w", err)
@@ -111,8 +115,12 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		}
 
 		ds = host.NewKinesisDataStream(p)
-	} else {
+
+	case host.DataStreamTypeCallback:
 		ds = host.NewCallbackDataStream()
+
+	default:
+		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
 
 	hostCfg := &host.Config{
