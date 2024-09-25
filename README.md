@@ -63,10 +63,11 @@ COMMANDS:
 GLOBAL OPTIONS:
    --help, -h  show help
 
-   Kinesis Configuration:
+   DataStream Configuration:
 
-   --kinesis.region value  The region of the AWS Kinesis Data Stream [$HERMES_KINESIS_REGION]
-   --kinesis.stream value  The name of the AWS Kinesis Data Stream [$HERMES_KINESIS_DATA_STREAM]
+   --data.stream.type value  Format where the traces will be submitted: logger, kinesis, or callback. (default: "logger") [$HERMES_DATA_STREAM_TYPE]
+   --kinesis.region value    The region of the AWS Kinesis Data Stream [$HERMES_KINESIS_REGION]
+   --kinesis.stream value    The name of the AWS Kinesis Data Stream [$HERMES_KINESIS_DATA_STREAM]
 
    Logging Configuration:
 

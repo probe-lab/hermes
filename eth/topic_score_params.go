@@ -462,7 +462,7 @@ func committeeCountPerSlot(activeValidators uint64) uint64 {
 }
 
 func slotCommitteeCount(activeValidatorCount uint64) uint64 {
-	var committeesPerSlot = activeValidatorCount / currentBeaconConfig.SecondsPerSlot / currentBeaconConfig.TargetCommitteeSize
+	committeesPerSlot := activeValidatorCount / currentBeaconConfig.SecondsPerSlot / currentBeaconConfig.TargetCommitteeSize
 	if committeesPerSlot > currentBeaconConfig.MaxCommitteesPerSlot {
 		return currentBeaconConfig.MaxCommitteesPerSlot
 	}

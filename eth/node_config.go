@@ -76,10 +76,11 @@ type NodeConfig struct {
 	PrysmPortHTTP    int
 	PrysmPortGRPC    int
 
-	// The AWS Kinesis Data Stream configuration
-	AWSConfig     *aws.Config // if set, we consider Kinesis to be enabled
-	KinesisRegion string
-	KinesisStream string
+	// The Data Stream configuration
+	DataStreamType host.DataStreamType
+	AWSConfig      *aws.Config
+	KinesisRegion  string
+	KinesisStream  string
 
 	// The maximum number of peers our libp2p host can be connected to.
 	MaxPeers int
@@ -162,13 +163,16 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("dialer count must be positive, got %d", n.DialConcurrency)
 	}
 
-	if n.AWSConfig != nil {
-		if n.KinesisStream == "" {
-			return fmt.Errorf("kinesis is enabled but stream is not set")
-		}
+	// ensure that if the data stream is AWS, the parameters where given
+	if n.DataStreamType == host.DataStreamTypeKinesis {
+		if n.AWSConfig != nil {
+			if n.KinesisStream == "" {
+				return fmt.Errorf("kinesis is enabled but stream is not set")
+			}
 
-		if n.KinesisRegion == "" {
-			return fmt.Errorf("kinesis is enabled but region is not set")
+			if n.KinesisRegion == "" {
+				return fmt.Errorf("kinesis is enabled but region is not set")
+			}
 		}
 	}
 
