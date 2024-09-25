@@ -8,6 +8,8 @@ import (
 
 type TraceLogger struct{}
 
+var _ DataStream = (*TraceLogger)(nil)
+
 func (t *TraceLogger) Start(ctx context.Context) error {
 	<-ctx.Done()
 	return nil

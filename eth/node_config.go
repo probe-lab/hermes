@@ -78,7 +78,7 @@ type NodeConfig struct {
 
 	// The Data Stream configuration
 	DataStreamType host.DataStreamType
-	AWSConfig      *aws.Config // if set, we consider Kinesis to be enabled
+	AWSConfig      *aws.Config
 	KinesisRegion  string
 	KinesisStream  string
 
