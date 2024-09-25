@@ -86,14 +86,14 @@ func (h *Host) Serve(ctx context.Context) error {
 				AgentVersion string
 				Direction    string
 				Opened       time.Time
-				Transient    bool
+				Limited      bool
 			}{
 				RemotePeer:   c.RemotePeer().String(),
 				RemoteMaddrs: c.RemoteMultiaddr(),
 				AgentVersion: h.AgentVersion(c.RemotePeer()),
 				Direction:    c.Stat().Direction.String(),
 				Opened:       c.Stat().Opened,
-				// Transient:    c.Stat().Transient,
+				Limited:      c.Stat().Limited,
 			},
 		}
 
