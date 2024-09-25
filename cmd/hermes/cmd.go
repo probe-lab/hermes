@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	flagCategoryLogging   = "Logging Configuration:"
-	flagCategoryTelemetry = "Telemetry Configuration:"
-	flagCategoryKinesis   = "Kinesis Configuration:"
+	flagCategoryLogging    = "Logging Configuration:"
+	flagCategoryTelemetry  = "Telemetry Configuration:"
+	flagCategoryDataStream = "DataStream Configuration:"
 )
 
 var rootConfig = struct {
@@ -175,10 +175,10 @@ var rootFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "data.stream.type",
 		EnvVars:     []string{"HERMES_DATA_STREAM_TYPE"},
-		Usage:       "Format where the traces will be submitted.",
+		Usage:       "Format where the traces will be submitted: logger, kinesis, or callback.",
 		Value:       rootConfig.DataStreamType,
 		Destination: &rootConfig.DataStreamType,
-		Category:    flagCategoryTelemetry,
+		Category:    flagCategoryDataStream,
 	},
 	&cli.StringFlag{
 		Name:        "kinesis.region",
@@ -186,7 +186,7 @@ var rootFlags = []cli.Flag{
 		Usage:       "The region of the AWS Kinesis Data Stream",
 		Value:       rootConfig.KinesisRegion,
 		Destination: &rootConfig.KinesisRegion,
-		Category:    flagCategoryKinesis,
+		Category:    flagCategoryDataStream,
 	},
 	&cli.StringFlag{
 		Name:        "kinesis.stream",
@@ -194,7 +194,7 @@ var rootFlags = []cli.Flag{
 		Usage:       "The name of the AWS Kinesis Data Stream",
 		Value:       rootConfig.KinesisStream,
 		Destination: &rootConfig.KinesisStream,
-		Category:    flagCategoryKinesis,
+		Category:    flagCategoryDataStream,
 	},
 }
 
