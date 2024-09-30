@@ -552,8 +552,14 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 
 func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, err error) {
 	defer func() {
+		av, err := r.host.Peerstore().Get(pid, "AgentVersion")
+		if err != nil {
+			av = "unknown"
+		}
+
 		reqData := map[string]any{
-			"PeerID": pid.String(),
+			"AgentVersion": av,
+			"PeerID":       pid.String(),
 		}
 		if status != nil {
 			reqData["ForkDigest"] = hex.EncodeToString(status.ForkDigest)
