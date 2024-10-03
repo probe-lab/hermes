@@ -17,6 +17,8 @@ var prysmConnectionGraceTime = 2 * time.Second
 
 func TestReqResp_ProtocolRequests(t *testing.T) {
 	// NOTE: be aware that the logs can generate noisy
+	// ONLY run with a local trusted Prysm on "127.0.0.1:3500 / 4000"
+	t.Skip()
 
 	// Generate an Ethereum Node to communicate with the local Prysm node
 	ctx, mainCancel := context.WithCancel(context.Background())
