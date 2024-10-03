@@ -24,7 +24,7 @@ var (
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
 
-	currentBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
+	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)z
 )
 
 // configure global ForkVersion variables
@@ -34,7 +34,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
-	currentBeaconConfig = beaconConfig
+	globalBeaconConfig = beaconConfig
 }
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root
