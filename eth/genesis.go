@@ -25,7 +25,7 @@ var (
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
 
-	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)z
+	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
 
 // configure global ForkVersion variables
