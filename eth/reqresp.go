@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	ssz "github.com/ferranbt/fastssz"
+	"github.com/libp2p/go-libp2p/core"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -22,6 +24,9 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
+	psync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
 	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel/attribute"
@@ -552,8 +557,14 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 
 func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, err error) {
 	defer func() {
+		av, err := r.host.Peerstore().Get(pid, "AgentVersion")
+		if err != nil {
+			av = "unknown"
+		}
+
 		reqData := map[string]any{
-			"PeerID": pid.String(),
+			"AgentVersion": av,
+			"PeerID":       pid.String(),
 		}
 		if status != nil {
 			reqData["ForkDigest"] = hex.EncodeToString(status.ForkDigest)
@@ -723,6 +734,90 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 	return resp, nil
 }
 
+func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, lastSlot uint64) ([]interfaces.ReadOnlySignedBeaconBlock, error) {
+	var err error
+	blocks := make([]interfaces.ReadOnlySignedBeaconBlock, 0, (lastSlot - firstSlot))
+
+	startT := time.Now()
+
+	defer func() {
+		reqData := map[string]any{
+			"PeerID": pid.String(),
+		}
+
+		if blocks != nil {
+			reqData["RequestedBlocks"] = lastSlot - firstSlot
+			reqData["ReceivedBlocks"] = len(blocks)
+			reqData["Duration"] = time.Since(startT)
+		}
+
+		if err != nil {
+			reqData["Error"] = err.Error()
+		}
+
+		traceEvt := &hermeshost.TraceEvent{
+			Type:      "REQUEST_BLOCKS_BY_RANGE",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Payload:   reqData,
+		}
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
+		}
+
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "block_by_range"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	slog.Debug("Perform blocks_by_range request", tele.LogAttrPeerID(pid))
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
+	if err != nil {
+		return blocks, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
+	}
+	defer stream.Close()
+	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
+
+	req := &pb.BeaconBlocksByRangeRequest{
+		StartSlot: primitives.Slot(firstSlot),
+		Count:     (lastSlot - firstSlot),
+		Step:      1,
+	}
+	if err := r.writeRequest(ctx, stream, req); err != nil {
+		return blocks, fmt.Errorf("write block_by_range request: %w", err)
+	}
+
+	// read and decode status response
+	process := func(blk interfaces.ReadOnlySignedBeaconBlock) error {
+		blocks = append(blocks, blk)
+		slog.Info(
+			"got signed_beacon_block",
+			slog.Attr{Key: "block_number", Value: slog.AnyValue(blk.Block().Slot())},
+			slog.Attr{Key: "from", Value: slog.AnyValue(pid.String())},
+		)
+		return nil
+	}
+
+	for i := uint64(0); ; i++ {
+		isFirstChunk := i == 0
+		blk, err := r.readChunkedBlock(stream, &encoder.SszNetworkEncoder{}, isFirstChunk)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading block_by_range request: %w", err)
+		}
+		if err := process(blk); err != nil {
+			return nil, fmt.Errorf("processing block_by_range chunk: %w", err)
+		}
+	}
+
+	return blocks, nil
+}
+
 // readRequest reads a request from the given network stream and populates the
 // data parameter with the decoded request. It also sets a read deadline on the
 // stream and returns an error if it fails to do so. After reading the request,
@@ -854,4 +949,127 @@ func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data
 	}
 
 	return nil
+}
+
+// ReadChunkedBlock handles each response chunk that is sent by the
+// peer and converts it into a beacon block.
+// Adaptation from Prysm's -> https://github.com/prysmaticlabs/prysm/blob/2e29164582c3665cdf5a472cd4ec9838655c9754/beacon-chain/sync/rpc_chunked_response.go#L85
+func (r *ReqResp) readChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding, isFirstChunk bool) (interfaces.ReadOnlySignedBeaconBlock, error) {
+	// Handle deadlines differently for first chunk
+	if isFirstChunk {
+		return r.readFirstChunkedBlock(stream, encoding)
+	}
+	return r.readResponseChunk(stream, encoding)
+}
+
+// readFirstChunkedBlock reads the first chunked block and applies the appropriate deadlines to it.
+func (r *ReqResp) readFirstChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding) (interfaces.ReadOnlySignedBeaconBlock, error) {
+	// read status
+	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, fmt.Errorf(errMsg)
+	}
+	// set deadline for reading from stream
+	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+	// get fork version and block type
+	forkD, err := r.readForkDigestFromStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	forkV, err := GetForkVersionFromForkDigest(forkD)
+	if err != nil {
+		return nil, err
+	}
+	return r.getBlockForForkVersion(forkV, encoding, stream)
+}
+
+// readResponseChunk reads the response from the stream and decodes it into the
+// provided message type.
+func (r *ReqResp) readResponseChunk(stream core.Stream, encoding encoder.NetworkEncoding) (interfaces.ReadOnlySignedBeaconBlock, error) {
+	if err := stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, fmt.Errorf(errMsg)
+	}
+	// No-op for now with the rpc context.
+	forkD, err := r.readForkDigestFromStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	forkV, err := GetForkVersionFromForkDigest(forkD)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.getBlockForForkVersion(forkV, encoding, stream)
+}
+
+// readForkDigestFromStream reads any attached context-bytes to the payload.
+func (r *ReqResp) readForkDigestFromStream(stream network.Stream) (forkD [4]byte, err error) {
+	// Read context (fork-digest) from stream (assumes it has it)
+	b := make([]byte, 4)
+	if _, err = stream.Read(b); err != nil {
+		return ForkVersion{}, err
+	}
+	copy(forkD[:], b)
+	return forkD, nil
+}
+
+// getBlockForForkVersion returns an ReadOnlySignedBeaconBlock interface from the block type of each ForkVersion
+func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.NetworkEncoding, stream network.Stream) (sblk interfaces.ReadOnlySignedBeaconBlock, err error) {
+	switch forkV {
+	case Phase0ForkVersion:
+		blk := &pb.SignedBeaconBlock{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
+
+	case AltairForkVersion:
+		blk := &pb.SignedBeaconBlockAltair{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
+
+	case BellatrixForkVersion:
+		blk := &pb.SignedBeaconBlockBellatrix{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
+
+	case CapellaForkVersion:
+		blk := &pb.SignedBeaconBlockCapella{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
+
+	case DenebForkVersion:
+		blk := &pb.SignedBeaconBlockDeneb{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
+
+	default:
+		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
+		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)
+	}
 }

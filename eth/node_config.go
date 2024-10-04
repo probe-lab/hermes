@@ -435,13 +435,13 @@ func topicFormatFromBase(topicBase string) (string, error) {
 func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 	switch topic {
 	case p2p.GossipAttestationMessage:
-		return currentBeaconConfig.AttestationSubnetCount, true
+		return globalBeaconConfig.AttestationSubnetCount, true
 
 	case p2p.GossipSyncCommitteeMessage:
-		return currentBeaconConfig.SyncCommitteeSubnetCount, true
+		return globalBeaconConfig.SyncCommitteeSubnetCount, true
 
 	case p2p.GossipBlobSidecarMessage:
-		return currentBeaconConfig.BlobsidecarSubnetCount, true
+		return globalBeaconConfig.BlobsidecarSubnetCount, true
 
 	default:
 		return uint64(0), false

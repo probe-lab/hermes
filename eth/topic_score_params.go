@@ -80,7 +80,7 @@ func topicToScoreParamsMapper(topic string, activeValidators uint64) *pubsub.Top
 // defaultBlockTopicParams returns the Block-topic specific parameters that need to be given to the topic subscriber
 func defaultBlockTopicParams() *pubsub.TopicScoreParams {
 	decayEpoch := time.Duration(5)
-	blocksPerEpoch := uint64(currentBeaconConfig.SlotsPerEpoch)
+	blocksPerEpoch := uint64(globalBeaconConfig.SlotsPerEpoch)
 	meshWeight := -0.717
 	return &pubsub.TopicScoreParams{
 		TopicWeight:                     beaconBlockWeight,
@@ -143,7 +143,7 @@ func defaultAggregateTopicParams(activeValidators uint64) *pubsub.TopicScorePara
 
 func defaultSyncContributionTopicParams() *pubsub.TopicScoreParams {
 	// Determine the expected message rate for the particular gossip topic.
-	aggPerSlot := currentBeaconConfig.SyncCommitteeSubnetCount * currentBeaconConfig.TargetAggregatorsPerSyncSubcommittee
+	aggPerSlot := globalBeaconConfig.SyncCommitteeSubnetCount * globalBeaconConfig.TargetAggregatorsPerSyncSubcommittee
 	firstMessageCap, err := decayLimit(scoreDecay(1*oneEpochDuration()), float64(aggPerSlot*2/gossipSubD))
 	if err != nil {
 		slog.Warn("skipping initializing topic scoring", tele.LogAttrError(err))
@@ -179,7 +179,7 @@ func defaultSyncContributionTopicParams() *pubsub.TopicScoreParams {
 }
 
 func defaultAggregateSubnetTopicParams(activeValidators uint64) *pubsub.TopicScoreParams {
-	subnetCount := currentBeaconConfig.AttestationSubnetCount
+	subnetCount := globalBeaconConfig.AttestationSubnetCount
 	// Get weight for each specific subnet.
 	topicWeight := attestationTotalWeight / float64(subnetCount)
 	subnetWeight := activeValidators / subnetCount
@@ -188,13 +188,13 @@ func defaultAggregateSubnetTopicParams(activeValidators uint64) *pubsub.TopicSco
 		return nil
 	}
 	// Determine the amount of validators expected in a subnet in a single slot.
-	numPerSlot := time.Duration(subnetWeight / uint64(currentBeaconConfig.SlotsPerEpoch))
+	numPerSlot := time.Duration(subnetWeight / uint64(globalBeaconConfig.SlotsPerEpoch))
 	if numPerSlot == 0 {
 		slog.Warn("numPerSlot is 0, skipping initializing topic scoring")
 		return nil
 	}
 	comsPerSlot := committeeCountPerSlot(activeValidators)
-	exceedsThreshold := comsPerSlot >= 2*subnetCount/uint64(currentBeaconConfig.SlotsPerEpoch)
+	exceedsThreshold := comsPerSlot >= 2*subnetCount/uint64(globalBeaconConfig.SlotsPerEpoch)
 	firstDecay := time.Duration(1)
 	meshDecay := time.Duration(4)
 	if exceedsThreshold {
@@ -243,10 +243,10 @@ func defaultAggregateSubnetTopicParams(activeValidators uint64) *pubsub.TopicSco
 }
 
 func defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub.TopicScoreParams {
-	subnetCount := currentBeaconConfig.SyncCommitteeSubnetCount
+	subnetCount := globalBeaconConfig.SyncCommitteeSubnetCount
 	// Get weight for each specific subnet.
 	topicWeight := syncCommitteesTotalWeight / float64(subnetCount)
-	syncComSize := currentBeaconConfig.SyncCommitteeSize
+	syncComSize := globalBeaconConfig.SyncCommitteeSize
 	// Set the max as the sync committee size
 	if activeValidators > syncComSize {
 		activeValidators = syncComSize
@@ -391,11 +391,11 @@ func defaultBlsToExecutionChangeTopicParams() *pubsub.TopicScoreParams {
 // utility functions
 
 func oneSlotDuration() time.Duration {
-	return time.Duration(currentBeaconConfig.SecondsPerSlot) * time.Second
+	return time.Duration(globalBeaconConfig.SecondsPerSlot) * time.Second
 }
 
 func oneEpochDuration() time.Duration {
-	return time.Duration(currentBeaconConfig.SlotsPerEpoch) * oneSlotDuration()
+	return time.Duration(globalBeaconConfig.SlotsPerEpoch) * oneSlotDuration()
 }
 
 // determines the decay rate from the provided time period till
@@ -450,7 +450,7 @@ func maxScore() float64 {
 // Uses a very rough gauge for total aggregator size per slot.
 func aggregatorsPerSlot(activeValidators uint64) uint64 {
 	comms := committeeCountPerSlot(activeValidators)
-	totalAggs := comms * currentBeaconConfig.TargetAggregatorsPerCommittee
+	totalAggs := comms * globalBeaconConfig.TargetAggregatorsPerCommittee
 	return totalAggs
 }
 
@@ -462,9 +462,9 @@ func committeeCountPerSlot(activeValidators uint64) uint64 {
 }
 
 func slotCommitteeCount(activeValidatorCount uint64) uint64 {
-	committeesPerSlot := activeValidatorCount / currentBeaconConfig.SecondsPerSlot / currentBeaconConfig.TargetCommitteeSize
-	if committeesPerSlot > currentBeaconConfig.MaxCommitteesPerSlot {
-		return currentBeaconConfig.MaxCommitteesPerSlot
+	committeesPerSlot := activeValidatorCount / globalBeaconConfig.SecondsPerSlot / globalBeaconConfig.TargetCommitteeSize
+	if committeesPerSlot > globalBeaconConfig.MaxCommitteesPerSlot {
+		return globalBeaconConfig.MaxCommitteesPerSlot
 	}
 	if committeesPerSlot == 0 {
 		return 1
