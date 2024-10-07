@@ -288,6 +288,7 @@ func cmdEthAction(c *cli.Context) error {
 		Libp2pHost:                  ethConfig.Libp2pHost,
 		Libp2pPort:                  ethConfig.Libp2pPort,
 		Libp2pPeerscoreSnapshotFreq: ethConfig.Libp2pPeerscoreSnapshotFreq,
+		GossipSubTopics:             eth.AllPubSubBaseTopics(),
 		GossipSubMessageEncoder:     encoder.SszNetworkEncoder{},
 		RPCEncoder:                  encoder.SszNetworkEncoder{},
 		LocalTrustedAddr:            ethConfig.LocalTrustedAddr,

@@ -180,7 +180,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
-		Topics:         cfg.getDesiredFullTopics(cfg.GossipSubMessageEncoder),
+		Topics:         cfg.GetDesiredFullTopics(cfg.GossipSubMessageEncoder),
 		ForkVersion:    cfg.ForkVersion,
 		Encoder:        cfg.GossipSubMessageEncoder,
 		SecondsPerSlot: time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second,

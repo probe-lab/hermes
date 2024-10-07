@@ -66,6 +66,9 @@ type NodeConfig struct {
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
 
+	// GossipSub related topics
+	GossipSubTopics []string
+
 	// Message encoders
 	GossipSubMessageEncoder encoder.NetworkEncoding
 	RPCEncoder              encoder.NetworkEncoding
@@ -377,7 +380,7 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 }
 
 // desiredPubSubBaseTopics returns the list of gossip_topics we want to subscribe to
-func desiredPubSubBaseTopics() []string {
+func AllPubSubBaseTopics() []string {
 	return []string{
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
@@ -456,11 +459,10 @@ func (n *NodeConfig) composeEthTopicWithSubnet(base string, encoder encoder.Netw
 	return fmt.Sprintf(base, n.ForkDigest, subnet) + encoder.ProtocolSuffix()
 }
 
-func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
-	desiredTopics := desiredPubSubBaseTopics()
+func (n *NodeConfig) GetDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
 	fullTopics := make([]string, 0)
 
-	for _, topicBase := range desiredTopics {
+	for _, topicBase := range n.GossipSubTopics {
 		topicFormat, err := topicFormatFromBase(topicBase)
 		if err != nil {
 			slog.Warn("invalid gossipsub topic", slog.Attr{Key: "topic", Value: slog.StringValue(topicBase)})
@@ -480,7 +482,7 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 }
 
 func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding, activeValidators uint64) map[string]*pubsub.TopicScoreParams {
-	desiredTopics := n.getDesiredFullTopics(encoder)
+	desiredTopics := n.GetDesiredFullTopics(encoder)
 	topicScores := make(map[string]*pubsub.TopicScoreParams, len(desiredTopics))
 	for _, topic := range desiredTopics {
 		if params := topicToScoreParamsMapper(topic, activeValidators); params != nil {
