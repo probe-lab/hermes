@@ -78,7 +78,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	// configure the global variables for the network ForkVersions
-	initNetworkForkVersions(cfg.BeaconConfig)
+	InitNetworkForkVersions(cfg.BeaconConfig)
 
 	var ds host.DataStream
 	switch cfg.DataStreamType {

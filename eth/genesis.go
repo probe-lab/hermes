@@ -29,7 +29,7 @@ var (
 )
 
 // configure global ForkVersion variables
-func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
+func InitNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	Phase0ForkVersion = ForkVersion(beaconConfig.GenesisForkVersion)
 	AltairForkVersion = ForkVersion(beaconConfig.AltairForkVersion)
 	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)

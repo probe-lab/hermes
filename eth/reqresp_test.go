@@ -62,7 +62,7 @@ func requestBlockByRangeV2(t *testing.T, ctx context.Context, ethNode *Node) {
 func composeLocalEthNode(t *testing.T, ctx context.Context) (*Node, context.CancelFunc) {
 	config, err := DeriveKnownNetworkConfig(ctx, "mainnet")
 	require.NoError(t, err)
-	initNetworkForkVersions(config.Beacon)
+	InitNetworkForkVersions(config.Beacon)
 
 	genesisConfig := GenesisConfigs["mainnet"]
 	forkV := DenebForkVersion
