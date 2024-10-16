@@ -31,3 +31,25 @@ func (t *TraceLogger) PutRecord(ctx context.Context, event *TraceEvent) error {
 func (t *TraceLogger) Type() DataStreamType {
 	return DataStreamTypeLogger
 }
+
+type EmptyDataStream struct{}
+
+var _ DataStream = (*EmptyDataStream)(nil)
+
+func (t *EmptyDataStream) Start(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (t *EmptyDataStream) Stop(ctx context.Context) error {
+	return nil
+}
+
+func (t *EmptyDataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
+	// do nothing
+	return nil
+}
+
+func (t *EmptyDataStream) Type() DataStreamType {
+	return DataStreamTypeDummy
+}

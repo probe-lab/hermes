@@ -808,7 +808,7 @@ func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, l
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("reading block_by_range request: %w", err)
+			return nil, fmt.Errorf("reading block_by_range response: %w", err)
 		}
 		if err := process(blk); err != nil {
 			return nil, fmt.Errorf("processing block_by_range chunk: %w", err)
@@ -1072,4 +1072,166 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
 		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)
 	}
+}
+
+// custom ReqResp handlers for ookla
+func (r *ReqResp) OoklaBlocksByRangeV2(ctx context.Context, pid peer.ID, startSlot, finishSlot uint64) (time.Duration, []*pb.SignedBeaconBlockDeneb, error) {
+	var err error
+	blocks := make([]*pb.SignedBeaconBlockDeneb, 0)
+
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
+	if err != nil {
+		return time.Duration(0), blocks, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
+	}
+	defer stream.Close()
+	defer stream.Reset()
+
+	req := &pb.BeaconBlocksByRangeRequest{
+		StartSlot: primitives.Slot(startSlot),
+		Count:     finishSlot + 1 - startSlot,
+		Step:      1,
+	}
+
+	if err := r.writeRequest(ctx, stream, req); err != nil {
+		return time.Duration(0), blocks, fmt.Errorf("write block_by_range request: %w", err)
+	}
+
+	tStart := time.Now()
+	// read and decode status response
+	for i := uint64(0); ; i++ {
+		isFirstChunk := i == 0
+		block, err := r.simpleReadChunkedBlock(stream, &encoder.SszNetworkEncoder{}, isFirstChunk)
+		if errors.Is(err, io.EOF) {
+			if i == 0 {
+				return time.Duration(0), nil, fmt.Errorf("read EOF on first block reply: %w", err)
+			}
+			break
+		}
+		if err != nil {
+			return time.Duration(0), nil, fmt.Errorf("reading block_by_range reply: %w", err)
+		}
+		blocks = append(blocks, block)
+	}
+	opDuration := time.Since(tStart)
+	return opDuration, blocks, nil
+}
+
+// custom ReqResp handlers for ookla
+func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(ctx context.Context, pid peer.ID, startSlot, finishSlot uint64) (time.Duration, int64, error) {
+	var err error
+
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
+	if err != nil {
+		return time.Duration(0), 0, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
+	}
+	defer stream.Close()
+	defer stream.Reset()
+
+	req := &pb.BeaconBlocksByRangeRequest{
+		StartSlot: primitives.Slot(startSlot),
+		Count:     finishSlot - startSlot,
+		Step:      1,
+	}
+
+	if err := r.writeRequest(ctx, stream, req); err != nil {
+		return time.Duration(0), 0, fmt.Errorf("write block_by_range request: %w", err)
+	}
+
+	tStart := time.Now()
+	// read and decode status response
+	bytes, err := r.fastBulkMessageReader(stream)
+	opDuration := time.Since(tStart)
+	return opDuration, bytes, err
+}
+
+// ReadChunkedBlock handles each response chunk that is sent by the
+// peer and converts it into a beacon block.
+// Adaptation from Prysm's -> https://github.com/prysmaticlabs/prysm/blob/2e29164582c3665cdf5a472cd4ec9838655c9754/beacon-chain/sync/rpc_chunked_response.go#L85
+func (r *ReqResp) simpleReadChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding, isFirstChunk bool) (*pb.SignedBeaconBlockDeneb, error) {
+	// Handle deadlines differently for first chunk
+	if isFirstChunk {
+		return r.simpleReadFirstChunkedBlock(stream, encoding)
+	}
+	return r.simpleReadResponseChunk(stream, encoding)
+}
+
+// readFirstChunkedBlock reads the first chunked block and applies the appropriate deadlines to it.
+func (r *ReqResp) simpleReadFirstChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding) (*pb.SignedBeaconBlockDeneb, error) {
+	// read status
+	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, fmt.Errorf(errMsg)
+	}
+	// set deadline for reading from stream
+	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+	// get fork version and block type
+	forkD, err := r.readForkDigestFromStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	_, err = GetForkVersionFromForkDigest(forkD)
+	if err != nil {
+		return nil, err
+	}
+	return r.getDenebBlock(encoding, stream)
+}
+
+// readResponseChunk reads the response from the stream and decodes it into the
+// provided message type.
+func (r *ReqResp) simpleReadResponseChunk(stream core.Stream, encoding encoder.NetworkEncoding) (*pb.SignedBeaconBlockDeneb, error) {
+	if err := stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, fmt.Errorf(errMsg)
+	}
+	// No-op for now with the rpc context.
+	forkD, err := r.readForkDigestFromStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	_, err = GetForkVersionFromForkDigest(forkD)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.getDenebBlock(encoding, stream)
+}
+
+// getBlockForForkVersion returns an ReadOnlySignedBeaconBlock interface from the block type of each ForkVersion
+func (r *ReqResp) getDenebBlock(encoding encoder.NetworkEncoding, stream network.Stream) (*pb.SignedBeaconBlockDeneb, error) {
+	blk := &pb.SignedBeaconBlockDeneb{}
+	err := encoding.DecodeWithMaxLength(stream, blk)
+	return blk, err
+}
+
+func (r *ReqResp) fastBulkMessageReader(stream core.Stream) (snappyBytes int64, err error) {
+	iters := 0
+msgReadLoop:
+	for {
+		rawB, err := io.ReadAll(stream)
+		switch err {
+		case nil:
+			snappyBytes = snappyBytes + int64(len(rawB))
+			iters++
+			continue
+
+		default:
+			fmt.Println("other error", err)
+			break msgReadLoop
+		}
+
+	}
+	fmt.Println("messages:", iters)
+	fmt.Println("snappyBytes:", snappyBytes)
+	return snappyBytes, nil
 }

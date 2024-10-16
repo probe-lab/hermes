@@ -77,11 +77,18 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
 
+	// TEMP
+	// override the log level
+	slog.SetLogLoggerLevel(slog.LevelWarn)
+	// END
+
 	// configure the global variables for the network ForkVersions
 	InitNetworkForkVersions(cfg.BeaconConfig)
 
 	var ds host.DataStream
 	switch cfg.DataStreamType {
+	case host.DataStreamTypeDummy:
+		ds = new(host.EmptyDataStream)
 	case host.DataStreamTypeLogger:
 		ds = new(host.TraceLogger)
 
@@ -385,18 +392,6 @@ func (n *Node) Start(ctx context.Context) error {
 		return fmt.Errorf("register RPC handlers: %w", err)
 	}
 
-	// get chain parameters for scores
-	actVals, err := n.pryClient.getActiveValidatorCount(ctx)
-	if err != nil {
-		return fmt.Errorf("fetch active validators: %w", err)
-	}
-
-	// initialize GossipSub
-	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n, actVals)...)
-	if err != nil {
-		return fmt.Errorf("init gossip sub: %w", err)
-	}
-
 	// Create a connection signal that fires when the Prysm node has connected
 	// to us. Prysm will try this periodically AFTER we have registered ourselves
 	// as a trusted peer. Therefore, we register the signal first and only
@@ -434,6 +429,21 @@ func (n *Node) Start(ctx context.Context) error {
 			slog.Warn("failed to remove ourself as a trusted peer", tele.LogAttrError(err))
 		}
 	}()
+
+	// TODO: for some reason this delays the entire Hermes initialization process for ookla
+	// commenting it
+	// // get chain parameters for scores
+	// fmt.Println("getting active validator count...")
+	// actVals, err := n.pryClient.getActiveValidatorCount(ctx)
+	// if err != nil {
+	// 	return fmt.Errorf("fetch active validators: %w", err)
+	// }
+
+	// initialize GossipSub
+	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n, 0)...)
+	if err != nil {
+		return fmt.Errorf("init gossip sub: %w", err)
+	}
 
 	// register the node itself as the notifiee for network connection events
 	n.host.Network().Notify(n)
@@ -506,6 +516,34 @@ func logDeferErr(fn func() error, onErrMsg string) {
 func terminateSupervisorTreeOnErr(err error) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", err, suture.ErrTerminateSupervisorTree)
+	}
+	return nil
+}
+
+// startDataStream starts the data stream and implements a graceful shutdown
+func (n *Node) LocalPrysmInfo() peer.AddrInfo {
+	return *n.pryInfo
+}
+
+// startDataStream starts the data stream and implements a graceful shutdown
+func (n *Node) NodesChainHead(ctx context.Context) (*eth.ChainHead, error) {
+	return n.pryClient.ChainHead(ctx)
+}
+
+// startDataStream starts the data stream and implements a graceful shutdown
+func (n *Node) Host() *host.Host {
+	return n.host
+}
+
+// startDataStream starts the data stream and implements a graceful shutdown
+func (n *Node) ReqResp() *ReqResp {
+	return n.reqResp
+}
+
+func (n *Node) RemoveTrustedPeer(ctx context.Context, pid peer.ID) error {
+	err := n.pryClient.RemoveTrustedPeer(context.Background(), n.host.ID())
+	if err != nil { // use new context, as the old one is likely cancelled
+		return fmt.Errorf("failed to remove ourself as a trusted peer %s", err.Error())
 	}
 	return nil
 }

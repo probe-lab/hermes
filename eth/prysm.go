@@ -3,7 +3,6 @@ package eth
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 
 	apiCli "github.com/prysmaticlabs/prysm/v5/api/client/beacon"
 	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -325,18 +323,19 @@ func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte)
 
 	// this checks whether the local fork_digest at hermes matches the one that the remote node keeps
 	// request the genesis
-	nodeFork, err := p.beaconApiClient.GetFork(ctx, apiCli.StateOrBlockId("head"))
-	if err != nil {
-		return false, fmt.Errorf("request beacon fork to compose forkdigest: %w", err)
-	}
+	// nodeFork, err := p.beaconApiClient.GetFork(ctx, apiCli.StateOrBlockId("head"))
+	// if err != nil {
+	// 	return false, fmt.Errorf("request beacon fork to compose forkdigest: %w", err)
+	// }
 
-	forkDigest, err := signing.ComputeForkDigest(nodeFork.CurrentVersion, p.genesis.GenesisValidatorRoot)
-	if err != nil {
-		return false, fmt.Errorf("create fork digest (%s, %x): %w", hex.EncodeToString(nodeFork.CurrentVersion), p.genesis.GenesisValidatorRoot, err)
-	}
-	// check if our version is within the versions of the node
-	if forkDigest == hermesForkDigest {
-		return true, nil
-	}
-	return false, nil
+	// forkDigest, err := signing.ComputeForkDigest(nodeFork.CurrentVersion, p.genesis.GenesisValidatorRoot)
+	// if err != nil {
+	// 	return false, fmt.Errorf("create fork digest (%s, %x): %w", hex.EncodeToString(nodeFork.CurrentVersion), p.genesis.GenesisValidatorRoot, err)
+	// }
+	// // check if our version is within the versions of the node
+	// if forkDigest == hermesForkDigest {
+	// 	return true, nil
+	// }
+	// return false, nil
+	return true, nil
 }

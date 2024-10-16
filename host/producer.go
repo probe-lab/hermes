@@ -15,6 +15,8 @@ type DataStreamType int
 
 func (ds DataStreamType) String() string {
 	switch ds {
+	case DataStreamTypeDummy:
+		return "dummy"
 	case DataStreamTypeLogger:
 		return "logger"
 	case DataStreamTypeKinesis:
@@ -27,13 +29,16 @@ func (ds DataStreamType) String() string {
 }
 
 const (
-	DataStreamTypeKinesis DataStreamType = iota
-	DataStreamTypeCallback
+	DataStreamTypeDummy DataStreamType = iota
 	DataStreamTypeLogger
+	DataStreamTypeKinesis
+	DataStreamTypeCallback
 )
 
 func DataStreamtypeFromStr(str string) DataStreamType {
 	switch str {
+	case "dummy":
+		return DataStreamTypeDummy
 	case "logger":
 		return DataStreamTypeLogger
 	case "kinesis":
