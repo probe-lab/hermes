@@ -476,7 +476,9 @@ func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Str
 		return nil, fmt.Errorf("blocks by range request from delegate peer")
 	}
 
-	return nil, r.delegateStream(ctx, stream)
+	stream.Reset()
+	return nil, nil
+	// return nil, r.delegateStream(ctx, stream)
 }
 
 func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
@@ -484,7 +486,9 @@ func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stre
 		return nil, fmt.Errorf("blocks by root request from delegate peer")
 	}
 
-	return nil, r.delegateStream(ctx, stream)
+	stream.Reset()
+	return nil, nil
+	// return nil, r.delegateStream(ctx, stream)
 }
 
 func (r *ReqResp) blobsByRangeV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
@@ -492,15 +496,18 @@ func (r *ReqResp) blobsByRangeV2Handler(ctx context.Context, stream network.Stre
 		return nil, fmt.Errorf("blobs by range request from delegate peer")
 	}
 
-	return nil, r.delegateStream(ctx, stream)
+	stream.Reset()
+	return nil, nil
+	// return nil, r.delegateStream(ctx, stream)
 }
 
 func (r *ReqResp) blobsByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
 		return nil, fmt.Errorf("blobs by root request from delegate peer")
 	}
-
-	return nil, r.delegateStream(ctx, stream)
+	stream.Reset()
+	return nil, nil
+	// return nil, r.delegateStream(ctx, stream)
 }
 
 func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) error {
@@ -1117,7 +1124,11 @@ func (r *ReqResp) OoklaBlocksByRangeV2(ctx context.Context, pid peer.ID, startSl
 }
 
 // custom ReqResp handlers for ookla
-func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(ctx context.Context, pid peer.ID, startSlot, finishSlot uint64) (time.Duration, int64, error) {
+func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(
+	ctx context.Context,
+	pid peer.ID,
+	startSlot, finishSlot int,
+) (time.Duration, int, error) {
 	var err error
 
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
@@ -1129,7 +1140,7 @@ func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(ctx context.Context, pid pe
 
 	req := &pb.BeaconBlocksByRangeRequest{
 		StartSlot: primitives.Slot(startSlot),
-		Count:     finishSlot - startSlot,
+		Count:     uint64(finishSlot - startSlot),
 		Step:      1,
 	}
 
@@ -1214,24 +1225,10 @@ func (r *ReqResp) getDenebBlock(encoding encoder.NetworkEncoding, stream network
 	return blk, err
 }
 
-func (r *ReqResp) fastBulkMessageReader(stream core.Stream) (snappyBytes int64, err error) {
-	iters := 0
-msgReadLoop:
-	for {
-		rawB, err := io.ReadAll(stream)
-		switch err {
-		case nil:
-			snappyBytes = snappyBytes + int64(len(rawB))
-			iters++
-			continue
-
-		default:
-			fmt.Println("other error", err)
-			break msgReadLoop
-		}
-
+func (r *ReqResp) fastBulkMessageReader(stream core.Stream) (snappyBytes int, err error) {
+	rawB, err := io.ReadAll(stream)
+	if err != nil {
+		return 0, err
 	}
-	fmt.Println("messages:", iters)
-	fmt.Println("snappyBytes:", snappyBytes)
-	return snappyBytes, nil
+	return len(rawB), nil
 }
