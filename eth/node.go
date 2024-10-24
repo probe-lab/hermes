@@ -77,11 +77,6 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
 
-	// TEMP
-	// override the log level
-	slog.SetLogLoggerLevel(slog.LevelWarn)
-	// END
-
 	// configure the global variables for the network ForkVersions
 	InitNetworkForkVersions(cfg.BeaconConfig)
 
