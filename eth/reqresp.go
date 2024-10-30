@@ -1150,9 +1150,14 @@ func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(
 
 	tStart := time.Now()
 	// read and decode status response
-	bytes, err := r.fastBulkMessageReader(stream)
+	msgBytes, bytesLen, err := r.fastBulkMessageReader(stream)
 	opDuration := time.Since(tStart)
-	return opDuration, bytes, err
+	if err != nil {
+		return opDuration, bytesLen, err
+	} else {
+		err = parseStatusCode(r.cfg.Encoder, *msgBytes)
+		return opDuration, bytesLen, err
+	}
 }
 
 // ReadChunkedBlock handles each response chunk that is sent by the
@@ -1225,10 +1230,31 @@ func (r *ReqResp) getDenebBlock(encoding encoder.NetworkEncoding, stream network
 	return blk, err
 }
 
-func (r *ReqResp) fastBulkMessageReader(stream core.Stream) (snappyBytes int, err error) {
-	rawB, err := io.ReadAll(stream)
+func (r *ReqResp) fastBulkMessageReader(stream core.Stream) (*[]byte, int, error) {
+	snappyBytes, err := io.ReadAll(stream)
 	if err != nil {
-		return 0, err
+		return &snappyBytes, len(snappyBytes), err
 	}
-	return len(rawB), nil
+	return &snappyBytes, len(snappyBytes), nil
+}
+
+const responseCodeSuccess = byte(0x00)
+
+func parseStatusCode(encoding encoder.NetworkEncoding, bs []byte) error {
+	// if no bytes, error code 1
+	if len(bs) <= 0 {
+		return fmt.Errorf("no error, no bytes")
+	}
+	errCode := bs[0]
+	if errCode == responseCodeSuccess {
+		return nil
+	} else {
+		r := bytes.NewReader(bs[1:])
+		msg := &types.ErrorMessage{}
+		if err := encoding.DecodeWithMaxLength(r, msg); err != nil {
+			fmt.Println("err: ", err.Error())
+			return err
+		}
+		return fmt.Errorf(string(*msg))
+	}
 }

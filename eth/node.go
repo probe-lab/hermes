@@ -516,8 +516,11 @@ func terminateSupervisorTreeOnErr(err error) error {
 }
 
 // startDataStream starts the data stream and implements a graceful shutdown
-func (n *Node) LocalPrysmInfo() peer.AddrInfo {
-	return *n.pryInfo
+func (n *Node) LocalPrysmInfo() (peer.AddrInfo, error) {
+	if n.pryInfo == nil {
+		return peer.AddrInfo{}, fmt.Errorf("no addres available for local Prysm node")
+	}
+	return *n.pryInfo, nil
 }
 
 // startDataStream starts the data stream and implements a graceful shutdown
