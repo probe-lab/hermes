@@ -226,6 +226,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		peerer:         NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
 		disc:           disc,
 		eventCallbacks: []func(ctx context.Context, event *host.TraceEvent){},
+		readyNotC:      make(chan struct{}),
 	}
 
 	if ds.Type() == host.DataStreamTypeCallback {
@@ -428,10 +429,8 @@ func (n *Node) Start(ctx context.Context) error {
 		}
 	}()
 
-	// if the connection with the Prysm node when successfully, notify over the channel (if was requested)
-	if n.readyNotC != nil {
-		n.readyNotC <- struct{}{}
-	}
+	// if the connection with the Prysm node when successfully, notify over the channel
+	close(n.readyNotC)
 
 	// TODO: for some reason this delays the entire Hermes initialization process for ookla
 	// commenting it
@@ -525,7 +524,6 @@ func terminateSupervisorTreeOnErr(err error) error {
 
 // notifyWhenReady creates and returns a channel when the service is ready to work
 func (n *Node) NotifyWhenReady() chan struct{} {
-	n.readyNotC = make(chan struct{})
 	return n.readyNotC
 }
 
