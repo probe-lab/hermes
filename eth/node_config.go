@@ -266,7 +266,7 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		return nil, err
 	}
 
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.InfiniteLimits), rcmgr.WithTraceReporter(str))
 	if err != nil {
 		return nil, err
 	}
