@@ -9,30 +9,28 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/probe-lab/hermes/host"
 	ssz "github.com/prysmaticlabs/fastssz"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	ethtypes "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 )
 
 // KinesisOutput is a renderer for Kinesis output.
 type KinesisOutput struct {
 	cfg *PubSubConfig
-	enc encoder.NetworkEncoding
 }
 
 var _ host.DataStreamRenderer = (*KinesisOutput)(nil)
 
 // NewKinesisOutput creates a new instance of KinesisOutput.
-func NewKinesisOutput(cfg *PubSubConfig, enc encoder.NetworkEncoding) host.DataStreamRenderer {
-	return &KinesisOutput{cfg: cfg, enc: enc}
+func NewKinesisOutput(cfg *PubSubConfig) host.DataStreamRenderer {
+	return &KinesisOutput{cfg: cfg}
 }
 
 // RenderPayload renders message into the destination.
 func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, dst ssz.Unmarshaler) (*host.TraceEvent, error) {
-	if k.enc == nil {
+	if k.cfg.Encoder == nil {
 		return nil, fmt.Errorf("no network encoding provided to kinenis output renderer")
 	}
 
-	if err := k.enc.DecodeGossip(msg.Data, dst); err != nil {
+	if err := k.cfg.Encoder.DecodeGossip(msg.Data, dst); err != nil {
 		return nil, fmt.Errorf("decode gossip message: %w", err)
 	}
 

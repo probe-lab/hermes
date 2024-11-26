@@ -34,5 +34,5 @@ func (t *TraceLogger) Type() DataStreamType {
 
 // OutputType returns the output type to be used by this data stream.
 func (t *TraceLogger) OutputType() DataStreamOutputType {
-	return DataStreamOutputTypeFull
+	return DataStreamOutputTypeKinesis
 }

@@ -55,6 +55,7 @@ type PubSub struct {
 	host *host.Host
 	cfg  *PubSubConfig
 	gs   *pubsub.PubSub
+	dsr  host.DataStreamRenderer
 }
 
 func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
@@ -62,12 +63,19 @@ func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
 		return nil, fmt.Errorf("validate configuration: %w", err)
 	}
 
-	ps := &PubSub{
-		host: h,
-		cfg:  cfg,
+	var dsr host.DataStreamRenderer
+	switch cfg.DataStream.OutputType() {
+	case host.DataStreamOutputTypeFull:
+		dsr = NewFullOutput(cfg)
+	default:
+		dsr = NewKinesisOutput(cfg)
 	}
 
-	return ps, nil
+	return &PubSub{
+		host: h,
+		cfg:  cfg,
+		dsr:  dsr,
+	}, nil
 }
 
 func (p *PubSub) Serve(ctx context.Context) error {
@@ -152,7 +160,6 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) error {
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -177,7 +184,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %s", p.cfg.ForkVersion.String())
 	}
 
-	evt, err = dsr.RenderPayload(evt, msg, block)
+	evt, err = p.dsr.RenderPayload(evt, msg, block)
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -202,7 +209,6 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -211,7 +217,7 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.Attestation{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.Attestation{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -236,7 +242,6 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -245,7 +250,7 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProof{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProof{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -270,7 +275,6 @@ func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) err
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -279,7 +283,7 @@ func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) err
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.VoluntaryExit{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.VoluntaryExit{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -304,7 +308,6 @@ func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -313,7 +316,7 @@ func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.AttesterSlashing{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.AttesterSlashing{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -338,7 +341,6 @@ func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -347,7 +349,7 @@ func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.ProposerSlashing{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.ProposerSlashing{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -372,7 +374,6 @@ func (p *PubSub) handleContributionAndProofMessage(ctx context.Context, msg *pub
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -381,7 +382,7 @@ func (p *PubSub) handleContributionAndProofMessage(ctx context.Context, msg *pub
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.SignedContributionAndProof{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedContributionAndProof{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -406,7 +407,6 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -415,7 +415,7 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.SyncCommitteeMessage{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SyncCommitteeMessage{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -440,7 +440,6 @@ func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pub
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -449,7 +448,7 @@ func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pub
 		}
 	)
 
-	evt, err = dsr.RenderPayload(evt, msg, &ethtypes.BLSToExecutionChange{})
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.BLSToExecutionChange{})
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -474,7 +473,6 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 
 	var (
 		err error
-		dsr = p.getDataStreamRenderer()
 		evt = &host.TraceEvent{
 			Type:      eventTypeHandleMessage,
 			Topic:     msg.GetTopic(),
@@ -487,7 +485,7 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 	case DenebForkVersion:
 		blob := ethtypes.BlobSidecar{}
 
-		evt, err = dsr.RenderPayload(evt, msg, &blob)
+		evt, err = p.dsr.RenderPayload(evt, msg, &blob)
 		if err != nil {
 			slog.Warn(
 				"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -506,13 +504,4 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 	}
 
 	return nil
-}
-
-func (p *PubSub) getDataStreamRenderer() host.DataStreamRenderer {
-	switch p.cfg.DataStream.OutputType() {
-	case host.DataStreamOutputTypeFull:
-		return NewFullOutput(p.cfg.Encoder)
-	default:
-		return NewKinesisOutput(p.cfg, p.cfg.Encoder)
-	}
 }
