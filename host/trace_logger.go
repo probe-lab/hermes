@@ -31,3 +31,8 @@ func (t *TraceLogger) PutRecord(ctx context.Context, event *TraceEvent) error {
 func (t *TraceLogger) Type() DataStreamType {
 	return DataStreamTypeLogger
 }
+
+// OutputType returns the output type to be used by this data stream.
+func (t *TraceLogger) OutputType() DataStreamOutputType {
+	return DataStreamOutputTypeFull
+}
