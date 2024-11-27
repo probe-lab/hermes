@@ -229,7 +229,6 @@ func (k *KinesisOutput) renderAggregateAttestationAndProof(
 		"Seq":            msg.GetSeqno(),
 		"MsgID":          hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":        len(msg.Data),
-		"MsgData":        agg.GetMessage(),
 		"Sig":            hexutil.Encode(agg.GetSignature()),
 		"AggIdx":         agg.GetMessage().GetAggregatorIndex(),
 		"SelectionProof": hexutil.Encode(agg.GetMessage().GetSelectionProof()),

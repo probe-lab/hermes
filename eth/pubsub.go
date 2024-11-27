@@ -64,6 +64,7 @@ func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
 	}
 
 	var dsr host.DataStreamRenderer
+
 	switch cfg.DataStream.OutputType() {
 	case host.DataStreamOutputTypeFull:
 		dsr = NewFullOutput(cfg)
