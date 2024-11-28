@@ -44,7 +44,8 @@ type PrysmClient struct {
 func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration, genesis *GenesisConfig) (*PrysmClient, error) {
 	tracer := otel.GetTracerProvider().Tracer("prysm_client")
 
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, portGRPC),
+	conn, err := grpc.NewClient(
+		fmt.Sprintf("%s:%d", host, portGRPC),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {

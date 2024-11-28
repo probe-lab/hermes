@@ -970,7 +970,7 @@ func (r *ReqResp) readFirstChunkedBlock(stream core.Stream, encoding encoder.Net
 		return nil, err
 	}
 	if code != 0 {
-		return nil, fmt.Errorf(errMsg)
+		return nil, errors.New(errMsg)
 	}
 	// set deadline for reading from stream
 	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
@@ -999,7 +999,7 @@ func (r *ReqResp) readResponseChunk(stream core.Stream, encoding encoder.Network
 		return nil, err
 	}
 	if code != 0 {
-		return nil, fmt.Errorf(errMsg)
+		return nil, errors.New(errMsg)
 	}
 	// No-op for now with the rpc context.
 	forkD, err := r.readForkDigestFromStream(stream)
