@@ -1144,6 +1144,11 @@ func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(
 		Step:      1,
 	}
 
+	err = stream.SetDeadline(time.Now().Add(30 * time.Second))
+	if err != nil {
+		return time.Duration(0), 0, fmt.Errorf("adding deadline to stream reader: %w", err)
+	}
+
 	if err := r.writeRequest(ctx, stream, req); err != nil {
 		return time.Duration(0), 0, fmt.Errorf("write block_by_range request: %w", err)
 	}
