@@ -225,7 +225,6 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			},
 		},
 		{
-
 			name: "renderProposerSlashing",
 			payload: &ethtypes.AttesterSlashing{
 				Attestation_1: &ethtypes.IndexedAttestation{
