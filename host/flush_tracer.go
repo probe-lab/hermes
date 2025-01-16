@@ -53,6 +53,29 @@ func (t *TraceEvent) Data() []byte {
 	return data
 }
 
+func (t *TraceEvent) toParquet() *ParquetTraceEvent {
+	payload, err := json.Marshal(t.Payload)
+	if err != nil {
+		slog.Warn("failed to marshal event payload", tele.LogAttrError(err))
+		return nil
+	}
+	return &ParquetTraceEvent{
+		Type:      t.Topic,
+		Topic:     t.Topic,
+		PeerID:    t.PeerID.String(),
+		Timestamp: t.Timestamp.UnixMilli(),
+		Payload:   string(payload),
+	}
+}
+
+type ParquetTraceEvent struct {
+	Type      string
+	Topic     string
+	PeerID    string
+	Timestamp int64
+	Payload   string
+}
+
 var _ gk.Record = (*TraceEvent)(nil)
 
 var _ pubsub.RawTracer = (*Host)(nil)

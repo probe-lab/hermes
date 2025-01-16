@@ -1,0 +1,265 @@
+package host
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/parquet-go/parquet-go"
+	"github.com/stretchr/testify/require"
+)
+
+// batcher
+
+var testingBatchLimit = 100
+
+func Test_S3_Batcher(t *testing.T) {
+	evnt1 := getTestEvent()
+	// ensure that the test event exeeds the limit
+	bytes := evnt1.Data()
+	require.GreaterOrEqual(t, len(bytes), testingBatchLimit)
+
+	// try the s3batcher methods
+	batcher, err := newTraceBatcher(int64(testingBatchLimit))
+	require.NoError(t, err)
+
+	// check if the batcher is full
+	batcher.addNewTrace(&evnt1)
+	isFull := batcher.isFull()
+	require.Equal(t, isFull, true)
+
+	// reset the batcher
+	batcherSize := batcher.totBytes
+	evnts := batcher.reset()
+	require.Equal(t, len(evnts), 1)
+	require.Equal(t, batcherSize, int64(len(bytes)))
+	require.Equal(t, batcher.len(), 0)
+}
+
+// S3 client
+
+func Test_S3_SingleSubmission(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s3ds := getTestS3client(testCtx, t)
+	defer func() {
+		cleanUpS3Bucket(testCtx, s3ds, t)
+		testCancel()
+	}()
+
+	s3Key := "path/to/file.txt"
+	_ = submitSingleItem(testCtx, s3ds, s3Key, t)
+}
+
+func Test_S3_ItemRemoval(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s3ds := getTestS3client(testCtx, t)
+	defer testCancel()
+
+	s3Key := "path/to/file.txt"
+	itemCnt := submitSingleItem(testCtx, s3ds, s3Key, t)
+
+	// remove the item
+	err := s3ds.removeItemFromS3(testCtx, s3Key)
+	require.NoError(t, err)
+
+	afterRemoval, err := s3ds.getObjsInBucket(testCtx)
+	require.NoError(t, err)
+	require.Equal(t, len(afterRemoval), itemCnt-1)
+}
+
+func Test_S3_BatchSubmission(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s3ds := getTestS3client(testCtx, t)
+	defer func() {
+		cleanUpS3Bucket(testCtx, s3ds, t)
+		testCancel()
+	}()
+
+	event1 := getTestEvent()
+	submitTraceThroughBatcher(testCtx, &event1, s3ds, t)
+}
+
+func Test_S3_Connection(t *testing.T) {
+	// test the s3 client with a localstack s3 setup
+	s3ds := getTestS3client(context.TODO(), t)
+
+	buckets, err := s3ds.listBuckets(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, len(buckets), 1)
+	require.Equal(t, *buckets[0].Name, "locals3")
+}
+
+func Test_S3_ParquetRetrieval(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s3ds := getTestS3client(testCtx, t)
+	defer func() {
+		cleanUpS3Bucket(testCtx, s3ds, t)
+		testCancel()
+	}()
+
+	event1 := getTestEvent()
+	submitTraceThroughBatcher(testCtx, &event1, s3ds, t)
+
+	event2 := getTestEvent()
+	submitTraceThroughBatcher(testCtx, &event2, s3ds, t)
+
+	objs, err := s3ds.getObjsInBucket(testCtx)
+	require.NoError(t, err)
+	for _, obj := range objs {
+		objReader := downloadItem(testCtx, s3ds, *obj.Key, t)
+		trace := parseTraceFromReader(objReader, t)
+		require.Greater(t, len(trace), 0)
+		require.Equal(t, trace[0].Topic, event1.Topic)
+		require.Equal(t, trace[0].PeerID, event1.PeerID.String())
+	}
+}
+
+func Test_S3_Periodic_Flusher(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s3ds := getTestS3client(testCtx, t)
+	defer func() {
+		cleanUpS3Bucket(testCtx, s3ds, t)
+		testCancel()
+	}()
+
+	event1 := getTestEvent()
+	submitTraceThroughBatcher(testCtx, &event1, s3ds, t)
+
+	err := s3ds.PutRecord(testCtx, &event1)
+	require.NoError(t, err)
+
+	ogNumberOfItems, err := s3ds.getObjsInBucket(testCtx)
+	require.NoError(t, err)
+
+	// wait 2,5 secs (flusher should kick in)
+	time.Sleep(2500 * time.Millisecond)
+
+	// check the number of items in the
+	postItemNumber, err := s3ds.getObjsInBucket(testCtx)
+	require.NoError(t, err)
+	require.Equal(t, len(postItemNumber), len(ogNumberOfItems)+1)
+}
+
+// TODO: missing tests:
+// - periodic flusher (with small event)
+
+// utils
+
+func getTestS3client(ctx context.Context, t *testing.T) *S3DataStream {
+	// basic configuration
+	cfg := S3DSConfig{
+		FlushInterval:   2 * time.Second,
+		Endpoint:        "http://localhost:4566",
+		ByteLimit:       int64(testingBatchLimit),
+		Region:          "us-east-1",
+		Bucket:          "locals3",
+		AccessKeyID:     "test",
+		SecretAccessKey: "test",
+	}
+
+	s3ds, err := NewS3DataStream(cfg)
+	require.NoError(t, err)
+
+	err = s3ds.testConnection(ctx)
+	require.NoError(t, err)
+	return s3ds
+}
+
+func submitSingleItem(ctx context.Context, s3ds *S3DataStream, s3Key string, t *testing.T) int {
+	// check which was the og number of items in the bucket
+	ogNumberOfItems, err := s3ds.getObjsInBucket(ctx)
+	require.NoError(t, err)
+
+	// compose dummy file & submit it
+	testBytes := []byte("this is a test")
+	err = s3ds.s3KeySubmission(ctx, s3Key, testBytes)
+	require.NoError(t, err)
+
+	// check the number of items in the bucket is prev+1
+	postItemNumber, err := s3ds.getObjsInBucket(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(postItemNumber), len(ogNumberOfItems)+1)
+	return len(postItemNumber)
+}
+
+func submitTraceThroughBatcher(ctx context.Context, event *TraceEvent, s3ds *S3DataStream, t *testing.T) {
+	// adding a single event should already trigger the flush
+	// thus we should be also able to retrieve it
+	err := s3ds.PutRecord(ctx, event)
+	require.NoError(t, err)
+
+	ogNumberOfItems, err := s3ds.getObjsInBucket(ctx)
+	require.NoError(t, err)
+
+	// submit the traces
+	s3ds.submitRecords(ctx)
+	time.Sleep(300 * time.Millisecond)
+
+	// check the number of items in the
+	postItemNumber, err := s3ds.getObjsInBucket(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(postItemNumber), len(ogNumberOfItems)+1)
+}
+
+func cleanUpS3Bucket(ctx context.Context, s3ds *S3DataStream, t *testing.T) {
+	// list items in s3 bucket
+	items, err := s3ds.getObjsInBucket(ctx)
+	for _, item := range items {
+		err = s3ds.removeItemFromS3(ctx, *item.Key)
+		require.NoError(t, err)
+	}
+}
+
+func downloadItem(ctx context.Context, s3ds *S3DataStream, s3Key string, t *testing.T) io.ReadCloser {
+	output, err := s3ds.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s3ds.config.Bucket),
+		Key:    aws.String(s3Key),
+	})
+	require.NoError(t, err)
+	return output.Body
+}
+
+func parseTraceFromReader(objReader io.ReadCloser, t *testing.T) []ParquetTraceEvent {
+	buf := new(bytes.Buffer)
+	_, err := buf.ReadFrom(objReader)
+	require.NoError(t, err)
+	require.Greater(t, len(buf.Bytes()), 0)
+
+	data := make([]ParquetTraceEvent, 2)
+	schema := parquet.SchemaOf(new(ParquetTraceEvent))
+	pr := parquet.NewGenericReader[ParquetTraceEvent](bytes.NewReader(buf.Bytes()), schema)
+	_, err = pr.Read(data)
+	require.Error(t, io.EOF, err)
+
+	return data
+}
+
+func getTestEvent() TraceEvent {
+	return TraceEvent{
+		Type:      "test_type",
+		Topic:     "test_topic",
+		PeerID:    peer.ID("ASDWEASD"),
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"this":  "is a test",
+			"that":  "is a test as well",
+			"these": "are multiple bytes for testing purposes",
+			"those": "will say if the test was successfully done or not",
+		},
+	}
+}
+
+func getTestSmallEvent() TraceEvent {
+	return TraceEvent{
+		Type:      "test_type",
+		Topic:     "test_topic",
+		PeerID:    peer.ID("ASDWEASD"),
+		Timestamp: time.Now(),
+		Payload:   map[string]any{},
+	}
+}

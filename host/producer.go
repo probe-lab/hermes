@@ -30,6 +30,8 @@ func (ds DataStreamType) String() string {
 		return "kinesis"
 	case DataStreamTypeCallback:
 		return "callback"
+	case DataStreamTypeS3:
+		return "s3"
 	default:
 		return "logger"
 	}
@@ -39,6 +41,7 @@ const (
 	DataStreamTypeKinesis DataStreamType = iota
 	DataStreamTypeCallback
 	DataStreamTypeLogger
+	DataStreamTypeS3
 )
 
 func DataStreamtypeFromStr(str string) DataStreamType {
@@ -49,6 +52,8 @@ func DataStreamtypeFromStr(str string) DataStreamType {
 		return DataStreamTypeKinesis
 	case "callback":
 		return DataStreamTypeCallback
+	case "s3":
+		return DataStreamTypeS3
 	default:
 		return DataStreamTypeLogger
 	}

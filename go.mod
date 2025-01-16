@@ -7,7 +7,9 @@ toolchain go1.23.3
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.7
 	github.com/aws/aws-sdk-go-v2/config v1.28.7
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.48
 	github.com/aws/aws-sdk-go-v2/service/kinesis v1.32.8
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.72.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/dennis-tra/go-kinesis v0.0.0-20240326083914-7acf5f8dc24e
 	github.com/ethereum/go-ethereum v1.13.5
@@ -20,6 +22,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.12.0
 	github.com/lmittmann/tint v1.0.6
 	github.com/multiformats/go-multiaddr v0.14.0
+	github.com/parquet-go/parquet-go v0.24.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prysmaticlabs/fastssz v0.0.0-20241008181541-518c4ce73516
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
