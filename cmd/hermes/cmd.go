@@ -43,6 +43,12 @@ var rootConfig = struct {
 	DataStreamType string
 	KinesisRegion  string
 	KinesisStream  string
+	S3Region       string
+	S3Endpoint     string
+	S3Bucket       string
+	S3ByteLimit    int
+	AWSAccessKeyID string
+	AWSAccessKey   string
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
@@ -66,6 +72,12 @@ var rootConfig = struct {
 	DataStreamType: host.DataStreamTypeLogger.String(),
 	KinesisRegion:  "",
 	KinesisStream:  "",
+	S3Region:       "",
+	S3Endpoint:     "",
+	S3Bucket:       "hermes",
+	S3ByteLimit:    4194304, // 4MB
+	AWSAccessKeyID: "",
+	AWSAccessKey:   "",
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
@@ -194,6 +206,46 @@ var rootFlags = []cli.Flag{
 		Usage:       "The name of the AWS Kinesis Data Stream",
 		Value:       rootConfig.KinesisStream,
 		Destination: &rootConfig.KinesisStream,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "s3.region",
+		EnvVars:     []string{"HERMES_S3_REGION"},
+		Usage:       "The name of the region where the s3 bucket will be stored",
+		Value:       rootConfig.S3Region,
+		Destination: &rootConfig.S3Region,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "s3.endpoint",
+		EnvVars:     []string{"HERMES_S3_CUSTOM_ENDPOINT"},
+		Usage:       "The endpoint of our custom S3 instance to override the AWS defaults",
+		Value:       rootConfig.S3Endpoint,
+		Destination: &rootConfig.S3Endpoint,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.IntFlag{
+		Name:        "s3.batcher.size.limit",
+		EnvVars:     []string{"HERMES_S3_BATCHER_SIZE_LIMIT"},
+		Usage:       "Soft upper limite of bytes for the S3 dumps",
+		Value:       rootConfig.S3ByteLimit,
+		Destination: &rootConfig.S3ByteLimit,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "aws.access.key",
+		EnvVars:     []string{"HERMES_AWS_ACCESS_KEY"},
+		Usage:       "Access key of the AWS account for the S3 bucket",
+		Value:       rootConfig.AWSAccessKey,
+		Destination: &rootConfig.AWSAccessKey,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "s3.access.key.id",
+		EnvVars:     []string{"HERMES_AWS_ACCESS_KEY_ID"},
+		Usage:       "Access key ID of the AWS account for the s3 bucket",
+		Value:       rootConfig.AWSAccessKeyID,
+		Destination: &rootConfig.AWSAccessKeyID,
 		Category:    flagCategoryDataStream,
 	},
 }
