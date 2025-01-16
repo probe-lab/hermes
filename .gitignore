@@ -153,3 +153,4 @@ fabric.properties
 .vscode
 */venv
 build/
+s3_local/data/
