@@ -32,13 +32,17 @@ type S3DataStream struct {
 	client  *s3.Client
 	batcher *traceBatcher
 
+	traceTaskC   chan *TraceSubmissionTask
+	flushersDone chan struct{}
+	pFlusherDone chan struct{}
+
 	// counter to identify trace-files on S3
 	// unique per peer
 	// should be reset on restart with the peer_id
 	fileCnt atomic.Int64
 }
 
-var _DataStream = (*S3DataStream)(nil)
+var _ DataStream = (*S3DataStream)(nil)
 
 func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 	cfg, err := baseCfg.ToAWSconfig()
@@ -64,9 +68,12 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 		return nil, err
 	}
 	return &S3DataStream{
-		config:  baseCfg,
-		client:  s3client,
-		batcher: batcher,
+		config:       baseCfg,
+		client:       s3client,
+		batcher:      batcher,
+		traceTaskC:   make(chan *TraceSubmissionTask),
+		flushersDone: make(chan struct{}),
+		pFlusherDone: make(chan struct{}),
 	}, nil
 }
 
@@ -81,22 +88,33 @@ func (s3ds *S3DataStream) OutputType() DataStreamOutputType {
 func (s3ds *S3DataStream) Start(ctx context.Context) error {
 	slog.Info(
 		"spawning s3 data-stream",
-		slog.Attr{Key: "endpoint", Value: slog.StringValue(s3ds.config.Endpoint)},
-		slog.Attr{Key: "bucket", Value: slog.StringValue(s3ds.config.Bucket)},
+		"endpoint", s3ds.config.Endpoint,
+		"bucket", s3ds.config.Bucket,
 	)
 	opCtx, cancel := context.WithTimeout(ctx, S3ConnectionTimeout)
 	defer cancel()
 
-	err := s3ds.testConnection(opCtx)
-	if err != nil {
+	if err := s3ds.testConnection(opCtx); err != nil {
 		return err
 	}
-
-	s3ds.spawnPeriodicFlusher(ctx, s3ds.config.FlushInterval)
 
 	mainCtx, mainCancel := context.WithCancel(ctx)
 	s3ds.ctx = mainCtx
 	s3ds.cancelFn = mainCancel
+
+	s3ds.spawnPeriodicFlusher(mainCtx, s3ds.config.FlushInterval)
+	go func() {
+		var wg sync.WaitGroup
+		for i := 0; i < s3ds.config.Flushers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s3ds.spawnS3Flusher(mainCtx, i)
+			}()
+		}
+		wg.Wait()
+		close(s3ds.flushersDone)
+	}()
 
 	<-mainCtx.Done()
 	return mainCtx.Err()
@@ -109,6 +127,18 @@ func (s3ds *S3DataStream) Stop(ctx context.Context) error {
 	opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
 	defer cancel()
 	s3ds.submitRecords(opCtx)
+	// wait untill the flusher is done or a timeout
+	select {
+	case <-time.After(S3OpTimeout):
+		slog.Warn("s3 datastream took too much time to be closed")
+	case <-s3ds.pFlusherDone:
+	}
+	// wait untill the flusher is done or a timeout
+	select {
+	case <-time.After(S3OpTimeout):
+		slog.Warn("s3 datastream took too much time to be closed")
+	case <-s3ds.flushersDone:
+	}
 	return nil
 }
 
@@ -128,24 +158,30 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 // *NOTE*: the method leaves a routine in the background to format the parquet
 //
 //	file, and to submit it into S3. Reason -> to avoid freezing other processes
-func (s3ds *S3DataStream) submitRecords(ctx context.Context) {
+func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
 	// check if the trace-buffer has anything
 	if s3ds.batcher.len() <= 0 {
-		return
+		return nil
 	}
 
 	// get and reset the traces from the batcher
 	// increase the counter for the next file descriptor
 	// and get the peer_id from the traces
-	traces := s3ds.batcher.reset()
+	traceT := new(TraceSubmissionTask)
+	traceT.Traces = s3ds.batcher.reset()
 	currentFileCnt := s3ds.fileCnt.Load()
 	s3ds.fileCnt.Add(1)
-	producerID := traces[0].PeerID
+	// avoid race conditions where the periodic flusher flushed right before the
+	// batcher was reset
+	if len(traceT.Traces) <= 0 {
+		return nil
+	}
+	producerID := traceT.Traces[0].PeerID
 
 	// compose the path for the s3 key/file
 	// s3Path = hermes/peer_id/year/month/day/hour/file_index.parquet
 	t := time.Now()
-	s3Key := fmt.Sprintf(
+	traceT.S3Key = fmt.Sprintf(
 		"hermes/%s/%d/%d/%d/%d/%d.parquet",
 		producerID,
 		t.Year(),
@@ -154,45 +190,20 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context) {
 		t.Hour(),
 		currentFileCnt,
 	)
-	slog.Info(
-		"submitting traces to s3",
-		slog.Attr{Key: "traces", Value: slog.AnyValue(len(traces))},
-	)
 
-	go func() {
-		// write the traces into the s3 file descriptor
-		parquetBuffer := new(bytes.Buffer)
-		schema := parquet.SchemaOf(new(ParquetTraceEvent))
-		pw := parquet.NewGenericWriter[ParquetTraceEvent](parquetBuffer, schema)
+	// flusher pool logic
+	// give some timeout to the flusher publication (avoid deadlocks)
+	select {
+	case <-time.After(S3OpTimeout):
+		return fmt.Errorf("")
+	case s3ds.traceTaskC <- traceT:
+	}
 
-		_, err := pw.Write(traces)
-		if err != nil {
-			slog.Error(
-				"writing traces to parquet",
-				tele.LogAttrError(err))
-		}
-		err = pw.Close()
-		if err != nil {
-			slog.Error("unable to close the parquer writer", tele.LogAttrError(err))
-			return
-		}
-
-		// submit the resulting bytes
-		err = s3ds.s3KeySubmission(ctx, s3Key, parquetBuffer.Bytes())
-		if err != nil {
-			slog.Error("uploading file to s3", tele.LogAttrError(err))
-		} else {
-			slog.Info(
-				"submitted file to s3",
-				slog.Attr{Key: "bytes", Value: slog.IntValue(len(parquetBuffer.Bytes()))},
-			)
-		}
-	}()
-	return
+	return nil
 }
 
 // s3KeySubmission is a unitary method (mostly for testing) that submits any arbitrary []byte into S3
-func (s3ds *S3DataStream) s3KeySubmission(ctx context.Context, s3Key string, content []byte) error {
+func (s3ds *S3DataStream) S3KeySubmission(ctx context.Context, s3Key string, content []byte) error {
 	slog.Debug(
 		"submitting traces to s3",
 		slog.Attr{Key: "file", Value: slog.StringValue(s3Key)},
@@ -207,18 +218,12 @@ func (s3ds *S3DataStream) s3KeySubmission(ctx context.Context, s3Key string, con
 		Key:    aws.String(s3Key),
 		Body:   bytes.NewReader(content),
 	})
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 // getObjsInBucket returns all the existing items in the s3 bucket
 func (s3ds *S3DataStream) getObjsInBucket(ctx context.Context) ([]types.Object, error) {
-	slog.Debug(
-		"listing items on s3 bucket",
-		slog.Attr{Key: "bucket-name", Value: slog.StringValue(s3ds.config.Bucket)},
-	)
+	slog.Info("listing items on s3 bucket", "bucket-name", s3ds.config.Bucket)
 	opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
 	defer cancel()
 
@@ -259,10 +264,7 @@ func (s3ds *S3DataStream) testConnection(ctx context.Context) error {
 
 	for _, bucket := range buckets {
 		if *bucket.Name == s3ds.config.Bucket {
-			slog.Info(
-				"successfull connection to the S3 bucket",
-				slog.Attr{Key: "bucket", Value: slog.StringValue(*bucket.Name)},
-			)
+			slog.Info("successfull connection to the S3 bucket", "bucket", *bucket.Name)
 			return nil
 		}
 	}
@@ -271,68 +273,156 @@ func (s3ds *S3DataStream) testConnection(ctx context.Context) error {
 
 // removeItemFromS3 removes the item from the s3 instance (for testing purposes)
 func (s3ds *S3DataStream) removeItemFromS3(ctx context.Context, s3Key string) error {
-	slog.Debug(
-		"launching S3 periodic flusher",
-		slog.Attr{Key: "s3key", Value: slog.StringValue(s3Key)},
-	)
+	slog.Debug("launching S3 periodic flusher", "s3key", s3Key)
 	opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
 	defer cancel()
 
-	s3ds.client.DeleteObject(opCtx, &s3.DeleteObjectInput{
+	_, err := s3ds.client.DeleteObject(opCtx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s3ds.config.Bucket),
 		Key:    aws.String(s3Key),
 	})
-
-	return nil
+	return err
 }
 
 // spawnPeriodicFlusher is a S3DataStream method that will create a background routine
 // to flush the batched traces every given interval
 func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval time.Duration) {
 	go func() {
-		slog.Debug("launching S3 periodic flusher", slog.Attr{Key: "flush-interval", Value: slog.StringValue(interval.String())})
+		defer close(s3ds.pFlusherDone)
+		slog.Debug("launching S3 periodic flusher", "flush-interval", interval.String())
 		flushTicker := time.NewTicker(interval)
 		for {
 			select {
 			case <-ctx.Done():
 				slog.Debug("context died, closing the s3 trace-periodic-flusher")
 				// use new context to submit whatever is left
-				s3ds.submitRecords(context.TODO())
+				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
+				defer cancel()
+				s3ds.submitRecords(opCtx)
 				return
 			case <-flushTicker.C:
-
+				slog.Debug("trace-periodic-flusher kicked in")
+				// use new context to submit whatever is left
+				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
+				s3ds.submitRecords(opCtx)
+				cancel()
 			}
 		}
 	}()
 }
 
+// TraceSubmissionTask main trace submission Task
+type TraceSubmissionTask struct {
+	Traces []ParquetTraceEvent
+	S3Key  string
+}
+
+// spawnS3Flusher creates a sync flusher for traces
+// It will read any TraceSubmissionTask on the s3ds.traceTaskC and will upload it
+// it is intended to limit the number of routines spawned to flush the traces to s3
+func (s3ds *S3DataStream) spawnS3Flusher(
+	ctx context.Context,
+	idx int,
+) {
+	slog.Info("spawned s3 flusher", "flusher-id", idx)
+	for {
+		select {
+		case traceT := <-s3ds.traceTaskC:
+			slog.Info("submitting traces to s3",
+				"traces", len(traceT.Traces),
+				"s3Key", traceT.S3Key,
+			)
+
+			formatStartT := time.Now()
+			totBytes, buf, err := TraceTtoBytes(traceT)
+			if err != nil {
+				slog.Error(err.Error())
+				continue
+			}
+			formatT := time.Since(formatStartT)
+			// submit the resulting bytes
+			uploadStartT := time.Now()
+			if err := s3ds.S3KeySubmission(ctx, traceT.S3Key, buf.Bytes()); err != nil {
+				slog.Error("uploading file to s3", tele.LogAttrError(err))
+				continue
+			}
+			slog.Info("submitted file to s3",
+				"bytes", totBytes,
+				"s3key", traceT.S3Key,
+				"formating-time", formatT,
+				"upload-time", time.Since(uploadStartT),
+				"total-time", time.Since(formatStartT),
+			)
+
+		case <-ctx.Done():
+			slog.Info("closing flusher", "flusher-id", idx)
+			return
+		}
+	}
+}
+
+// traceTtoBytes translates any given number of traceEvents into parquet serialized bytes
+// it can also be tuned with any desired set of parquet.WriterOption
+func TraceTtoBytes(
+	traceT *TraceSubmissionTask,
+	opts ...parquet.WriterOption,
+) (int, *bytes.Buffer, error) {
+	// creates a new parquet formatted file into a in-memmory bytes buffer
+	parquetBuffer := new(bytes.Buffer)
+	pw := parquet.NewGenericWriter[ParquetTraceEvent](
+		parquetBuffer,
+		parquet.SchemaOf(new(ParquetTraceEvent)),
+	)
+	_, err := pw.Write(traceT.Traces)
+	if err != nil {
+		return 0, nil, fmt.Errorf("writing traces to parquet: %s", err)
+	}
+	if err := pw.Close(); err != nil {
+		return 0, nil, fmt.Errorf("unable to close the parquer writer: %s", err.Error())
+	}
+	return len(parquetBuffer.Bytes()), parquetBuffer, nil
+}
+
 // S3DSConfig belongs to the configuration needed to stablish a connection with an s3 instance
 type S3DSConfig struct {
-	ByteLimit       int64
-	AccessKeyID     string
-	SecretAccessKey string
-	Region          string
-	Endpoint        string
-	Bucket          string
-	Prefix          string
-	FlushInterval   time.Duration
+	Flushers      int
+	ByteLimit     int64
+	AccessKeyID   string
+	SecretKey     string
+	Region        string
+	Endpoint      string
+	Bucket        string
+	FlushInterval time.Duration
 }
 
 // IsValid checks whether the current configuration is valid or not
-// returns true if the S3 Region, the Bucket, the AccessKeyID and the Secret are set
-// returns false otherwise
-func (s3cfg *S3DSConfig) IsValid() bool {
-	return len(s3cfg.Bucket) > 0 &&
-		len(s3cfg.AccessKeyID) > 0 &&
-		len(s3cfg.SecretAccessKey) > 0 &&
-		len(s3cfg.Region) > 0 &&
-		s3cfg.FlushInterval.Nanoseconds() > 0
+// returns the missing items in case there is anything wrong with the config
+func (s3cfg *S3DSConfig) CheckValidity() error {
+	if s3cfg.Flushers <= 0 {
+		return fmt.Errorf("no flushers given interval ")
+	}
+	if len(s3cfg.Bucket) <= 0 {
+		return fmt.Errorf("no s3 bucket was provided")
+	}
+	if len(s3cfg.AccessKeyID) <= 0 {
+		return fmt.Errorf("no s3 access-key was provided")
+	}
+	if len(s3cfg.SecretKey) <= 0 {
+		return fmt.Errorf("no s3 secret access key was provided")
+	}
+	if len(s3cfg.Region) <= 0 {
+		return fmt.Errorf("no s3 region was provided")
+	}
+	if s3cfg.FlushInterval.Nanoseconds() <= 0 {
+		return fmt.Errorf("no flush interval was given")
+	}
+	return nil
 }
 
 // ToAWSconfig makes a quick translation from the given user args
 // into the aws.Config struct -> ready to create the S3 client
 func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
-	if !s3cfg.IsValid() {
+	if err := s3cfg.CheckValidity(); err != nil {
 		return nil, fmt.Errorf("non valid s3 configuration, %+v", s3cfg)
 	}
 	cfg, err := config.LoadDefaultConfig(
@@ -340,32 +430,29 @@ func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
 		config.WithRegion(s3cfg.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			s3cfg.AccessKeyID,
-			s3cfg.SecretAccessKey,
+			s3cfg.SecretKey,
 			"", // empty session for now
 		)),
 	)
-	if err != nil {
-		return nil, err
-	}
-	return &cfg, nil
+	return &cfg, err
 }
 
 // TraceBatcher is an internal threathsafe buffer for EventTraces
 type traceBatcher struct {
 	sync.RWMutex
-	limit    int64 // bytes
-	traces   []*TraceEvent
-	totBytes int64
+	byteLimit int64
+	traces    []*TraceEvent
+	totBytes  int64
 }
 
 // NewTraceBatcher creates a new empty TraceBatcher
-func newTraceBatcher(limit int64) (*traceBatcher, error) {
-	if limit <= 0 {
-		return nil, fmt.Errorf("invalid size for the trace limitter %d", limit)
+func newTraceBatcher(byteLimit int64) (*traceBatcher, error) {
+	if byteLimit <= 0 {
+		return nil, fmt.Errorf("invalid size for the trace limitter %d", byteLimit)
 	}
 	return &traceBatcher{
-		limit:  limit,
-		traces: make([]*TraceEvent, 0), // limitted by size, not by traces
+		byteLimit: byteLimit,
+		traces:    make([]*TraceEvent, 0), // limitted by size, not by traces
 	}, nil
 }
 
@@ -394,7 +481,7 @@ func (b *traceBatcher) len() int {
 func (b *traceBatcher) isFull() bool {
 	b.RLock()
 	defer b.RUnlock()
-	return b.totBytes >= b.limit
+	return b.totBytes >= b.byteLimit
 }
 
 // reset makes a copy of the existing traces

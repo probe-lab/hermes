@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/parquet-go/parquet-go"
+	"github.com/probe-lab/hermes/tele"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,10 +87,11 @@ func Test_S3_BatchSubmission(t *testing.T) {
 }
 
 func Test_S3_Connection(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer testCancel()
 	// test the s3 client with a localstack s3 setup
-	s3ds := getTestS3client(context.TODO(), t)
-
-	buckets, err := s3ds.listBuckets(context.Background())
+	s3ds := getTestS3client(testCtx, t)
+	buckets, err := s3ds.listBuckets(testCtx)
 	require.NoError(t, err)
 	require.Equal(t, len(buckets), 1)
 	require.Equal(t, *buckets[0].Name, "locals3")
@@ -136,8 +139,15 @@ func Test_S3_Periodic_Flusher(t *testing.T) {
 	ogNumberOfItems, err := s3ds.getObjsInBucket(testCtx)
 	require.NoError(t, err)
 
-	// wait 2,5 secs (flusher should kick in)
-	time.Sleep(2500 * time.Millisecond)
+	// wait 1,5 secs (flusher should kick in)
+	select {
+	case <-time.After(1300 * time.Millisecond):
+	case <-testCtx.Done():
+		slog.Error(
+			"context died before the submission grace time",
+			tele.LogAttrError(testCtx.Err()),
+		)
+	}
 
 	// check the number of items in the
 	postItemNumber, err := s3ds.getObjsInBucket(testCtx)
@@ -153,16 +163,20 @@ func Test_S3_Periodic_Flusher(t *testing.T) {
 func getTestS3client(ctx context.Context, t *testing.T) *S3DataStream {
 	// basic configuration
 	cfg := S3DSConfig{
-		FlushInterval:   2 * time.Second,
-		Endpoint:        "http://localhost:4566",
-		ByteLimit:       int64(testingBatchLimit),
-		Region:          "us-east-1",
-		Bucket:          "locals3",
-		AccessKeyID:     "test",
-		SecretAccessKey: "test",
+		Flushers:      1,
+		FlushInterval: 1 * time.Second,
+		Endpoint:      "http://localhost:4566",
+		ByteLimit:     int64(testingBatchLimit),
+		Region:        "us-east-1",
+		Bucket:        "locals3",
+		AccessKeyID:   "test",
+		SecretKey:     "test",
 	}
 
 	s3ds, err := NewS3DataStream(cfg)
+	go func() {
+		_ = s3ds.Start(ctx)
+	}()
 	require.NoError(t, err)
 
 	err = s3ds.testConnection(ctx)
@@ -177,7 +191,7 @@ func submitSingleItem(ctx context.Context, s3ds *S3DataStream, s3Key string, t *
 
 	// compose dummy file & submit it
 	testBytes := []byte("this is a test")
-	err = s3ds.s3KeySubmission(ctx, s3Key, testBytes)
+	err = s3ds.S3KeySubmission(ctx, s3Key, testBytes)
 	require.NoError(t, err)
 
 	// check the number of items in the bucket is prev+1
@@ -187,7 +201,12 @@ func submitSingleItem(ctx context.Context, s3ds *S3DataStream, s3Key string, t *
 	return len(postItemNumber)
 }
 
-func submitTraceThroughBatcher(ctx context.Context, event *TraceEvent, s3ds *S3DataStream, t *testing.T) {
+func submitTraceThroughBatcher(
+	ctx context.Context,
+	event *TraceEvent,
+	s3ds *S3DataStream,
+	t *testing.T,
+) {
 	// adding a single event should already trigger the flush
 	// thus we should be also able to retrieve it
 	err := s3ds.PutRecord(ctx, event)
@@ -198,7 +217,16 @@ func submitTraceThroughBatcher(ctx context.Context, event *TraceEvent, s3ds *S3D
 
 	// submit the traces
 	s3ds.submitRecords(ctx)
-	time.Sleep(300 * time.Millisecond)
+
+	// wait a few milliseconds till the pool of submitters is triggered
+	select {
+	case <-time.After(100 * time.Millisecond):
+	case <-ctx.Done():
+		slog.Error(
+			"context died before the submission grace time",
+			tele.LogAttrError(ctx.Err()),
+		)
+	}
 
 	// check the number of items in the
 	postItemNumber, err := s3ds.getObjsInBucket(ctx)

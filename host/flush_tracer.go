@@ -69,11 +69,19 @@ func (t *TraceEvent) toParquet() *ParquetTraceEvent {
 }
 
 type ParquetTraceEvent struct {
+	Timestamp int64
 	Type      string
 	Topic     string
 	PeerID    string
-	Timestamp int64
 	Payload   string
+}
+
+func (pte *ParquetTraceEvent) BytesLen() int {
+	return 8 + // int64
+		len([]byte(pte.Type)) +
+		len([]byte(pte.Topic)) +
+		len([]byte(pte.PeerID)) +
+		len([]byte(pte.Payload))
 }
 
 var _ gk.Record = (*TraceEvent)(nil)
