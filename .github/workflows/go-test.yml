@@ -20,3 +20,13 @@ jobs:
       go-versions: '["this"]'
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    services:
+      s3:
+        image: localstack/localstack:s3-latest
+        ports:
+          - "127.0.0.1:4566:4566"
+        environment:
+          - DEBUG=${DEBUG:-0}
+        volumes:
+          - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
+
