@@ -29,26 +29,28 @@ const (
 )
 
 var rootConfig = struct {
-	Verbose        bool
-	LogLevel       string
-	LogFormat      string
-	LogSource      bool
-	LogNoColor     bool
-	MetricsEnabled bool
-	MetricsAddr    string
-	MetricsPort    int
-	TracingEnabled bool
-	TracingAddr    string
-	TracingPort    int
-	DataStreamType string
-	KinesisRegion  string
-	KinesisStream  string
-	S3Region       string
-	S3Endpoint     string
-	S3Bucket       string
-	S3ByteLimit    int
-	AWSAccessKeyID string
-	AWSAccessKey   string
+	Verbose         bool
+	LogLevel        string
+	LogFormat       string
+	LogSource       bool
+	LogNoColor      bool
+	MetricsEnabled  bool
+	MetricsAddr     string
+	MetricsPort     int
+	TracingEnabled  bool
+	TracingAddr     string
+	TracingPort     int
+	DataStreamType  string
+	KinesisRegion   string
+	KinesisStream   string
+	S3Flushers      int
+	S3FlushInterval time.Duration
+	S3ByteLimit     int
+	S3Region        string
+	S3Bucket        string
+	S3Endpoint      string
+	AWSAccessKeyID  string
+	AWSSecretKey    string
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
@@ -58,26 +60,28 @@ var rootConfig = struct {
 	metricsShutdownFunc func(ctx context.Context) error
 	tracerShutdownFunc  func(ctx context.Context) error
 }{
-	Verbose:        false,
-	LogLevel:       "info",
-	LogFormat:      "hlog",
-	LogSource:      false,
-	LogNoColor:     false,
-	MetricsEnabled: false,
-	MetricsAddr:    "localhost",
-	MetricsPort:    6060,
-	TracingEnabled: false,
-	TracingAddr:    "localhost",
-	TracingPort:    4317, // default jaeger port
-	DataStreamType: host.DataStreamTypeLogger.String(),
-	KinesisRegion:  "",
-	KinesisStream:  "",
-	S3Region:       "",
-	S3Endpoint:     "",
-	S3Bucket:       "hermes",
-	S3ByteLimit:    4194304, // 4MB
-	AWSAccessKeyID: "",
-	AWSAccessKey:   "",
+	Verbose:         false,
+	LogLevel:        "info",
+	LogFormat:       "hlog",
+	LogSource:       false,
+	LogNoColor:      false,
+	MetricsEnabled:  false,
+	MetricsAddr:     "localhost",
+	MetricsPort:     6060,
+	TracingEnabled:  false,
+	TracingAddr:     "localhost",
+	TracingPort:     4317, // default jaeger port
+	DataStreamType:  host.DataStreamTypeLogger.String(),
+	KinesisRegion:   "",
+	KinesisStream:   "",
+	S3Region:        "",
+	S3Endpoint:      "",
+	S3Bucket:        "hermes",
+	S3Flushers:      2,
+	S3FlushInterval: 1 * time.Second,
+	S3ByteLimit:     4 * 1024 * 1024, // 4MB
+	AWSAccessKeyID:  "",
+	AWSSecretKey:    "",
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
@@ -86,12 +90,15 @@ var rootConfig = struct {
 }
 
 var app = &cli.App{
-	Name:     "hermes",
-	Usage:    "a gossipsub listener",
-	Flags:    rootFlags,
-	Before:   rootBefore,
-	Commands: []*cli.Command{cmdEth},
-	After:    rootAfter,
+	Name:   "hermes",
+	Usage:  "a gossipsub listener",
+	Flags:  rootFlags,
+	Before: rootBefore,
+	Commands: []*cli.Command{
+		cmdEth,
+		cmdBenchmark,
+	},
+	After: rootAfter,
 }
 
 var rootFlags = []cli.Flag{
@@ -224,24 +231,48 @@ var rootFlags = []cli.Flag{
 		Destination: &rootConfig.S3Endpoint,
 		Category:    flagCategoryDataStream,
 	},
+	&cli.StringFlag{
+		Name:        "s3.bucket",
+		EnvVars:     []string{"HERMES_S3_BUCKET"},
+		Usage:       "name of the S3 bucket that will be used as reference to submit the traces",
+		Value:       rootConfig.S3Bucket,
+		Destination: &rootConfig.S3Bucket,
+		Category:    flagCategoryDataStream,
+	},
 	&cli.IntFlag{
 		Name:        "s3.batcher.size.limit",
-		EnvVars:     []string{"HERMES_S3_BATCHER_SIZE_LIMIT"},
+		EnvVars:     []string{"HERMES_S3_BATCHER_BYTE_LIMIT"},
 		Usage:       "Soft upper limite of bytes for the S3 dumps",
 		Value:       rootConfig.S3ByteLimit,
 		Destination: &rootConfig.S3ByteLimit,
 		Category:    flagCategoryDataStream,
 	},
-	&cli.StringFlag{
-		Name:        "aws.access.key",
-		EnvVars:     []string{"HERMES_AWS_ACCESS_KEY"},
-		Usage:       "Access key of the AWS account for the S3 bucket",
-		Value:       rootConfig.AWSAccessKey,
-		Destination: &rootConfig.AWSAccessKey,
+	&cli.IntFlag{
+		Name:        "s3.flushers",
+		EnvVars:     []string{"HERMES_S3_FLUSHERS"},
+		Usage:       "Number of flushers that will be spawned to dump traces into S3",
+		Value:       rootConfig.S3Flushers,
+		Destination: &rootConfig.S3Flushers,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.DurationFlag{
+		Name:        "s3.flush.interval",
+		EnvVars:     []string{"HERMES_S3_FLUSH_INTERVAL"},
+		Usage:       "Minimum time interval at which the batched traces will be dump in S3",
+		Value:       rootConfig.S3FlushInterval,
+		Destination: &rootConfig.S3FlushInterval,
 		Category:    flagCategoryDataStream,
 	},
 	&cli.StringFlag{
-		Name:        "s3.access.key.id",
+		Name:        "aws.secret.key",
+		EnvVars:     []string{"HERMES_AWS_SECRET_KEY"},
+		Usage:       "Secret key of the AWS account for the S3 bucket",
+		Value:       rootConfig.AWSSecretKey,
+		Destination: &rootConfig.AWSSecretKey,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "aws.key.id",
 		EnvVars:     []string{"HERMES_AWS_ACCESS_KEY_ID"},
 		Usage:       "Access key ID of the AWS account for the s3 bucket",
 		Value:       rootConfig.AWSAccessKeyID,
