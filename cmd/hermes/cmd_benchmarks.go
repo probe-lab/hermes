@@ -4,7 +4,6 @@ import (
 	"log/slog"
 
 	"github.com/probe-lab/hermes/benchmarks"
-	"github.com/probe-lab/hermes/host"
 	"github.com/urfave/cli/v2"
 )
 
@@ -53,20 +52,7 @@ func runBenchmark(c *cli.Context) error {
 	}
 	// s3 benchmark
 	if benchmarkConf.s3B {
-		s3conf := &host.S3DSConfig{
-			Flushers:      rootConfig.S3Flushers,
-			FlushInterval: rootConfig.S3FlushInterval,
-			ByteLimit:     int64(rootConfig.S3ByteLimit),
-			Region:        rootConfig.S3Region,
-			Endpoint:      rootConfig.S3Endpoint,
-			Bucket:        rootConfig.S3Bucket,
-			SecretKey:     rootConfig.AWSSecretKey,
-			AccessKeyID:   rootConfig.AWSAccessKeyID,
-		}
-		if err := s3conf.CheckValidity(); err != nil {
-			return err
-		}
-		if err := benchmarks.S3SubmissionBenchmark(c.Context, *s3conf); err != nil {
+		if err := benchmarks.S3SubmissionBenchmark(c.Context, *rootConfig.s3Config); err != nil {
 			return err
 		}
 	}
