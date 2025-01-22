@@ -382,7 +382,7 @@ func rootAfter(c *cli.Context) error {
 }
 
 // configureLogger configures the global logger based on the provided CLI
-// context. It sets the log level based on the "--log-level" flag or the
+// context. It sets the log level based on the "--log.level" flag or the
 // "--verbose" flag. The log format is determined by the "--log.format" flag.
 // The function returns an error if the log level or log format is not supported.
 // Possible log formats include "tint", "hlog", "text", and "json". The default
@@ -391,7 +391,7 @@ func configureLogger(c *cli.Context) error {
 	// set default log level
 	logLevel := slog.LevelInfo
 
-	if c.IsSet("log-level") {
+	if c.IsSet("log.level") {
 		switch strings.ToLower(rootConfig.LogLevel) {
 		case "debug":
 			logLevel = slog.LevelDebug
