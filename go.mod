@@ -2,7 +2,7 @@ module github.com/probe-lab/hermes
 
 go 1.23.0
 
-toolchain go1.23.3
+toolchain go1.23.4
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.7

@@ -2,14 +2,11 @@ package main
 
 import (
 	"log/slog"
-	"time"
 
 	"github.com/probe-lab/hermes/benchmarks"
 	"github.com/probe-lab/hermes/host"
 	"github.com/urfave/cli/v2"
 )
-
-var baseTimeout = 1 * time.Minute
 
 var benchmarkConf = benchmarkConfig{
 	parquetB: false,
@@ -19,16 +16,6 @@ var benchmarkConf = benchmarkConfig{
 type benchmarkConfig struct {
 	parquetB bool
 	s3B      bool
-}
-
-func (b *benchmarkConfig) numberOfBenchmarks() (bs int) {
-	if b.parquetB {
-		bs++
-	}
-	if b.s3B {
-		bs++
-	}
-	return bs
 }
 
 var cmdBenchmark = &cli.Command{

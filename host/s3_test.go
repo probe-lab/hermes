@@ -237,6 +237,7 @@ func submitTraceThroughBatcher(
 func cleanUpS3Bucket(ctx context.Context, s3ds *S3DataStream, t *testing.T) {
 	// list items in s3 bucket
 	items, err := s3ds.getObjsInBucket(ctx)
+	require.NoError(t, err)
 	for _, item := range items {
 		err = s3ds.removeItemFromS3(ctx, *item.Key)
 		require.NoError(t, err)
@@ -279,15 +280,5 @@ func getTestEvent() TraceEvent {
 			"these": "are multiple bytes for testing purposes",
 			"those": "will say if the test was successfully done or not",
 		},
-	}
-}
-
-func getTestSmallEvent() TraceEvent {
-	return TraceEvent{
-		Type:      "test_type",
-		Topic:     "test_topic",
-		PeerID:    peer.ID("ASDWEASD"),
-		Timestamp: time.Now(),
-		Payload:   map[string]any{},
 	}
 }

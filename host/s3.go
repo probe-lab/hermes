@@ -268,7 +268,7 @@ func (s3ds *S3DataStream) testConnection(ctx context.Context) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Couldn't find bucket %s among existing ones in the s3 instance", s3ds.config.Bucket)
+	return fmt.Errorf("couldn't find bucket %s among existing ones in the s3 instance", s3ds.config.Bucket)
 }
 
 // removeItemFromS3 removes the item from the s3 instance (for testing purposes)
