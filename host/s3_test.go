@@ -20,7 +20,8 @@ import (
 
 var testingBatchLimit = 100
 
-func Test_S3_Batcher(t *testing.T) {
+func Test_S3_SimpleBatcher(t *testing.T) {
+	// non-thread-safe test
 	evnt1 := getTestEvent()
 	// ensure that the test event exeeds the limit
 	bytes := evnt1.Data()
@@ -154,9 +155,6 @@ func Test_S3_Periodic_Flusher(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(postItemNumber), len(ogNumberOfItems)+1)
 }
-
-// TODO: missing tests:
-// - periodic flusher (with small event)
 
 // utils
 

@@ -32,9 +32,10 @@ type S3DataStream struct {
 	client  *s3.Client
 	batcher *traceBatcher
 
-	traceTaskC   chan *TraceSubmissionTask
-	flushersDone chan struct{}
-	pFlusherDone chan struct{}
+	traceTaskC       chan *TraceSubmissionTask
+	flushersDone     chan struct{}
+	pFlusherDone     chan struct{}
+	restartPflusherC chan struct{}
 
 	// counter to identify trace-files on S3
 	// unique per peer
@@ -68,12 +69,13 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 		return nil, err
 	}
 	return &S3DataStream{
-		config:       baseCfg,
-		client:       s3client,
-		batcher:      batcher,
-		traceTaskC:   make(chan *TraceSubmissionTask),
-		flushersDone: make(chan struct{}),
-		pFlusherDone: make(chan struct{}),
+		config:           baseCfg,
+		client:           s3client,
+		batcher:          batcher,
+		traceTaskC:       make(chan *TraceSubmissionTask),
+		flushersDone:     make(chan struct{}),
+		pFlusherDone:     make(chan struct{}),
+		restartPflusherC: make(chan struct{}),
 	}, nil
 }
 
@@ -126,29 +128,33 @@ func (s3ds *S3DataStream) Start(ctx context.Context) error {
 func (s3ds *S3DataStream) Stop(ctx context.Context) error {
 	// stop the mainCtx, as we don't want new traces coming in
 	s3ds.cancelFn()
-	// ensure to prune existing traces before closing
-	opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
-	defer cancel()
-	s3ds.submitRecords(opCtx)
-	// wait untill the flusher is done or a timeout
+	// wait untill the flusher is done or a timeout is triggered
+	timeout := time.NewTicker(S3OpTimeout)
 	select {
-	case <-time.After(S3OpTimeout):
+	case <-timeout.C:
 		slog.Warn("s3 datastream took too much time to be closed")
 	case <-s3ds.pFlusherDone:
 	}
-	// wait untill the flusher is done or a timeout
+	// wait untill the flusher is done or a timeout is triggered
 	select {
-	case <-time.After(S3OpTimeout):
+	case <-timeout.C:
 		slog.Warn("s3 datastream took too much time to be closed")
 	case <-s3ds.flushersDone:
 	}
+	close(s3ds.restartPflusherC)
 	return nil
 }
 
 func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
+	// thread-safe method that will:
+	// 1- adds a new trace to the list of traces
+	// 3- submit the records to the s3 bucket if needed
+	s3ds.batcher.Lock()
+	defer s3ds.batcher.Unlock()
 	s3ds.batcher.addNewTrace(event)
 	if s3ds.batcher.isFull() {
-		s3ds.submitRecords(ctx)
+		slog.Debug("batcher is full, submitting records")
+		return s3ds.submitRecords(ctx)
 	}
 	return nil
 }
@@ -162,23 +168,21 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 //
 //	file, and to submit it into S3. Reason -> to avoid freezing other processes
 func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
-	// check if the trace-buffer has anything
-	if s3ds.batcher.len() <= 0 {
-		return nil
-	}
-
 	// get and reset the traces from the batcher
 	// increase the counter for the next file descriptor
 	// and get the peer_id from the traces
 	traceT := new(TraceSubmissionTask)
 	traceT.Traces = s3ds.batcher.reset()
-	currentFileCnt := s3ds.fileCnt.Load()
-	s3ds.fileCnt.Add(1)
+	go func() {
+		// notify the periodic flusher to restart the timeout
+		s3ds.restartPflusherC <- struct{}{}
+	}()
 	// avoid race conditions where the periodic flusher flushed right before the
 	// batcher was reset
 	if len(traceT.Traces) <= 0 {
 		return nil
 	}
+	currentFileCnt := s3ds.fileCnt.Add(1)
 	producerID := traceT.Traces[0].PeerID
 
 	// compose the path for the s3 key/file
@@ -297,18 +301,21 @@ func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval tim
 		for {
 			select {
 			case <-ctx.Done():
-				slog.Debug("context died, closing the s3 trace-periodic-flusher")
-				// use new context to submit whatever is left
-				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
-				defer cancel()
-				s3ds.submitRecords(opCtx)
+				slog.Info("context died, closing the s3 trace-periodic-flusher")
 				return
 			case <-flushTicker.C:
+				// use new context to submit whatever is in the batcher
 				slog.Debug("trace-periodic-flusher kicked in")
-				// use new context to submit whatever is left
 				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
-				s3ds.submitRecords(opCtx)
+				s3ds.batcher.Lock()
+				if err := s3ds.submitRecords(opCtx); err != nil {
+					slog.Error("submitting last records to s3", tele.LogAttrError(err))
+				}
+				s3ds.batcher.Unlock()
 				cancel()
+			case <-s3ds.restartPflusherC:
+				// the submitRecods function will notify when is time to reset the timer
+				flushTicker.Reset(interval)
 			}
 		}
 	}()
@@ -331,7 +338,7 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 	for {
 		select {
 		case traceT := <-s3ds.traceTaskC:
-			slog.Info("submitting traces to s3",
+			slog.Debug("submitting traces to s3",
 				"traces", len(traceT.Traces),
 				"s3Key", traceT.S3Key,
 			)
@@ -350,7 +357,7 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 				continue
 			}
 			slog.Info("submitted file to s3",
-				"bytes", totBytes,
+				"MB", float32(totBytes)/(1024.0*1024.0),
 				"s3key", traceT.S3Key,
 				"formating-time", formatT,
 				"upload-time", time.Since(uploadStartT),
@@ -441,6 +448,7 @@ func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
 }
 
 // TraceBatcher is an internal threathsafe buffer for EventTraces
+// it includes some non-locking mechanisms to avoid race conditions on upper-level calls
 type traceBatcher struct {
 	sync.RWMutex
 	byteLimit int64
@@ -459,44 +467,66 @@ func newTraceBatcher(byteLimit int64) (*traceBatcher, error) {
 	}, nil
 }
 
-// addNewTrace locks the array and adds a new event to the queue
+// AddNewTrace is a thread-safe wrapper on top of the AddNewTrace method
+func (b *traceBatcher) AddNewTrace(event *TraceEvent) {
+	b.Lock()
+	defer b.Unlock()
+	b.addNewTrace(event)
+}
+
+// addNewTrace adds a new event to the queue
 // it also aggregates the bytes from the json format to know when the
 // buffer needs to be  flushed
 func (b *traceBatcher) addNewTrace(event *TraceEvent) {
 	// this might be rustic, but we calculate the size of the trace
 	// based on the it's JsonBytes (although we used compressed parquets)
 	jsonBytes := event.Data()
-	b.Lock()
 	b.traces = append(b.traces, event)
 	b.totBytes = b.totBytes + int64(len(jsonBytes))
-	b.Unlock()
 }
 
-func (b *traceBatcher) len() int {
+// Len is a thread-safe wrapper over b.len()
+func (b *traceBatcher) Len() int {
 	b.RLock()
 	defer b.RUnlock()
+	return b.len()
+}
+
+// len returns the current number of traces in the array
+func (b *traceBatcher) len() int {
 	return len(b.traces)
+}
+
+// IsFull is a thread-safe wrapper over the b.isFull one
+func (b *traceBatcher) IsFull() bool {
+	b.RLock()
+	defer b.RUnlock()
+	return b.isFull()
 }
 
 // isFull checks whether we've already reached the limit of
 // bytes to flush the batch of traces
 // NOTE: takes into account the Json Encoded bytes of the trace
 func (b *traceBatcher) isFull() bool {
-	b.RLock()
-	defer b.RUnlock()
 	return b.totBytes >= b.byteLimit
+}
+
+// Reset is a thread-safe method over the b.reset() one
+func (b *traceBatcher) Reset() []ParquetTraceEvent {
+	b.Lock()
+	defer b.Unlock()
+	return b.reset()
 }
 
 // reset makes a copy of the existing traces
 // converting them into a parquet formatted events
 // and will return the copy ready to be submitted
 func (b *traceBatcher) reset() []ParquetTraceEvent {
-	b.Lock()
 	prevTraces := make([]ParquetTraceEvent, len(b.traces))
 	for i, trace := range b.traces {
 		prevTraces[i] = *trace.toParquet()
 	}
 	b.traces = make([]*TraceEvent, 0)
-	b.Unlock()
+	b.totBytes = 0
 	return prevTraces
 }
