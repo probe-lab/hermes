@@ -90,6 +90,9 @@ func (s3ds *S3DataStream) Start(ctx context.Context) error {
 		"spawning s3 data-stream",
 		"endpoint", s3ds.config.Endpoint,
 		"bucket", s3ds.config.Bucket,
+		"flush-interval", s3ds.config.FlushInterval,
+		"flushers", s3ds.config.Flushers,
+		"byte-limite(MB)", float32(s3ds.config.ByteLimit)/(1024.0*1024.0),
 	)
 	opCtx, cancel := context.WithTimeout(ctx, S3ConnectionTimeout)
 	defer cancel()

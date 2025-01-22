@@ -54,6 +54,7 @@ var rootConfig = struct {
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
+	s3Config  *host.S3DSConfig
 
 	// Functions that shut down the telemetry providers.
 	// Both block until they're done
@@ -78,13 +79,14 @@ var rootConfig = struct {
 	S3Endpoint:      "",
 	S3Bucket:        "hermes",
 	S3Flushers:      2,
-	S3FlushInterval: 1 * time.Second,
-	S3ByteLimit:     4 * 1024 * 1024, // 4MB
+	S3FlushInterval: 2 * time.Second,
+	S3ByteLimit:     10 * 1024 * 1024, // 10MB
 	AWSAccessKeyID:  "",
 	AWSSecretKey:    "",
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
+	s3Config:            nil,
 	tracerShutdownFunc:  nil,
 	metricsShutdownFunc: nil,
 }
@@ -240,8 +242,8 @@ var rootFlags = []cli.Flag{
 		Category:    flagCategoryDataStream,
 	},
 	&cli.IntFlag{
-		Name:        "s3.batcher.size.limit",
-		EnvVars:     []string{"HERMES_S3_BATCHER_BYTE_LIMIT"},
+		Name:        "s3.byte.limit",
+		EnvVars:     []string{"HERMES_S3_BYTE_LIMIT"},
 		Usage:       "Soft upper limite of bytes for the S3 dumps",
 		Value:       rootConfig.S3ByteLimit,
 		Destination: &rootConfig.S3ByteLimit,
@@ -337,8 +339,23 @@ func rootBefore(c *cli.Context) error {
 				rootConfig.awsConfig = &awsConfig
 			}
 		}
+		if dataStreamType == host.DataStreamTypeS3 {
+			s3conf := &host.S3DSConfig{
+				Flushers:      rootConfig.S3Flushers,
+				FlushInterval: rootConfig.S3FlushInterval,
+				ByteLimit:     int64(rootConfig.S3ByteLimit),
+				Region:        rootConfig.S3Region,
+				Endpoint:      rootConfig.S3Endpoint,
+				Bucket:        rootConfig.S3Bucket,
+				SecretKey:     rootConfig.AWSSecretKey,
+				AccessKeyID:   rootConfig.AWSAccessKeyID,
+			}
+			if err := s3conf.CheckValidity(); err != nil {
+				return fmt.Errorf("loading S3 configuration: %w", err)
+			}
+			rootConfig.s3Config = s3conf
+		}
 	}
-
 	return nil
 }
 
