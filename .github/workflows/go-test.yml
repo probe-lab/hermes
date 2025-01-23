@@ -15,11 +15,6 @@ concurrency:
 
 jobs:
   go-test:
-    uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
-    with:
-      go-versions: '["this"]'
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     services:
       s3:
         image: localstack/localstack:s3-latest
@@ -29,4 +24,10 @@ jobs:
           - DEBUG=${DEBUG:-0}
         volumes:
           - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
+    test:
+      uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
+      with:
+        go-versions: '["this"]'
+      secrets:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
