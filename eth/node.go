@@ -429,9 +429,6 @@ func (n *Node) Start(ctx context.Context) error {
 		}
 	}()
 
-	// if the connection with the Prysm node when successfully, notify over the channel
-	close(n.readyNotC)
-
 	// TODO: for some reason this delays the entire Hermes initialization process for ookla
 	// commenting it
 	// // get chain parameters for scores
@@ -463,6 +460,9 @@ func (n *Node) Start(ctx context.Context) error {
 	} else {
 		slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
 	}
+
+	// if the connection with the Prysm node when successfully, notify over the channel
+	close(n.readyNotC)
 
 	// protect connection to beacon node so that it's not pruned at some point
 	n.host.ConnManager().Protect(addrInfo.ID, "hermes")
