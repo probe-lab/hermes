@@ -522,7 +522,7 @@ func (n *Node) startDataStream(ctx context.Context) (func(), error) {
 
 	go func() {
 		if err := n.ds.Start(backgroundCtx); err != nil {
-			slog.Error("Failed to start data stream", tele.LogAttrError(err))
+			slog.Warn("Failed to start data stream", tele.LogAttrError(err))
 		}
 	}()
 
