@@ -18,8 +18,8 @@ type benchmarkConfig struct {
 }
 
 var cmdBenchmark = &cli.Command{
-	Name:        "benchmark",
-	Description: "performs the given set of benchmarks for the hermes internals",
+	Name:  "benchmark",
+	Usage: "performs the given set of benchmarks for the hermes internals",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
 			Name:        "parquet",
@@ -43,7 +43,6 @@ func runBenchmark(c *cli.Context) error {
 		"parquet", benchmarkConf.parquetB,
 		"s3", benchmarkConf.s3B,
 	)
-	slog.Info("")
 	// parquet benchmark
 	if benchmarkConf.parquetB {
 		if err := benchmarks.ParquetFormatingBenchmark(); err != nil {
