@@ -414,12 +414,6 @@ func (s3cfg *S3DSConfig) CheckValidity() error {
 	if len(s3cfg.Bucket) <= 0 {
 		return fmt.Errorf("no s3 bucket was provided")
 	}
-	if len(s3cfg.AccessKeyID) <= 0 {
-		return fmt.Errorf("no s3 access-key was provided")
-	}
-	if len(s3cfg.SecretKey) <= 0 {
-		return fmt.Errorf("no s3 secret access key was provided")
-	}
 	if len(s3cfg.Region) <= 0 {
 		return fmt.Errorf("no s3 region was provided")
 	}
@@ -438,12 +432,15 @@ func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
 	cfg, err := config.LoadDefaultConfig(
 		context.TODO(),
 		config.WithRegion(s3cfg.Region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+	)
+	// only if the credential details where given
+	if len(s3cfg.AccessKeyID) > 0 && len(s3cfg.SecretKey) > 0 {
+		cfg.Credentials = credentials.NewStaticCredentialsProvider(
 			s3cfg.AccessKeyID,
 			s3cfg.SecretKey,
 			"", // empty session for now
-		)),
-	)
+		)
+	}
 	return &cfg, err
 }
 
