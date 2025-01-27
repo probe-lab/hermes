@@ -192,7 +192,7 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
 		"%s/%d/%d/%d/%d/%d.parquet",
 		producerID,
 		"%s/%s/%d/%d/%d/%d/%s_%d.parquet",
-		s3ds.config.Tag, 
+		s3ds.config.Tag,
 		t.Year(),
 		t.Month(),
 		t.Day(),

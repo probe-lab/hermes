@@ -60,7 +60,7 @@ func (t *TraceEvent) toParquet() *ParquetTraceEvent {
 		return nil
 	}
 	return &ParquetTraceEvent{
-		Type:      t.Topic,
+		Type:      t.Type,
 		Topic:     t.Topic,
 		PeerID:    t.PeerID.String(),
 		Timestamp: t.Timestamp.UnixMilli(),

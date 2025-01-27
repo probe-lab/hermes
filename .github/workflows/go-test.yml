@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go-test:
+  localstack-s3-setup:
     services:
       s3:
         image: localstack/localstack:s3-latest
@@ -24,10 +24,19 @@ jobs:
           - DEBUG=${DEBUG:-0}
         volumes:
           - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
-    test:
-      uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
-      with:
-        go-versions: '["this"]'
-      secrets:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    steps:
+    - name: Wait for LocalStack to be ready
+      run: |
+        until curl -s http://127.0.0.1:4566/health | grep "\"s3\": \"running\""; do
+          echo "Waiting for LocalStack to start..."
+          sleep 5
+        done
+
+  go-test:
+    uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
+    with:
+      go-versions: '["this"]'
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
