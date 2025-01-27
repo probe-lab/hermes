@@ -48,6 +48,7 @@ var rootConfig = struct {
 	S3ByteLimit     int
 	S3Region        string
 	S3Bucket        string
+	S3Tag           string
 	S3Endpoint      string
 	AWSAccessKeyID  string
 	AWSSecretKey    string
@@ -241,6 +242,14 @@ var rootFlags = []cli.Flag{
 		Destination: &rootConfig.S3Bucket,
 		Category:    flagCategoryDataStream,
 	},
+	&cli.StringFlag{
+		Name:        "s3.tag",
+		EnvVars:     []string{"HERMES_S3_TAG"},
+		Usage:       "tag within the S3 bucket that will be used as reference to submit the traces",
+		Value:       rootConfig.S3Tag,
+		Destination: &rootConfig.S3Tag,
+		Category:    flagCategoryDataStream,
+	},
 	&cli.IntFlag{
 		Name:        "s3.byte.limit",
 		EnvVars:     []string{"HERMES_S3_BYTE_LIMIT"},
@@ -347,6 +356,7 @@ func rootBefore(c *cli.Context) error {
 				Region:        rootConfig.S3Region,
 				Endpoint:      rootConfig.S3Endpoint,
 				Bucket:        rootConfig.S3Bucket,
+				Tag:           rootConfig.S3Tag,
 				SecretKey:     rootConfig.AWSSecretKey,
 				AccessKeyID:   rootConfig.AWSAccessKeyID,
 			}
