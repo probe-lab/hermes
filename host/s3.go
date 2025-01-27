@@ -189,10 +189,9 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
 	// s3Path = hermes/peer_id/year/month/day/hour/file_index.parquet
 	t := time.Now()
 	traceT.S3Key = fmt.Sprintf(
-		"%s/%d/%d/%d/%d/%d.parquet",
-		producerID,
-		"%s/%s/%d/%d/%d/%d/%s_%d.parquet",
+		"%s/%s/%d/%d/%d/%d/%d.parquet",
 		s3ds.config.Tag,
+		producerID,
 		t.Year(),
 		t.Month(),
 		t.Day(),
@@ -404,6 +403,7 @@ type S3DSConfig struct {
 	Region        string
 	Endpoint      string
 	Bucket        string
+	Tag           string
 	FlushInterval time.Duration
 }
 
