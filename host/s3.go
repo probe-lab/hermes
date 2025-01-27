@@ -28,16 +28,17 @@ type S3DataStream struct {
 	ctx      context.Context
 	cancelFn context.CancelFunc
 
-	config  S3DSConfig
-	client  *s3.Client
-	batcher *traceBatcher
+	config S3DSConfig
+	client *s3.Client
 
-	traceTaskC       chan *TraceSubmissionTask
+	eventStore *eventStore
+
+	eventTaskC       chan *EventSubmissionTask
 	flushersDone     chan struct{}
 	pFlusherDone     chan struct{}
 	restartPflusherC chan struct{}
 
-	// counter to identify trace-files on S3
+	// counter to identify event-files on S3
 	// unique per peer
 	// should be reset on restart with the peer_id
 	fileCnt atomic.Int64
@@ -63,16 +64,15 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 	} else {
 		s3client = s3.NewFromConfig(*cfg)
 	}
-	// create the trace batcher
-	batcher, err := newTraceBatcher(baseCfg.ByteLimit)
-	if err != nil {
-		return nil, err
+	// create the event store
+	eventStore := &eventStore{
+		batchers: make(map[EventType]*eventBatcher),
 	}
 	return &S3DataStream{
 		config:           baseCfg,
 		client:           s3client,
-		batcher:          batcher,
-		traceTaskC:       make(chan *TraceSubmissionTask),
+		eventTaskC:       make(chan *EventSubmissionTask),
+		eventStore:       eventStore,
 		flushersDone:     make(chan struct{}),
 		pFlusherDone:     make(chan struct{}),
 		restartPflusherC: make(chan struct{}),
@@ -84,7 +84,7 @@ func (s3ds *S3DataStream) Type() DataStreamType {
 }
 
 func (s3ds *S3DataStream) OutputType() DataStreamOutputType {
-	return DataStreamOutputTypeKinesis
+	return DataStreamOutputParquet
 }
 
 func (s3ds *S3DataStream) Start(ctx context.Context) error {
@@ -126,7 +126,7 @@ func (s3ds *S3DataStream) Start(ctx context.Context) error {
 }
 
 func (s3ds *S3DataStream) Stop(ctx context.Context) error {
-	// stop the mainCtx, as we don't want new traces coming in
+	// stop the mainCtx, as we don't want new events coming in
 	s3ds.cancelFn()
 	// wait untill the flusher is done or a timeout is triggered
 	timeout := time.NewTicker(S3OpTimeout)
@@ -146,57 +146,66 @@ func (s3ds *S3DataStream) Stop(ctx context.Context) error {
 }
 
 func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
-	// thread-safe method that will:
-	// 1- adds a new trace to the list of traces
+	// thread-safe method that will
+	// 1- transfor the rawEvent into the right parquet format
+	// 2- adds a new event to the list of events (to the given type)
 	// 3- submit the records to the s3 bucket if needed
-	s3ds.batcher.Lock()
-	defer s3ds.batcher.Unlock()
-	s3ds.batcher.addNewTrace(event)
-	if s3ds.batcher.isFull() {
-		slog.Debug("batcher is full, submitting records")
-		return s3ds.submitRecords(ctx)
+	eventMap, err := RenderEvent(event)
+	if err != nil {
+		return err
+	}
+	// get each the the inner Events
+	for t, events := range eventMap {
+		// slog.Debug("traced event", "types", t, "len", len(events), "raw", *event, "bytes", SizeOfEvent(events))
+		s3ds.eventStore.Lock()
+		defer s3ds.eventStore.Unlock()
+		m, ok := s3ds.eventStore.batchers[t]
+		if !ok {
+			m, err = newEventBatcher(s3ds.config.ByteLimit)
+			if err != nil {
+				fmt.Println("error", err.Error())
+				return err
+			}
+		}
+		m.addNewEvents(events)
+		if m.isFull() {
+			slog.Debug("batcher is full, submitting records")
+			submissionT := &EventSubmissionTask{
+				ProducerID: event.PeerID.String(),
+				EventType:  t,
+			}
+			submissionT.Events = m.reset()
+			return s3ds.submitRecords(ctx, submissionT)
+		}
 	}
 	return nil
 }
 
-// submitRecords is the private method that will:
-// 1. get the copy of the existing traces, leaving a new batcher empty
-// 2. create the necessary s3 key to submite the batched traces
-// 3. format the traces into a parquet file
+// submitRecords is the private method that will:s3
+// 1. get the copy of the existing events, leaving a new batcher empty
+// 2. create the necessary s3 key to submit the batched events
+// 3. for_mat the events into a parquet file
 // 4. push the file into the s3 bucket
-// *NOTE*: the method leaves a routine in the background to format the parquet
-//
-//	file, and to submit it into S3. Reason -> to avoid freezing other processes
-func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
-	// get and reset the traces from the batcher
-	// increase the counter for the next file descriptor
-	// and get the peer_id from the traces
-	traceT := new(TraceSubmissionTask)
-	traceT.Traces = s3ds.batcher.reset()
-	go func() {
-		// notify the periodic flusher to restart the timeout
-		s3ds.restartPflusherC <- struct{}{}
-	}()
+func (s3ds *S3DataStream) submitRecords(ctx context.Context, eventT *EventSubmissionTask) error {
 	// avoid race conditions where the periodic flusher flushed right before the
 	// batcher was reset
-	if len(traceT.Traces) <= 0 {
+	if len(eventT.Events) <= 0 {
 		return nil
 	}
 	currentFileCnt := s3ds.fileCnt.Add(1)
-	producerID := traceT.Traces[0].PeerID
 
 	// compose the path for the s3 key/file
-	// s3Path = hermes/peer_id/year/month/day/hour/file_index.parquet
+	// s3Path = /tag/producer_id/year/month/day/hour/event_type_file_index.parquet
 	t := time.Now()
-	traceT.S3Key = fmt.Sprintf(
-		"%s/%d/%d/%d/%d/%d.parquet",
-		producerID,
+	eventT.S3Key = fmt.Sprintf(
 		"%s/%s/%d/%d/%d/%d/%s_%d.parquet",
-		s3ds.config.Tag, 
+		s3ds.config.Tag,
+		eventT.ProducerID,
 		t.Year(),
 		t.Month(),
 		t.Day(),
 		t.Hour(),
+		eventT.EventType.String(),
 		currentFileCnt,
 	)
 
@@ -205,7 +214,7 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
 	select {
 	case <-time.After(S3OpTimeout):
 		return fmt.Errorf("")
-	case s3ds.traceTaskC <- traceT:
+	case s3ds.eventTaskC <- eventT:
 	}
 
 	return nil
@@ -214,7 +223,7 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context) error {
 // s3KeySubmission is a unitary method (mostly for testing) that submits any arbitrary []byte into S3
 func (s3ds *S3DataStream) S3KeySubmission(ctx context.Context, s3Key string, content []byte) error {
 	slog.Debug(
-		"submitting traces to s3",
+		"submitting events to s3",
 		slog.Attr{Key: "file", Value: slog.StringValue(s3Key)},
 		slog.Attr{Key: "s3-bucket", Value: slog.StringValue(s3ds.config.Bucket)},
 	)
@@ -294,44 +303,59 @@ func (s3ds *S3DataStream) removeItemFromS3(ctx context.Context, s3Key string) er
 }
 
 // spawnPeriodicFlusher is a S3DataStream method that will create a background routine
-// to flush the batched traces every given interval
+// to flush the batched events every given interval
 func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval time.Duration) {
 	go func() {
 		defer close(s3ds.pFlusherDone)
 		slog.Debug("launching S3 periodic flusher", "flush-interval", interval.String())
-		flushTicker := time.NewTicker(interval)
+		flushTicker := time.NewTicker(1 * time.Second)
 		for {
 			select {
 			case <-ctx.Done():
-				slog.Info("context died, closing the s3 trace-periodic-flusher")
+				slog.Info("context died, closing the s3 event-periodic-flusher")
 				return
 			case <-flushTicker.C:
-				// use new context to submit whatever is in the batcher
-				slog.Debug("trace-periodic-flusher kicked in")
-				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
-				s3ds.batcher.Lock()
-				if err := s3ds.submitRecords(opCtx); err != nil {
-					slog.Error("submitting last records to s3", tele.LogAttrError(err))
+				// check if there is anything to flush every 250ms
+				s3ds.eventStore.Lock()
+				defer s3ds.eventStore.Unlock()
+				slog.Debug("periodic flusher", "batchers", len(s3ds.eventStore.batchers))
+				for t, batcher := range s3ds.eventStore.batchers {
+					if time.Since(batcher.lastResetT) >= interval {
+						slog.Debug("event-periodic-flusher kicked in", "event-type", t)
+						submissionT := &EventSubmissionTask{
+							EventType: t,
+						}
+						submissionT.Events = batcher.reset()
+						opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
+						if err := s3ds.submitRecords(opCtx, submissionT); err != nil {
+							slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", t)
+						}
+						cancel()
+					} else {
+						slog.Debug("not in time to flush", "event-type", t, interval-time.Since(batcher.lastResetT))
+					}
 				}
-				s3ds.batcher.Unlock()
-				cancel()
-			case <-s3ds.restartPflusherC:
-				// the submitRecods function will notify when is time to reset the timer
-				flushTicker.Reset(interval)
+				flushTicker.Reset(1 * time.Second)
 			}
 		}
 	}()
 }
 
-// TraceSubmissionTask main trace submission Task
-type TraceSubmissionTask struct {
-	Traces []ParquetTraceEvent
-	S3Key  string
+// EventSubmissionTask main event submission Task
+// identifies:
+// - the type of events (for a later cast)
+// - the list of events (that need to be casted)
+// - the name of the s3 key to store the events
+type EventSubmissionTask struct {
+	ProducerID string
+	EventType  EventType
+	Events     []any
+	S3Key      string
 }
 
-// spawnS3Flusher creates a sync flusher for traces
-// It will read any TraceSubmissionTask on the s3ds.traceTaskC and will upload it
-// it is intended to limit the number of routines spawned to flush the traces to s3
+// spawnS3Flusher creates a sync flusher for events
+// It will read any EventSubmissionTask on the s3ds.eventTaskC and will upload it
+// it is intended to limit the number of routines spawned to flush the events to s3
 func (s3ds *S3DataStream) spawnS3Flusher(
 	ctx context.Context,
 	idx int,
@@ -339,28 +363,86 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 	slog.Info("spawned s3 flusher", "flusher-id", idx)
 	for {
 		select {
-		case traceT := <-s3ds.traceTaskC:
-			slog.Debug("submitting traces to s3",
-				"traces", len(traceT.Traces),
-				"s3Key", traceT.S3Key,
+		case eventT := <-s3ds.eventTaskC:
+			// TODO: fix the s3keys for the current multi parquet formatting
+			slog.Debug("submitting events to s3",
+				"events", len(eventT.Events),
+				"s3Key", eventT.S3Key,
 			)
-
+			var totBytes int
+			var buf *bytes.Buffer
+			var err error
 			formatStartT := time.Now()
-			totBytes, buf, err := TraceTtoBytes(traceT)
-			if err != nil {
-				slog.Error(err.Error())
-				continue
+			// format the parquet columns based on the subtype
+			switch eventT.EventType {
+			case EventTypeUnknown, EventTypeGenericEvent: // default
+				// not-defined -> go for the generic Event (most generic type)
+				totBytes, buf, err = EventsToBytes[GenericParquetEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeGossipAddRemovePeer:
+				totBytes, buf, err = EventsToBytes[GossipAddRemovePeerEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeGossipGraftPrune:
+				totBytes, buf, err = EventsToBytes[GossipGraftPruneEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeControlRPC:
+				totBytes, buf, err = EventsToBytes[SendRecvRPCEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeIhave:
+				totBytes, buf, err = EventsToBytes[GossipIhaveEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeIwant:
+				totBytes, buf, err = EventsToBytes[GossipIwantEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeIdontwant:
+				totBytes, buf, err = EventsToBytes[GossipIdontwantEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			default:
+				// not-defined -> go for the generic Event
+				totBytes, buf, err = EventsToBytes[GenericParquetEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
 			}
 			formatT := time.Since(formatStartT)
 			// submit the resulting bytes
 			uploadStartT := time.Now()
-			if err := s3ds.S3KeySubmission(ctx, traceT.S3Key, buf.Bytes()); err != nil {
+			if err := s3ds.S3KeySubmission(ctx, eventT.S3Key, buf.Bytes()); err != nil {
 				slog.Error("uploading file to s3", tele.LogAttrError(err))
 				continue
 			}
 			slog.Info("submitted file to s3",
 				"MB", float32(totBytes)/(1024.0*1024.0),
-				"s3key", traceT.S3Key,
+				"s3key", eventT.S3Key,
 				"formating-time", formatT,
 				"upload-time", time.Since(uploadStartT),
 				"total-time", time.Since(formatStartT),
@@ -373,21 +455,26 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 	}
 }
 
-// traceTtoBytes translates any given number of traceEvents into parquet serialized bytes
+// eventTtoBytes translates any given number of traceEvents into parquet serialized bytes
 // it can also be tuned with any desired set of parquet.WriterOption
-func TraceTtoBytes(
-	traceT *TraceSubmissionTask,
+func EventsToBytes[T any](
+	events []any,
 	opts ...parquet.WriterOption,
 ) (int, *bytes.Buffer, error) {
+	traces := make([]T, len(events))
+	for idx, event := range events {
+		t := event.(*T)
+		traces[idx] = *t
+	}
 	// creates a new parquet formatted file into a in-memmory bytes buffer
 	parquetBuffer := new(bytes.Buffer)
-	pw := parquet.NewGenericWriter[ParquetTraceEvent](
+	pw := parquet.NewGenericWriter[T](
 		parquetBuffer,
-		parquet.SchemaOf(new(ParquetTraceEvent)),
+		parquet.SchemaOf(new(T)),
 	)
-	_, err := pw.Write(traceT.Traces)
+	_, err := pw.Write(traces)
 	if err != nil {
-		return 0, nil, fmt.Errorf("writing traces to parquet: %s", err)
+		return 0, nil, fmt.Errorf("writing events to parquet: %s", err)
 	}
 	if err := pw.Close(); err != nil {
 		return 0, nil, fmt.Errorf("unable to close the parquer writer: %s", err.Error())
@@ -404,6 +491,7 @@ type S3DSConfig struct {
 	Region        string
 	Endpoint      string
 	Bucket        string
+	Tag           string
 	FlushInterval time.Duration
 }
 
@@ -415,6 +503,9 @@ func (s3cfg *S3DSConfig) CheckValidity() error {
 	}
 	if len(s3cfg.Bucket) <= 0 {
 		return fmt.Errorf("no s3 bucket was provided")
+	}
+	if len(s3cfg.Tag) <= 0 {
+		return fmt.Errorf("no s3 tag was provided")
 	}
 	if len(s3cfg.Region) <= 0 {
 		return fmt.Errorf("no s3 region was provided")
@@ -446,86 +537,93 @@ func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
 	return &cfg, err
 }
 
-// TraceBatcher is an internal threathsafe buffer for EventTraces
-// it includes some non-locking mechanisms to avoid race conditions on upper-level calls
-type traceBatcher struct {
+type eventStore struct {
 	sync.RWMutex
-	byteLimit int64
-	traces    []*TraceEvent
-	totBytes  int64
+	batchers map[EventType]*eventBatcher
 }
 
-// NewTraceBatcher creates a new empty TraceBatcher
-func newTraceBatcher(byteLimit int64) (*traceBatcher, error) {
+// EventBatcher is an internal threathsafe buffer for EventEvents
+// it includes some non-locking mechanisms to avoid race conditions on upper-level calls
+type eventBatcher struct {
+	sync.RWMutex
+	lastResetT time.Time
+	events     []any
+	byteLimit  int64
+	totBytes   int64
+}
+
+// NewEventBatcher creates a new empty TraceBatcher
+func newEventBatcher(byteLimit int64) (*eventBatcher, error) {
 	if byteLimit <= 0 {
-		return nil, fmt.Errorf("invalid size for the trace limitter %d", byteLimit)
+		return nil, fmt.Errorf("invalid size for the event limitter %d", byteLimit)
 	}
-	return &traceBatcher{
-		byteLimit: byteLimit,
-		traces:    make([]*TraceEvent, 0), // limitted by size, not by traces
+	return &eventBatcher{
+		byteLimit:  byteLimit,
+		events:     make([]any, 0), // limitted by size, not by events
+		totBytes:   0,
+		lastResetT: time.Now(),
 	}, nil
 }
 
-// AddNewTrace is a thread-safe wrapper on top of the AddNewTrace method
-func (b *traceBatcher) AddNewTrace(event *TraceEvent) {
+// AddNewEvent is a thread-safe wrapper on top of the AddNewTrace method
+func (b *eventBatcher) AddNewEvents(events []any) {
 	b.Lock()
 	defer b.Unlock()
-	b.addNewTrace(event)
+	b.addNewEvents(events)
 }
 
-// addNewTrace adds a new event to the queue
-// it also aggregates the bytes from the json format to know when the
+// addNewEvent adds a new event to the queue
+// it also aggregates the bytes from the binary format of the event to know when the
 // buffer needs to be  flushed
-func (b *traceBatcher) addNewTrace(event *TraceEvent) {
-	// this might be rustic, but we calculate the size of the trace
-	// based on the it's JsonBytes (although we used compressed parquets)
-	jsonBytes := event.Data()
-	b.traces = append(b.traces, event)
-	b.totBytes = b.totBytes + int64(len(jsonBytes))
+func (b *eventBatcher) addNewEvents(events []any) {
+	for _, evt := range events {
+		newBytes := SizeOfEvent(evt)
+		b.events = append(b.events, evt)
+		b.totBytes = b.totBytes + newBytes
+	}
+	fmt.Println("tot_bytes:", b.totBytes)
 }
 
 // Len is a thread-safe wrapper over b.len()
-func (b *traceBatcher) Len() int {
+func (b *eventBatcher) Len() int {
 	b.RLock()
 	defer b.RUnlock()
 	return b.len()
 }
 
-// len returns the current number of traces in the array
-func (b *traceBatcher) len() int {
-	return len(b.traces)
+// len returns the current number of events in the array
+func (b *eventBatcher) len() int {
+	return len(b.events)
 }
 
 // IsFull is a thread-safe wrapper over the b.isFull one
-func (b *traceBatcher) IsFull() bool {
+func (b *eventBatcher) IsFull() bool {
 	b.RLock()
 	defer b.RUnlock()
 	return b.isFull()
 }
 
 // isFull checks whether we've already reached the limit of
-// bytes to flush the batch of traces
-// NOTE: takes into account the Json Encoded bytes of the trace
-func (b *traceBatcher) isFull() bool {
+// bytes to flush the batch of events
+// NOTE: takes into account the Json Encoded bytes of the event
+func (b *eventBatcher) isFull() bool {
 	return b.totBytes >= b.byteLimit
 }
 
 // Reset is a thread-safe method over the b.reset() one
-func (b *traceBatcher) Reset() []ParquetTraceEvent {
+func (b *eventBatcher) Reset() []any {
 	b.Lock()
 	defer b.Unlock()
 	return b.reset()
 }
 
-// reset makes a copy of the existing traces
+// reset makes a copy of the existing events
 // converting them into a parquet formatted events
 // and will return the copy ready to be submitted
-func (b *traceBatcher) reset() []ParquetTraceEvent {
-	prevTraces := make([]ParquetTraceEvent, len(b.traces))
-	for i, trace := range b.traces {
-		prevTraces[i] = *trace.toParquet()
-	}
-	b.traces = make([]*TraceEvent, 0)
+func (b *eventBatcher) reset() []any {
+	prevEvents := b.events
+	b.events = make([]any, 0)
 	b.totBytes = 0
-	return prevTraces
+	b.lastResetT = time.Now()
+	return prevEvents
 }

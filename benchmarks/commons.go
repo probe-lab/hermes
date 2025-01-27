@@ -19,22 +19,25 @@ var (
 
 // randomTraceGenerator generate as many traces as needed with a given size
 // until a limit is softly reached
-func randomTraceGenerator(
+func randomEventGenerator(
 	traceSize int,
 	byteIterLimit int,
-) (int, int, []host.ParquetTraceEvent) {
-	traces := make([]host.ParquetTraceEvent, 0)
+) (int, int, []any) {
+	traces := make([]any, 0)
 	totBytes := 0
 	for totBytes < byteIterLimit {
-		pEvent := host.ParquetTraceEvent{
-			Timestamp: time.Now().UnixMilli(),
-			Type:      randString(8),
-			Topic:     randString(8),
-			PeerID:    randString(8),
-			Payload:   randString(traceSize + (4 * 8)),
+		pEvent := host.GenericParquetEvent{
+			BaseEvent: host.BaseEvent{
+				Timestamp:  time.Now().UnixMilli(),
+				Type:       randString(8),
+				ProducerID: randString(8),
+			},
+			Topic:   randString(8),
+			Payload: randString(traceSize + (4 * 8)),
 		}
 		traces = append(traces, pEvent)
-		totBytes += pEvent.BytesLen()
+		// json bytes
+		totBytes += int(host.SizeOfEvent(pEvent))
 	}
 	return totBytes, len(traces), traces
 }
