@@ -16,16 +16,16 @@ func ParquetFormatingBenchmark() error {
 	for _, byteLimit := range byteLimits {
 		// generate traces of ~1kb
 		var totBytes int
-		var totTraces int
-		traceT := new(host.TraceSubmissionTask)
-		totBytes, totTraces, traceT.Traces = randomTraceGenerator(
+		var totEvents int
+		eventT := new(host.EventSubmissionTask)
+		totBytes, totEvents, eventT.Events = randomEventGenerator(
 			1024,
 			byteLimit,
 		)
 		fn := func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				t := time.Now()
-				parquetBytes, _, err := host.TraceTtoBytes(traceT)
+				parquetBytes, _, err := host.EventsToBytes[host.GenericParquetEvent](eventT.Events)
 				if err != nil {
 					slog.Error("error opening new S3DataStream", tele.LogAttrError(err))
 					return
@@ -33,7 +33,7 @@ func ParquetFormatingBenchmark() error {
 				duration := time.Since(t)
 				slog.Info(
 					fmt.Sprintf("ParquetFormatingBenchmark-%dMB:", byteLimit/oneMb),
-					"traces", totTraces,
+					"events", totEvents,
 					"raw(MB)", float64(totBytes)/float64(oneMb),
 					"serialized(MB)", float64(parquetBytes)/float64(oneMb),
 					"raw-to-parquet-ratio", float64(totBytes)/float64(parquetBytes),

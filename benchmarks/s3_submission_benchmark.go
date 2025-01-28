@@ -16,14 +16,14 @@ func S3SubmissionBenchmark(ctx context.Context, s3conf host.S3DSConfig) error {
 	for _, byteLimit := range byteLimits {
 		// generate traces of ~1kb
 		var totBytes int
-		var totTraces int
-		traceT := new(host.TraceSubmissionTask)
-		totBytes, totTraces, traceT.Traces = randomTraceGenerator(
+		var totEvents int
+		eventsT := new(host.EventSubmissionTask)
+		totBytes, totEvents, eventsT.Events = randomEventGenerator(
 			1024,
 			byteLimit,
 		)
 
-		parquetBytes, buf, err := host.TraceTtoBytes(traceT)
+		parquetBytes, buf, err := host.EventsToBytes[host.GenericParquetEvent](eventsT.Events)
 		if err != nil {
 			return err
 		}
@@ -46,7 +46,7 @@ func S3SubmissionBenchmark(ctx context.Context, s3conf host.S3DSConfig) error {
 				duration := time.Since(t)
 				slog.Info(
 					fmt.Sprintf("S3BatchSumissionBenchmark-%dMB:", byteLimit/oneMb),
-					"traces", totTraces,
+					"events", totEvents,
 					"raw(MB)", float64(totBytes)/float64(oneMb),
 					"serialized(MB)", float64(parquetBytes)/float64(oneMb),
 					"parquet-submission-time", duration,

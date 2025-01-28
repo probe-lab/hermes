@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -24,15 +25,15 @@ func Test_S3_SimpleBatcher(t *testing.T) {
 	// non-thread-safe test
 	evnt1 := getTestEvent()
 	// ensure that the test event exeeds the limit
-	bytes := evnt1.Data()
-	require.GreaterOrEqual(t, len(bytes), testingBatchLimit)
+	byteLen := SizeOfEvent(evnt1)
+	require.GreaterOrEqual(t, byteLen, int64(testingBatchLimit))
 
 	// try the s3batcher methods
-	batcher, err := newTraceBatcher(int64(testingBatchLimit))
+	batcher, err := newEventBatcher(int64(testingBatchLimit))
 	require.NoError(t, err)
 
 	// check if the batcher is full
-	batcher.addNewTrace(&evnt1)
+	batcher.AddNewEvents([]any{evnt1})
 	isFull := batcher.isFull()
 	require.Equal(t, isFull, true)
 
@@ -40,7 +41,7 @@ func Test_S3_SimpleBatcher(t *testing.T) {
 	batcherSize := batcher.totBytes
 	evnts := batcher.reset()
 	require.Equal(t, len(evnts), 1)
-	require.Equal(t, batcherSize, int64(len(bytes)))
+	require.Equal(t, batcherSize, byteLen)
 	require.Equal(t, batcher.len(), 0)
 }
 
@@ -84,7 +85,7 @@ func Test_S3_BatchSubmission(t *testing.T) {
 	}()
 
 	event1 := getTestEvent()
-	submitTraceThroughBatcher(testCtx, &event1, s3ds, t)
+	submitEventsTroughBatchers(testCtx, &event1, s3ds, t)
 }
 
 func Test_S3_Connection(t *testing.T) {
@@ -107,10 +108,10 @@ func Test_S3_ParquetRetrieval(t *testing.T) {
 	}()
 
 	event1 := getTestEvent()
-	submitTraceThroughBatcher(testCtx, &event1, s3ds, t)
+	submitEventsTroughBatchers(testCtx, &event1, s3ds, t)
 
 	event2 := getTestEvent()
-	submitTraceThroughBatcher(testCtx, &event2, s3ds, t)
+	submitEventsTroughBatchers(testCtx, &event2, s3ds, t)
 
 	objs, err := s3ds.getObjsInBucket(testCtx)
 	require.NoError(t, err)
@@ -119,7 +120,7 @@ func Test_S3_ParquetRetrieval(t *testing.T) {
 		trace := parseTraceFromReader(objReader, t)
 		require.Greater(t, len(trace), 0)
 		require.Equal(t, trace[0].Topic, event1.Topic)
-		require.Equal(t, trace[0].PeerID, event1.PeerID.String())
+		require.Equal(t, trace[0].ProducerID, event1.PeerID.String())
 	}
 }
 
@@ -132,7 +133,7 @@ func Test_S3_Periodic_Flusher(t *testing.T) {
 	}()
 
 	event1 := getTestEvent()
-	submitTraceThroughBatcher(testCtx, &event1, s3ds, t)
+	submitEventsTroughBatchers(testCtx, &event1, s3ds, t)
 
 	err := s3ds.PutRecord(testCtx, &event1)
 	require.NoError(t, err)
@@ -167,6 +168,7 @@ func getTestS3client(ctx context.Context, t *testing.T) *S3DataStream {
 		ByteLimit:     int64(testingBatchLimit),
 		Region:        "us-east-1",
 		Bucket:        "locals3",
+		Tag:           "test",
 		AccessKeyID:   "test",
 		SecretKey:     "test",
 	}
@@ -199,22 +201,16 @@ func submitSingleItem(ctx context.Context, s3ds *S3DataStream, s3Key string, t *
 	return len(postItemNumber)
 }
 
-func submitTraceThroughBatcher(
+func submitEventsTroughBatchers(
 	ctx context.Context,
 	event *TraceEvent,
 	s3ds *S3DataStream,
 	t *testing.T,
 ) {
-	// adding a single event should already trigger the flush
-	// thus we should be also able to retrieve it
-	err := s3ds.PutRecord(ctx, event)
-	require.NoError(t, err)
-
 	ogNumberOfItems, err := s3ds.getObjsInBucket(ctx)
 	require.NoError(t, err)
 
-	// submit the traces
-	s3ds.submitRecords(ctx)
+	s3ds.PutRecord(ctx, event)
 
 	// wait a few milliseconds till the pool of submitters is triggered
 	select {
@@ -251,15 +247,15 @@ func downloadItem(ctx context.Context, s3ds *S3DataStream, s3Key string, t *test
 	return output.Body
 }
 
-func parseTraceFromReader(objReader io.ReadCloser, t *testing.T) []ParquetTraceEvent {
+func parseTraceFromReader(objReader io.ReadCloser, t *testing.T) []GenericParquetEvent {
 	buf := new(bytes.Buffer)
 	_, err := buf.ReadFrom(objReader)
 	require.NoError(t, err)
 	require.Greater(t, len(buf.Bytes()), 0)
 
-	data := make([]ParquetTraceEvent, 2)
-	schema := parquet.SchemaOf(new(ParquetTraceEvent))
-	pr := parquet.NewGenericReader[ParquetTraceEvent](bytes.NewReader(buf.Bytes()), schema)
+	data := make([]GenericParquetEvent, 2)
+	schema := parquet.SchemaOf(new(GenericParquetEvent))
+	pr := parquet.NewGenericReader[GenericParquetEvent](bytes.NewReader(buf.Bytes()), schema)
 	_, err = pr.Read(data)
 	require.Error(t, io.EOF, err)
 
