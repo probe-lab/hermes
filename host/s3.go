@@ -22,6 +22,7 @@ import (
 var (
 	S3ConnectionTimeout = 5 * time.Second
 	S3OpTimeout         = 10 * time.Second
+	DefaultByteLimit = int64(10 * 1024 * 1024) // 10MB
 )
 
 type S3DataStream struct {
@@ -38,8 +39,7 @@ type S3DataStream struct {
 	pFlusherDone     chan struct{}
 	restartPflusherC chan struct{}
 
-	// counter to identify event-files on S3
-	// unique per peer
+	// counter to identify event-files on S3 - unique per peer
 	// should be reset on restart with the peer_id
 	fileCnt atomic.Int64
 }
@@ -66,7 +66,8 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 	}
 	// create the event store
 	eventStore := &eventStore{
-		batchers: make(map[EventType]*eventBatcher),
+		// batchers: make(map[EventType]*eventBatcher),
+		batchers:		new(sync.Map), // map[EventType]*batcher
 	}
 	return &S3DataStream{
 		config:           baseCfg,
@@ -154,44 +155,45 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 	if err != nil {
 		return err
 	}
-	// get each the the inner Events
+	if len(eventMap) <= 0 {
+		return nil
+	}
+	// get each the the inner subevents from the traced one
 	for t, events := range eventMap {
-		// slog.Debug("traced event", "types", t, "len", len(events), "raw", *event, "bytes", SizeOfEvent(events))
-		s3ds.eventStore.Lock()
-		defer s3ds.eventStore.Unlock()
-		m, ok := s3ds.eventStore.batchers[t]
+		var batcher *eventBatcher	
+		b, ok := s3ds.eventStore.batchers.Load(t)
 		if !ok {
-			m, err = newEventBatcher(s3ds.config.ByteLimit)
-			if err != nil {
-				fmt.Println("error", err.Error())
-				return err
-			}
+			batcher = newEventBatcher(s3ds.config.ByteLimit)
+			s3ds.eventStore.batchers.Store(t, batcher)
+		} else {
+			batcher = b.(*eventBatcher)
 		}
-		m.addNewEvents(events)
-		if m.isFull() {
-			slog.Debug("batcher is full, submitting records")
+		batcher.Lock()
+		batcher.addNewEvents(events)
+		if batcher.isFull() {
 			submissionT := &EventSubmissionTask{
-				ProducerID: event.PeerID.String(),
 				EventType:  t,
+				Events: batcher.reset(),
 			}
-			submissionT.Events = m.reset()
+			batcher.Unlock()
 			return s3ds.submitRecords(ctx, submissionT)
 		}
+		batcher.Unlock()
 	}
 	return nil
 }
 
 // submitRecords is the private method that will:s3
-// 1. get the copy of the existing events, leaving a new batcher empty
-// 2. create the necessary s3 key to submit the batched events
-// 3. for_mat the events into a parquet file
-// 4. push the file into the s3 bucket
+// 1. create the necessary s3 key to submit the batched events
+// 2. push the file into the submission queue
 func (s3ds *S3DataStream) submitRecords(ctx context.Context, eventT *EventSubmissionTask) error {
 	// avoid race conditions where the periodic flusher flushed right before the
 	// batcher was reset
 	if len(eventT.Events) <= 0 {
 		return nil
 	}
+	e := eventT.Events[0].(LocalyProducedEvent)
+	producerID := e.GetProducerID()
 	currentFileCnt := s3ds.fileCnt.Add(1)
 
 	// compose the path for the s3 key/file
@@ -200,7 +202,7 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context, eventT *EventSubmis
 	eventT.S3Key = fmt.Sprintf(
 		"%s/%s/%d/%d/%d/%d/%s_%d.parquet",
 		s3ds.config.Tag,
-		eventT.ProducerID,
+		producerID,
 		t.Year(),
 		t.Month(),
 		t.Day(),
@@ -213,14 +215,14 @@ func (s3ds *S3DataStream) submitRecords(ctx context.Context, eventT *EventSubmis
 	// give some timeout to the flusher publication (avoid deadlocks)
 	select {
 	case <-time.After(S3OpTimeout):
-		return fmt.Errorf("")
+		return fmt.Errorf("something took more time than needed and flushing timeout was triggered")
 	case s3ds.eventTaskC <- eventT:
 	}
 
 	return nil
 }
 
-// s3KeySubmission is a unitary method (mostly for testing) that submits any arbitrary []byte into S3
+// s3KeySubmission is a arbitraty method that submits any []byte into S3 with the given keys
 func (s3ds *S3DataStream) S3KeySubmission(ctx context.Context, s3Key string, content []byte) error {
 	slog.Debug(
 		"submitting events to s3",
@@ -230,7 +232,6 @@ func (s3ds *S3DataStream) S3KeySubmission(ctx context.Context, s3Key string, con
 	// get the file descriptor for the s3 file
 	s3OpCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
 	defer cancel()
-
 	_, err := s3ds.client.PutObject(s3OpCtx, &s3.PutObjectInput{
 		Bucket: aws.String(s3ds.config.Bucket),
 		Key:    aws.String(s3Key),
@@ -303,39 +304,41 @@ func (s3ds *S3DataStream) removeItemFromS3(ctx context.Context, s3Key string) er
 }
 
 // spawnPeriodicFlusher is a S3DataStream method that will create a background routine
-// to flush the batched events every given interval
+// to flush the all event batchers' events every given interval
 func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval time.Duration) {
 	go func() {
 		defer close(s3ds.pFlusherDone)
 		slog.Debug("launching S3 periodic flusher", "flush-interval", interval.String())
-		flushTicker := time.NewTicker(1 * time.Second)
+		flushCheckTicker := time.NewTicker(1 * time.Second)
 		for {
 			select {
 			case <-ctx.Done():
 				slog.Info("context died, closing the s3 event-periodic-flusher")
 				return
-			case <-flushTicker.C:
-				// check if there is anything to flush every 250ms
-				s3ds.eventStore.Lock()
-				defer s3ds.eventStore.Unlock()
-				slog.Debug("periodic flusher", "batchers", len(s3ds.eventStore.batchers))
-				for t, batcher := range s3ds.eventStore.batchers {
+			case <-flushCheckTicker.C:
+				// thread-safe iterator over the batchers
+				s3ds.eventStore.batchers.Range(func (key, value interface{}) bool {
+					eventType := key.(EventType)
+					batcher := value.(*eventBatcher)
 					if time.Since(batcher.lastResetT) >= interval {
-						slog.Debug("event-periodic-flusher kicked in", "event-type", t)
+						slog.Debug("event-periodic-flusher kicked in", "event-type", eventType)
 						submissionT := &EventSubmissionTask{
-							EventType: t,
+							EventType: eventType,
 						}
+						batcher.Lock()
 						submissionT.Events = batcher.reset()
+						batcher.Unlock()
 						opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
 						if err := s3ds.submitRecords(opCtx, submissionT); err != nil {
-							slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", t)
+							slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", eventType)
 						}
 						cancel()
 					} else {
-						slog.Debug("not in time to flush", "event-type", t, interval-time.Since(batcher.lastResetT))
+						slog.Debug("not in time to flush", "event-type", eventType, interval-time.Since(batcher.lastResetT))
 					}
-				}
-				flushTicker.Reset(1 * time.Second)
+					return true
+				})
+				flushCheckTicker.Reset(1 * time.Second)
 			}
 		}
 	}()
@@ -347,7 +350,6 @@ func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval tim
 // - the list of events (that need to be casted)
 // - the name of the s3 key to store the events
 type EventSubmissionTask struct {
-	ProducerID string
 	EventType  EventType
 	Events     []any
 	S3Key      string
@@ -364,7 +366,6 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 	for {
 		select {
 		case eventT := <-s3ds.eventTaskC:
-			// TODO: fix the s3keys for the current multi parquet formatting
 			slog.Debug("submitting events to s3",
 				"events", len(eventT.Events),
 				"s3Key", eventT.S3Key,
@@ -373,7 +374,7 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 			var buf *bytes.Buffer
 			var err error
 			formatStartT := time.Now()
-			// format the parquet columns based on the subtype
+			// format the parquet columns based on the event type
 			switch eventT.EventType {
 			case EventTypeUnknown, EventTypeGenericEvent: // default
 				// not-defined -> go for the generic Event (most generic type)
@@ -538,8 +539,11 @@ func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
 }
 
 type eventStore struct {
+	batchers *sync.Map
+	/*
 	sync.RWMutex
 	batchers map[EventType]*eventBatcher
+	*/
 }
 
 // EventBatcher is an internal threathsafe buffer for EventEvents
@@ -553,16 +557,17 @@ type eventBatcher struct {
 }
 
 // NewEventBatcher creates a new empty TraceBatcher
-func newEventBatcher(byteLimit int64) (*eventBatcher, error) {
+func newEventBatcher(byteLimit int64) *eventBatcher {
 	if byteLimit <= 0 {
-		return nil, fmt.Errorf("invalid size for the event limitter %d", byteLimit)
+		slog.Warn("no bytelimit was set, setting it to the default", "default", DefaultByteLimit)
+		byteLimit = DefaultByteLimit
 	}
 	return &eventBatcher{
 		byteLimit:  byteLimit,
 		events:     make([]any, 0), // limitted by size, not by events
 		totBytes:   0,
 		lastResetT: time.Now(),
-	}, nil
+	}
 }
 
 // AddNewEvent is a thread-safe wrapper on top of the AddNewTrace method
@@ -581,7 +586,6 @@ func (b *eventBatcher) addNewEvents(events []any) {
 		b.events = append(b.events, evt)
 		b.totBytes = b.totBytes + newBytes
 	}
-	fmt.Println("tot_bytes:", b.totBytes)
 }
 
 // Len is a thread-safe wrapper over b.len()

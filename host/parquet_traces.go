@@ -22,6 +22,11 @@ const (
 	EventTypeIhave
 	EventTypeIwant
 	EventTypeIdontwant
+	
+
+	// TODO: Ethereum related traces like Status/Metadata req/resp or pings 
+	// will have to be part of the generic type
+	// no need to add Ethereum-relate stuff on the generic host package
 )
 
 func (e EventType) String() string {
@@ -56,10 +61,6 @@ const (
 	EventSubTypeRemovePeer
 	EventSubTypeGossipGraft
 	EventSubTypeGossipPrune
-	EventSubTypeGossipBaseRCP
-	EventSubTypeGossipIhave
-	EventSubTypeGossipIwant
-	EventSubTypeGossipIdontWant
 	// TODO: add the rest
 )
 
@@ -75,14 +76,7 @@ func (e EventSubType) String() string {
 		return "graft"
 	case EventSubTypeGossipPrune:
 		return "prune"
-	case EventSubTypeGossipBaseRCP:
-		return "base_rpc"
-	case EventSubTypeGossipIhave:
-		return "ihave"
-	case EventSubTypeGossipIwant:
-		return "iwant"
-	case EventSubTypeGossipIdontWant:
-		return "idontwant"
+
 	default:
 		// pass
 	}
@@ -98,6 +92,8 @@ func SizeOfEvent(event any) int64 {
 type LocalyProducedEvent interface {
 	GetProducerID() string
 }
+
+var _ LocalyProducedEvent = (*BaseEvent)(nil)
 
 // For analysis purposes, we need to pair the events one with eachother
 type BaseEvent struct {
@@ -248,7 +244,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 				BaseRPCEvent: BaseRPCEvent{
 					BaseEvent: BaseEvent{
 						Timestamp:  timestamp,
-						Type:       EventSubTypeGossipIhave.String(),
+						Type:       EventTypeIhave.String(),
 						ProducerID: producerID,
 					},
 					IsOg:         isOg(&isFirst),
@@ -273,7 +269,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 				BaseRPCEvent: BaseRPCEvent{
 					BaseEvent: BaseEvent{
 						Timestamp:  timestamp,
-						Type:       EventSubTypeGossipIwant.String(),
+						Type:       EventTypeIwant.String(),
 						ProducerID: producerID,
 					},
 					IsOg:         isOg(&isFirst),
@@ -297,7 +293,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 				BaseRPCEvent: BaseRPCEvent{
 					BaseEvent: BaseEvent{
 						Timestamp:  timestamp,
-						Type:       EventSubTypeGossipIdontWant.String(),
+						Type:       EventTypeIdontwant.String(),
 						ProducerID: producerID,
 					},
 					IsOg:         isOg(&isFirst),
@@ -314,6 +310,8 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 	}
 
 	if ihavesMsgs > 0 || iwantsMsgs > 0 || idontwantsMsgs > 0 {
+		// if there is any kind of control message we are interested in
+		// create an extra RPC event with the summary
 		eventSubevents[EventTypeControlRPC] = []any{
 			&SendRecvRPCEvent{
 				BaseRPCEvent: BaseRPCEvent{
