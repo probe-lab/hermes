@@ -13,6 +13,11 @@ import (
 func ParquetFormatingBenchmark() error {
 	// run the plain parquet formating bencmark
 	// TODO: add different options to the parquet.Writer
+	/*
+		parquetOpts := []parquet.WriterOption{
+			parquet.Compression(&parquet.Snappy),
+		}
+	*/
 	for _, byteLimit := range byteLimits {
 		// generate traces of ~1kb
 		var totBytes int

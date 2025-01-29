@@ -23,6 +23,7 @@ func S3SubmissionBenchmark(ctx context.Context, s3conf host.S3DSConfig) error {
 			byteLimit,
 		)
 
+		// TODO: add differences on compressions
 		parquetBytes, buf, err := host.EventsToBytes[host.GenericParquetEvent](eventsT.Events)
 		if err != nil {
 			return err

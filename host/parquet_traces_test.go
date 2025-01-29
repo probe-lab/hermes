@@ -11,17 +11,17 @@ import (
 )
 
 var (
-	traceTimestamp     = time.Now()
-	dummyRemoteID      = peer.ID("dummy-remote-ID")
-	testProtocol       = "test-protocol"
-	testTopic          = "test-topic"
-	dummyMsgID1        = "dummy-msg-ID1"
-	dummyMsgID2        = "dummy-msg-ID2"
-	dummyMsgSize       = 1234
-	dummyMsgSeqno      = "dummy-msg-seqno"
-	dummyMaddrs, _ = ma.NewMultiaddr("/ip4/192.168.1.23/tcp/2021/")
-	dummyAgentVersion  = "dummy-peer/v0"
-	dummyDirection     = "Inbound"
+	traceTimestamp    = time.Now()
+	dummyRemoteID     = peer.ID("dummy-remote-ID")
+	testProtocol      = "test-protocol"
+	testTopic         = "test-topic"
+	dummyMsgID1       = "dummy-msg-ID1"
+	dummyMsgID2       = "dummy-msg-ID2"
+	dummyMsgSize      = 1234
+	dummyMsgSeqno     = "dummy-msg-seqno"
+	dummyMaddrs, _    = ma.NewMultiaddr("/ip4/192.168.1.23/tcp/2021/")
+	dummyAgentVersion = "dummy-peer/v0"
+	dummyDirection    = "Inbound"
 )
 
 func TestParquetFormating(t *testing.T) {

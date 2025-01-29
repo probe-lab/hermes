@@ -294,7 +294,7 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 	idontwantsMsgs := 0
 
 	isOg := func(isFirst *bool) bool {
-		defer func (){
+		defer func() {
 			*isFirst = false
 		}()
 		return *isFirst
