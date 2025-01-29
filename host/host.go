@@ -288,11 +288,11 @@ func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 			PeerID:    h.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]any{
-				"PeerID":  msg.ReceivedFrom.String(),
+				"PeerID":  msg.ReceivedFrom,
 				"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 				"MsgSize": len(msg.Data),
 				"Topic":   msg.GetTopic(),
-				"Seq":     msg.GetSeqno(),
+				"Seq":     hex.EncodeToString(msg.GetSeqno()),
 			},
 		}
 

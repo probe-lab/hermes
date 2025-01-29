@@ -34,7 +34,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			ReceivedFrom: peer.ID("peer-id1"),
 		}
 		commonExpected = map[string]any{
-			"PeerID":  peer.ID("peer-id1").String(),
+			"PeerID":  peer.ID("peer-id1"),
 			"Topic":   topic,
 			"MsgID":   "msg-id",
 			"MsgSize": 3,
