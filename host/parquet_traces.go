@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/probe-lab/hermes/tele"
 
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -16,15 +18,21 @@ type EventType int8
 const (
 	EventTypeUnknown EventType = iota
 	EventTypeGenericEvent
-	EventTypeGossipAddRemovePeer
-	EventTypeGossipGraftPrune
+	// Gossip-mesh
+	EventTypeAddRemovePeer
+	EventTypeGraftPrune
+	// Gossip RPCs
 	EventTypeControlRPC
 	EventTypeIhave
 	EventTypeIwant
 	EventTypeIdontwant
-	
-
-	// TODO: Ethereum related traces like Status/Metadata req/resp or pings 
+	// Gossip Message arrivals
+	EventTypeMsgArrivals
+	// Gossip Join/Leave Topic
+	EventTypeJoinLeaveTopic
+	// Libp2p Event
+	EventTypeConnectDisconnectPeer
+	// TODO: Ethereum related traces like Status/Metadata req/resp or pings
 	// will have to be part of the generic type
 	// no need to add Ethereum-relate stuff on the generic host package
 )
@@ -35,9 +43,9 @@ func (e EventType) String() string {
 		return "unknown"
 	case EventTypeGenericEvent:
 		return "generic"
-	case EventTypeGossipAddRemovePeer:
+	case EventTypeAddRemovePeer:
 		return "add_remove_peer"
-	case EventTypeGossipGraftPrune:
+	case EventTypeGraftPrune:
 		return "graft_prune"
 	case EventTypeControlRPC:
 		return "control_rpc"
@@ -47,21 +55,39 @@ func (e EventType) String() string {
 		return "iwant"
 	case EventTypeIdontwant:
 		return "idontwant"
+	case EventTypeMsgArrivals:
+		return "msg_arrival"
+	case EventTypeJoinLeaveTopic:
+		return "join_topic"
+	case EventTypeConnectDisconnectPeer:
+		return "connect_disconnect"
 	default:
-		// pass
+		return "unknown"
 	}
-	return "unknown"
 }
 
 type EventSubType int8
 
 const (
 	EventSubTypeNone EventSubType = iota
+	// Add / Remove peers
 	EventSubTypeAddPeer
 	EventSubTypeRemovePeer
-	EventSubTypeGossipGraft
-	EventSubTypeGossipPrune
-	// TODO: add the rest
+	// Graft / Prunes
+	EventSubTypeGraft
+	EventSubTypePrune
+	// Msg arrivals
+	EventSubTypeDeliverMsg
+	EventSubTypeValidateMsg
+	EventSubTypeHandleMsg // adding handle MSG aswell, although we are not parsing the Eth specific details from msgs
+	EventSubTypeDuplicatedMsg
+	EventSubTypeRejectMsg
+	// Join/Leave Topic
+	EventSubTypeJoinTopic
+	EventSubTypeLeaveTopic
+	// Libp2p
+	EventSubTypeConnectPeer
+	EventSubTypeDisconnectPeer
 )
 
 func (e EventSubType) String() string {
@@ -72,15 +98,31 @@ func (e EventSubType) String() string {
 		return "add_peer"
 	case EventSubTypeRemovePeer:
 		return "remove_peer"
-	case EventSubTypeGossipGraft:
+	case EventSubTypeGraft:
 		return "graft"
-	case EventSubTypeGossipPrune:
+	case EventSubTypePrune:
 		return "prune"
-
+	case EventSubTypeDeliverMsg:
+		return "deliver_msg"
+	case EventSubTypeValidateMsg:
+		return "validate_msg"
+	case EventSubTypeHandleMsg:
+		return "handle_msg"
+	case EventSubTypeDuplicatedMsg:
+		return "duplicated_msg"
+	case EventSubTypeRejectMsg:
+		return "reject_msg"
+	case EventSubTypeJoinTopic:
+		return "join_topic"
+	case EventSubTypeLeaveTopic:
+		return "leave_topic"
+	case EventSubTypeConnectPeer:
+		return "connect_peer"
+	case EventSubTypeDisconnectPeer:
+		return "disconnect_peer"
 	default:
-		// pass
+		return "unknown"
 	}
-	return "unknown"
 }
 
 // Return the size of any event
@@ -117,11 +159,11 @@ func addRemovePeerFromEvent(subType EventSubType, rawEvent *TraceEvent) (map[Eve
 	payload := rawEvent.Payload.(map[string]any)
 	remoteID := payload["PeerID"].(peer.ID)
 	combo := make(map[EventType][]any)
-	combo[EventTypeGossipAddRemovePeer] = []any{
+	combo[EventTypeAddRemovePeer] = []any{
 		&GossipAddRemovePeerEvent{
 			BaseEvent: BaseEvent{
 				Timestamp:  rawEvent.Timestamp.UnixMilli(),
-				Type:       EventTypeGossipAddRemovePeer.String(),
+				Type:       EventTypeAddRemovePeer.String(),
 				ProducerID: rawEvent.PeerID.String(),
 			},
 			SubType:      subType.String(),
@@ -143,11 +185,11 @@ func graftPruneFromEvent(subType EventSubType, rawEvent *TraceEvent) (map[EventT
 	remoteID := payload["PeerID"].(peer.ID)
 	topic := payload["Topic"].(string)
 	combo := make(map[EventType][]any)
-	combo[EventTypeGossipGraftPrune] = []any{
+	combo[EventTypeGraftPrune] = []any{
 		&GossipGraftPruneEvent{
 			BaseEvent: BaseEvent{
 				Timestamp:  rawEvent.Timestamp.UnixMilli(),
-				Type:       EventTypeGossipGraftPrune.String(),
+				Type:       EventTypeGraftPrune.String(),
 				ProducerID: rawEvent.PeerID.String(),
 			},
 			SubType:      subType.String(),
@@ -170,7 +212,7 @@ type SendRecvRPCEvent struct {
 type BaseRPCEvent struct {
 	BaseEvent
 	IsOg         bool // since we will divide original IHAVES into different rows off keep track of OG events for Control msg ids
-	Direction    bool // 0=in / 1=out
+	Direction    string
 	RemotePeerID string
 }
 
@@ -193,27 +235,50 @@ type GossipIdontwantEvent struct {
 	Msgs   int
 }
 
+type RPCdirection int8
+
+func (d RPCdirection) String() string {
+	switch d {
+	case RPCdirectionIn:
+		return "in"
+	case RPCdirectionOut:
+		return "out"
+	case RPCdirectionDrop:
+		return "drop"
+	case RPCdirectionUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
+
+const (
+	RPCdirectionUnknown RPCdirection = iota
+	RPCdirectionIn
+	RPCdirectionOut
+	RPCdirectionDrop
+)
+
 // directionFromRPC returns the boolean direction of the tracked RPC:
-// false = In
-// true = Out
-func directionFromRPC(eventType string) (bool, error) {
+func directionFromRPC(eventType string) (RPCdirection, error) {
 	switch eventType {
 	case pubsubpb.TraceEvent_RECV_RPC.String():
-		return false, nil
+		return RPCdirectionIn, nil
 	case pubsubpb.TraceEvent_SEND_RPC.String():
-		return true, nil
+		return RPCdirectionOut, nil
+	case pubsubpb.TraceEvent_DROP_RPC.String():
+		return RPCdirectionDrop, nil
 	default:
-		return false, fmt.Errorf("direction not clear from the event type %s", eventType)
+		return RPCdirectionUnknown, fmt.Errorf("direction not clear from the event type %s", eventType)
 	}
 }
 
 // sendRecvRPCFromTrace is one of the most complex functions
 // since gossipsub can aggregate multiple control RPCs in a single message
 // we need to divide each of the types into differnet subtypes:
-func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType][]any, error) {
+func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (map[EventType][]any, error) {
 	producerID := rawEvent.PeerID.String()
 	timestamp := rawEvent.Timestamp.UnixMilli()
-
 	// inside of the RPC Meta
 	rpcMeta := rawEvent.Payload.(*RpcMeta)
 	remoteID := rpcMeta.PeerID
@@ -229,12 +294,10 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 	idontwantsMsgs := 0
 
 	isOg := func(isFirst *bool) bool {
-		if *isFirst == true {
+		defer func (){
 			*isFirst = false
-			return true
-		} else {
-			return false
-		}
+		}()
+		return *isFirst
 	}
 	// Ihaves
 	if len(rpcMeta.Control.IHave) > 0 {
@@ -248,7 +311,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 						ProducerID: producerID,
 					},
 					IsOg:         isOg(&isFirst),
-					Direction:    isOutbound,
+					Direction:    rpcDirection.String(),
 					RemotePeerID: remoteID.String(),
 				},
 				Topic:  ihave.TopicID,
@@ -273,7 +336,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 						ProducerID: producerID,
 					},
 					IsOg:         isOg(&isFirst),
-					Direction:    isOutbound,
+					Direction:    rpcDirection.String(),
 					RemotePeerID: remoteID.String(),
 				},
 				MsgIDs: iwant.MsgIDs,
@@ -297,7 +360,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 						ProducerID: producerID,
 					},
 					IsOg:         isOg(&isFirst),
-					Direction:    isOutbound,
+					Direction:    rpcDirection.String(),
 					RemotePeerID: remoteID.String(),
 				},
 				MsgIDs: idw.MsgIDs,
@@ -320,7 +383,7 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 						Type:       EventTypeControlRPC.String(),
 						ProducerID: producerID,
 					},
-					Direction:    isOutbound,
+					Direction:    rpcDirection.String(),
 					IsOg:         false,
 					RemotePeerID: remoteID.String(),
 				},
@@ -333,13 +396,119 @@ func sendRecvRPCFromEvent(isOutbound bool, rawEvent *TraceEvent) (map[EventType]
 	return eventSubevents, nil
 }
 
+type GossipMsgArrivalEvent struct {
+	BaseEvent
+	SubType      string
+	RemotePeerID string
+	Topic        string
+	MsgID        string
+	Local        bool
+	MsgSize      int64
+	SeqNo        string
+}
+
+func msgArrivalFromEvent(subType EventSubType, rawEvent *TraceEvent) (map[EventType][]any, error) {
+	payload := rawEvent.Payload.(map[string]any)
+	remoteID := payload["PeerID"].(peer.ID)
+	topic := payload["Topic"].(string)
+	msgID := payload["MsgID"].(string)
+	// not all messages are local
+	local, ok := payload["Local"].(bool)
+	if !ok {
+		local = false
+	}
+	msgSize := payload["MsgSize"].(int)
+	seq := payload["Seq"].(string)
+	combo := make(map[EventType][]any)
+	combo[EventTypeMsgArrivals] = []any{
+		&GossipMsgArrivalEvent{
+			BaseEvent: BaseEvent{
+				Timestamp:  rawEvent.Timestamp.UnixMilli(),
+				Type:       EventTypeMsgArrivals.String(),
+				ProducerID: rawEvent.PeerID.String(),
+			},
+			SubType:      subType.String(),
+			RemotePeerID: remoteID.String(),
+			Topic:        topic,
+			MsgID:        msgID,
+			Local:        local,
+			MsgSize:      int64(msgSize),
+			SeqNo:        seq,
+		},
+	}
+	return combo, nil
+}
+
+type GossipJoinLeaveTopicEvent struct {
+	BaseEvent
+	SubType string
+	Topic   string
+}
+
+func joinLeaveTopicFromEvent(subType EventSubType, rawEvent *TraceEvent) (map[EventType][]any, error) {
+	payload := rawEvent.Payload.(map[string]any)
+	topic := payload["Topic"].(string)
+	combo := make(map[EventType][]any)
+	combo[EventTypeJoinLeaveTopic] = []any{
+		&GossipJoinLeaveTopicEvent{
+			BaseEvent: BaseEvent{
+				Timestamp:  rawEvent.Timestamp.UnixMilli(),
+				Type:       EventTypeJoinLeaveTopic.String(),
+				ProducerID: rawEvent.PeerID.String(),
+			},
+			SubType: subType.String(),
+			Topic:   topic,
+		},
+	}
+	return combo, nil
+}
+
+type Libp2pConnectDisconnectEvent struct {
+	BaseEvent
+	SubType          string
+	RemotePeerID     string
+	RemotePeerMaddrs string
+	AgentVersion     string
+	Direction        string
+	Opened           int64
+	Limited          bool
+}
+
+func connectDisconnectFromEvent(subType EventSubType, rawEvent *TraceEvent) (map[EventType][]any, error) {
+	combo := make(map[EventType][]any)
+	payload := rawEvent.Payload.(*struct {
+		RemotePeer   string
+		RemoteMaddrs ma.Multiaddr
+		AgentVersion string
+		Direction    string
+		Opened       time.Time
+		Limited      bool
+	})
+	combo[EventTypeConnectDisconnectPeer] = []any{
+		&Libp2pConnectDisconnectEvent{
+			BaseEvent: BaseEvent{
+				Timestamp:  rawEvent.Timestamp.UnixMilli(),
+				Type:       EventTypeConnectDisconnectPeer.String(),
+				ProducerID: rawEvent.PeerID.String(),
+			},
+			SubType:          subType.String(),
+			RemotePeerID:     payload.RemotePeer,
+			RemotePeerMaddrs: payload.RemoteMaddrs.String(),
+			AgentVersion:     payload.AgentVersion,
+			Direction:        payload.Direction,
+			Opened:           payload.Opened.UnixMilli(),
+			Limited:          payload.Limited,
+		},
+	}
+	return combo, nil
+}
+
 func RenderEvent(rawEvent *TraceEvent) (map[EventType][]any, error) {
 	if rawEvent == nil {
 		return make(map[EventType][]any), fmt.Errorf("event with no type was given")
 	}
 	// get the event type and sub-type
 	switch rawEvent.Type {
-	// GossipSub related event types
 	case pubsubpb.TraceEvent_ADD_PEER.String():
 		return addRemovePeerFromEvent(EventSubTypeAddPeer, rawEvent)
 
@@ -347,16 +516,46 @@ func RenderEvent(rawEvent *TraceEvent) (map[EventType][]any, error) {
 		return addRemovePeerFromEvent(EventSubTypeRemovePeer, rawEvent)
 
 	case pubsubpb.TraceEvent_GRAFT.String():
-		return graftPruneFromEvent(EventSubTypeGossipGraft, rawEvent)
+		return graftPruneFromEvent(EventSubTypeGraft, rawEvent)
 
 	case pubsubpb.TraceEvent_PRUNE.String():
-		return graftPruneFromEvent(EventSubTypeGossipPrune, rawEvent)
+		return graftPruneFromEvent(EventSubTypePrune, rawEvent)
 
 	case pubsubpb.TraceEvent_RECV_RPC.String():
-		return sendRecvRPCFromEvent(false, rawEvent)
+		return sendRecvDropRPCFromEvent(RPCdirectionIn, rawEvent)
 
 	case pubsubpb.TraceEvent_SEND_RPC.String():
-		return sendRecvRPCFromEvent(true, rawEvent)
+		return sendRecvDropRPCFromEvent(RPCdirectionOut, rawEvent)
+
+	case pubsubpb.TraceEvent_DROP_RPC.String():
+		return sendRecvDropRPCFromEvent(RPCdirectionDrop, rawEvent)
+
+	case pubsubpb.TraceEvent_DELIVER_MESSAGE.String():
+		return msgArrivalFromEvent(EventSubTypeDeliverMsg, rawEvent)
+
+	// we could consider leaving the Handle TraceEvent outside
+	// it could fall under the generic trace and store all the fields
+	// into a json formatted column
+	case "HANDLE_MESSAGE":
+		return msgArrivalFromEvent(EventSubTypeHandleMsg, rawEvent)
+
+	case pubsubpb.TraceEvent_DUPLICATE_MESSAGE.String():
+		return msgArrivalFromEvent(EventSubTypeDuplicatedMsg, rawEvent)
+
+	case pubsubpb.TraceEvent_REJECT_MESSAGE.String():
+		return msgArrivalFromEvent(EventSubTypeRejectMsg, rawEvent)
+
+	case pubsubpb.TraceEvent_JOIN.String():
+		return joinLeaveTopicFromEvent(EventSubTypeJoinTopic, rawEvent)
+
+	case pubsubpb.TraceEvent_LEAVE.String():
+		return joinLeaveTopicFromEvent(EventSubTypeLeaveTopic, rawEvent)
+
+	case "CONNECTED":
+		return connectDisconnectFromEvent(EventSubTypeConnectPeer, rawEvent)
+
+	case "DISCONNECTED":
+		return connectDisconnectFromEvent(EventSubTypeDisconnectPeer, rawEvent)
 
 	// TODO: Libp2p related event Types
 	default:
@@ -367,6 +566,7 @@ func RenderEvent(rawEvent *TraceEvent) (map[EventType][]any, error) {
 	}
 }
 
+// if we don't have a generic parquet format for a trace, use the generic one
 type GenericParquetEvent struct {
 	BaseEvent
 	Topic   string
