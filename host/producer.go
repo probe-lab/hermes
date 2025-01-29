@@ -67,6 +67,6 @@ const (
 	DataStreamOutputTypeKinesis DataStreamOutputType = iota
 	// DataStreamOutputTypeFull outputs the data stream decorated with metadata and containing the raw/full event data.
 	DataStreamOutputTypeFull
-	// DataStreamOutputParquet output the trace events formatted into a simplified parquet columns style
-	DataStreamOutputParquet
+	// DataStreamOutputTypeParquet output the trace events formatted into a simplified parquet columns style
+	DataStreamOutputTypeParquet
 )
