@@ -358,6 +358,9 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 	idx int,
 ) {
 	slog.Info("spawned s3 flusher", "flusher-id", idx)
+	parquetOpts := []parquet.WriterOption{
+		parquet.Compression(&parquet.Snappy),
+	}
 	for {
 		select {
 		case eventT := <-s3ds.eventTaskC:
@@ -373,70 +376,70 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 			switch eventT.EventType {
 			case EventTypeUnknown, EventTypeGenericEvent: // default
 				// not-defined -> go for the generic Event (most generic type)
-				totBytes, buf, err = EventsToBytes[GenericParquetEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GenericParquetEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeAddRemovePeer:
-				totBytes, buf, err = EventsToBytes[GossipAddRemovePeerEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipAddRemovePeerEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeGraftPrune:
-				totBytes, buf, err = EventsToBytes[GossipGraftPruneEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipGraftPruneEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeControlRPC:
-				totBytes, buf, err = EventsToBytes[SendRecvRPCEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[SendRecvRPCEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeIhave:
-				totBytes, buf, err = EventsToBytes[GossipIhaveEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipIhaveEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeIwant:
-				totBytes, buf, err = EventsToBytes[GossipIwantEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipIwantEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeIdontwant:
-				totBytes, buf, err = EventsToBytes[GossipIdontwantEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipIdontwantEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeMsgArrivals:
-				totBytes, buf, err = EventsToBytes[GossipMsgArrivalEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipMsgArrivalEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeJoinLeaveTopic:
-				totBytes, buf, err = EventsToBytes[GossipJoinLeaveTopicEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GossipJoinLeaveTopicEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
 			case EventTypeConnectDisconnectPeer:
-				totBytes, buf, err = EventsToBytes[Libp2pConnectDisconnectEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[Libp2pConnectDisconnectEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
@@ -444,7 +447,7 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 
 			default:
 				// not-defined -> go for the generic Event
-				totBytes, buf, err = EventsToBytes[GenericParquetEvent](eventT.Events)
+				totBytes, buf, err = EventsToBytes[GenericParquetEvent](eventT.Events, parquetOpts...)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
