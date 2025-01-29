@@ -22,7 +22,7 @@ import (
 var (
 	S3ConnectionTimeout = 5 * time.Second
 	S3OpTimeout         = 10 * time.Second
-	DefaultByteLimit = int64(10 * 1024 * 1024) // 10MB
+	DefaultByteLimit    = int64(10 * 1024 * 1024) // 10MB
 )
 
 type S3DataStream struct {
@@ -67,9 +67,8 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 	return &S3DataStream{
 		config:           baseCfg,
 		client:           s3client,
-		eventStore: sync.Map{},
+		eventStore:       sync.Map{},
 		eventTaskC:       make(chan *EventSubmissionTask),
-		eventStore:       eventStore,
 		flushersDone:     make(chan struct{}),
 		pFlusherDone:     make(chan struct{}),
 		restartPflusherC: make(chan struct{}),
@@ -81,7 +80,7 @@ func (s3ds *S3DataStream) Type() DataStreamType {
 }
 
 func (s3ds *S3DataStream) OutputType() DataStreamOutputType {
-	return DataStreamOutputParquet
+	return DataStreamOutputTypeParquet
 }
 
 func (s3ds *S3DataStream) Start(ctx context.Context) error {
@@ -156,7 +155,7 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 	}
 	// get each the the inner subevents from the traced one
 	for t, events := range eventMap {
-		var batcher *eventBatcher	
+		var batcher *eventBatcher
 		b, ok := s3ds.eventStore.Load(t)
 		if !ok {
 			batcher = newEventBatcher(s3ds.config.ByteLimit)
@@ -168,8 +167,8 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 		batcher.addNewEvents(events)
 		if batcher.isFull() {
 			submissionT := &EventSubmissionTask{
-				EventType:  t,
-				Events: batcher.reset(),
+				EventType: t,
+				Events:    batcher.reset(),
 			}
 			batcher.Unlock()
 			return s3ds.submitRecords(ctx, submissionT)
@@ -313,7 +312,7 @@ func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval tim
 				return
 			case <-flushCheckTicker.C:
 				// thread-safe iterator over the batchers
-				s3ds.eventStore.Range(func (key, value interface{}) bool {
+				s3ds.eventStore.Range(func(key, value interface{}) bool {
 					eventType := key.(EventType)
 					batcher := value.(*eventBatcher)
 					if time.Since(batcher.lastResetT) >= interval {
@@ -330,7 +329,7 @@ func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval tim
 						}
 						cancel()
 					} else {
-						slog.Debug("not in time to flush", "event-type", eventType, interval-time.Since(batcher.lastResetT))
+						slog.Debug("not in time to flush", "event-type", eventType, "waiting to pflush", interval-time.Since(batcher.lastResetT))
 					}
 					return true
 				})
@@ -346,9 +345,9 @@ func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval tim
 // - the list of events (that need to be casted)
 // - the name of the s3 key to store the events
 type EventSubmissionTask struct {
-	EventType  EventType
-	Events     []any
-	S3Key      string
+	EventType EventType
+	Events    []any
+	S3Key     string
 }
 
 // spawnS3Flusher creates a sync flusher for events
@@ -380,14 +379,14 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 					continue
 				}
 
-			case EventTypeGossipAddRemovePeer:
+			case EventTypeAddRemovePeer:
 				totBytes, buf, err = EventsToBytes[GossipAddRemovePeerEvent](eventT.Events)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
 				}
 
-			case EventTypeGossipGraftPrune:
+			case EventTypeGraftPrune:
 				totBytes, buf, err = EventsToBytes[GossipGraftPruneEvent](eventT.Events)
 				if err != nil {
 					slog.Error(err.Error())
@@ -417,6 +416,27 @@ func (s3ds *S3DataStream) spawnS3Flusher(
 
 			case EventTypeIdontwant:
 				totBytes, buf, err = EventsToBytes[GossipIdontwantEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeMsgArrivals:
+				totBytes, buf, err = EventsToBytes[GossipMsgArrivalEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeJoinLeaveTopic:
+				totBytes, buf, err = EventsToBytes[GossipJoinLeaveTopicEvent](eventT.Events)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+			case EventTypeConnectDisconnectPeer:
+				totBytes, buf, err = EventsToBytes[Libp2pConnectDisconnectEvent](eventT.Events)
 				if err != nil {
 					slog.Error(err.Error())
 					continue

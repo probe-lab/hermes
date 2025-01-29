@@ -3,7 +3,6 @@ package host
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -29,8 +28,7 @@ func Test_S3_SimpleBatcher(t *testing.T) {
 	require.GreaterOrEqual(t, byteLen, int64(testingBatchLimit))
 
 	// try the s3batcher methods
-	batcher, err := newEventBatcher(int64(testingBatchLimit))
-	require.NoError(t, err)
+	batcher := newEventBatcher(int64(testingBatchLimit))
 
 	// check if the batcher is full
 	batcher.AddNewEvents([]any{evnt1})
