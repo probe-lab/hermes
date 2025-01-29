@@ -476,7 +476,7 @@ type Libp2pConnectDisconnectEvent struct {
 
 func connectDisconnectFromEvent(subType EventSubType, rawEvent *TraceEvent) (map[EventType][]any, error) {
 	combo := make(map[EventType][]any)
-	payload := rawEvent.Payload.(*struct {
+	payload := rawEvent.Payload.(struct {
 		RemotePeer   string
 		RemoteMaddrs ma.Multiaddr
 		AgentVersion string

@@ -303,7 +303,7 @@ func TestParquetFormating(t *testing.T) {
 			name: "renderConnectMsg",
 			rawEvent: genNewTraceEvent(
 				"CONNECTED",
-				&struct {
+				struct {
 					RemotePeer   string
 					RemoteMaddrs ma.Multiaddr
 					AgentVersion string
@@ -327,7 +327,7 @@ func TestParquetFormating(t *testing.T) {
 			name: "renderDisconnectMsg",
 			rawEvent: genNewTraceEvent(
 				"DISCONNECTED",
-				&struct {
+				struct {
 					RemotePeer   string
 					RemoteMaddrs ma.Multiaddr
 					AgentVersion string
