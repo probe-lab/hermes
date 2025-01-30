@@ -146,6 +146,8 @@ There are different ways of keeping track of the events that Hermes generates:
 - `Logger`. Hermes will print the JSON formatted traces into `stdout` in a log format (ideal for local testing).
     - `--data.strea.type="logger"` 
 
+_Note: we provide a local s3 setup to use if needed. The configuration of the `localstack s3` instance can be tunned using a copy (`.env`) of the `.env.template` file, which will be read by default when doing `docker compose up s3`. Make sure that the docker container is up running when launching the `hermes` instance._
+
 ### Ethereum
 
 In order to run Hermes in the Ethereum network you are required to run a Prysm beacon node. Hermes requires Prysm over other implementations because as far as [I](https://github.com/dennis-tra) know it's the only implementation that allows dynamic registration of trusted peers. For example, Lighthouse requires the list of trusted peers at boot time.
