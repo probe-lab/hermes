@@ -32,7 +32,7 @@ type S3DataStream struct {
 	config S3DSConfig
 	client *s3.Client
 
-	eventStore sync.Map
+	eventStore map[EventType]*eventBatcher
 
 	eventTaskC       chan *EventSubmissionTask
 	flushersDone     chan struct{}
@@ -64,10 +64,14 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 	} else {
 		s3client = s3.NewFromConfig(*cfg)
 	}
+	eventStore := make(map[EventType]*eventBatcher)
+	for _, evType := range allEventTypes {
+		eventStore[evType] = newEventBatcher(baseCfg.ByteLimit)
+	}
 	return &S3DataStream{
 		config:           baseCfg,
 		client:           s3client,
-		eventStore:       sync.Map{},
+		eventStore:       eventStore,
 		eventTaskC:       make(chan *EventSubmissionTask),
 		flushersDone:     make(chan struct{}),
 		pFlusherDone:     make(chan struct{}),
@@ -103,14 +107,17 @@ func (s3ds *S3DataStream) Start(ctx context.Context) error {
 	s3ds.ctx = mainCtx
 	s3ds.cancelFn = mainCancel
 
-	s3ds.spawnPeriodicFlusher(mainCtx, s3ds.config.FlushInterval)
+	go func() {
+		defer close(s3ds.pFlusherDone)
+		s3ds.startPeriodicFlusher(mainCtx, s3ds.config.FlushInterval)
+	}()
 	go func() {
 		var wg sync.WaitGroup
 		for i := 0; i < s3ds.config.Flushers; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				s3ds.spawnS3Flusher(mainCtx, i)
+				s3ds.startS3Flusher(mainCtx, i)
 			}()
 		}
 		wg.Wait()
@@ -124,7 +131,7 @@ func (s3ds *S3DataStream) Start(ctx context.Context) error {
 func (s3ds *S3DataStream) Stop(ctx context.Context) error {
 	// stop the mainCtx, as we don't want new events coming in
 	s3ds.cancelFn()
-	// wait untill the flusher is done or a timeout is triggered
+	// wait until the flusher is done or a timeout is triggered
 	timeout := time.NewTicker(S3OpTimeout)
 	select {
 	case <-timeout.C:
@@ -156,12 +163,9 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 	// get each the the inner subevents from the traced one
 	for t, events := range eventMap {
 		var batcher *eventBatcher
-		b, ok := s3ds.eventStore.Load(t)
+		batcher, ok := s3ds.eventStore[t]
 		if !ok {
-			batcher = newEventBatcher(s3ds.config.ByteLimit)
-			s3ds.eventStore.Store(t, batcher)
-		} else {
-			batcher = b.(*eventBatcher)
+			return fmt.Errorf("event type %s not found in eventStore", t)
 		}
 		batcher.Lock()
 		batcher.addNewEvents(events)
@@ -298,45 +302,39 @@ func (s3ds *S3DataStream) removeItemFromS3(ctx context.Context, s3Key string) er
 	return err
 }
 
-// spawnPeriodicFlusher is a S3DataStream method that will create a background routine
+// startPeriodicFlusher is a S3DataStream method that will create a background routine
 // to flush the all event batchers' events every given interval
-func (s3ds *S3DataStream) spawnPeriodicFlusher(ctx context.Context, interval time.Duration) {
-	go func() {
-		defer close(s3ds.pFlusherDone)
-		slog.Debug("launching S3 periodic flusher", "flush-interval", interval.String())
-		flushCheckTicker := time.NewTicker(1 * time.Second)
-		for {
-			select {
-			case <-ctx.Done():
-				slog.Info("context died, closing the s3 event-periodic-flusher")
-				return
-			case <-flushCheckTicker.C:
-				// thread-safe iterator over the batchers
-				s3ds.eventStore.Range(func(key, value interface{}) bool {
-					eventType := key.(EventType)
-					batcher := value.(*eventBatcher)
-					if time.Since(batcher.lastResetT) >= interval {
-						slog.Debug("event-periodic-flusher kicked in", "event-type", eventType)
-						submissionT := &EventSubmissionTask{
-							EventType: eventType,
-						}
-						batcher.Lock()
-						submissionT.Events = batcher.reset()
-						batcher.Unlock()
-						opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
-						if err := s3ds.submitRecords(opCtx, submissionT); err != nil {
-							slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", eventType)
-						}
-						cancel()
-					} else {
-						slog.Debug("not in time to flush", "event-type", eventType, "waiting to pflush", interval-time.Since(batcher.lastResetT))
-					}
-					return true
-				})
-				flushCheckTicker.Reset(1 * time.Second)
+func (s3ds *S3DataStream) startPeriodicFlusher(ctx context.Context, interval time.Duration) {
+	slog.Debug("launching S3 periodic flusher", "flush-interval", interval.String())
+	flushCheckTicker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("context died, closing the s3 event-periodic-flusher")
+			return
+		case <-flushCheckTicker.C:
+			// thread-safe iterator over the batchers
+			for evType, batcher := range s3ds.eventStore {
+				if time.Since(batcher.GetLastResetTime()) < interval {
+					slog.Debug("not in time to flush", "event-type", evType, "waiting to pflush", interval-time.Since(batcher.lastResetT))
+					continue
+				}
+				slog.Debug("event-periodic-flusher kicked in", "event-type", evType)
+				submissionT := &EventSubmissionTask{
+					EventType: evType,
+				}
+				batcher.Lock()
+				submissionT.Events = batcher.reset()
+				batcher.Unlock()
+				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
+				if err := s3ds.submitRecords(opCtx, submissionT); err != nil {
+					slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", evType)
+				}
+				cancel()
 			}
+			flushCheckTicker.Reset(1 * time.Second)
 		}
-	}()
+	}
 }
 
 // EventSubmissionTask main event submission Task
@@ -350,10 +348,10 @@ type EventSubmissionTask struct {
 	S3Key     string
 }
 
-// spawnS3Flusher creates a sync flusher for events
+// startS3Flusher creates a sync flusher for events
 // It will read any EventSubmissionTask on the s3ds.eventTaskC and will upload it
 // it is intended to limit the number of routines spawned to flush the events to s3
-func (s3ds *S3DataStream) spawnS3Flusher(
+func (s3ds *S3DataStream) startS3Flusher(
 	ctx context.Context,
 	idx int,
 ) {
@@ -557,7 +555,7 @@ func (s3cfg S3DSConfig) ToAWSconfig() (*aws.Config, error) {
 	return &cfg, err
 }
 
-// EventBatcher is an internal threathsafe buffer for EventEvents
+// EventBatcher is an internal threath-safe buffer for EventEvents
 // it includes some non-locking mechanisms to avoid race conditions on upper-level calls
 type eventBatcher struct {
 	sync.RWMutex
@@ -641,4 +639,11 @@ func (b *eventBatcher) reset() []any {
 	b.totBytes = 0
 	b.lastResetT = time.Now()
 	return prevEvents
+}
+
+// GetLastResetTime returns the last time it got reseted on a thread-safe version
+func (b *eventBatcher) GetLastResetTime() time.Time {
+	b.RLock()
+	defer b.RUnlock()
+	return b.lastResetT
 }

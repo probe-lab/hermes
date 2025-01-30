@@ -66,6 +66,19 @@ func (e EventType) String() string {
 	}
 }
 
+var allEventTypes = []EventType{
+	EventTypeGenericEvent,
+	EventTypeAddRemovePeer,
+	EventTypeGraftPrune,
+	EventTypeControlRPC,
+	EventTypeIhave,
+	EventTypeIwant,
+	EventTypeIdontwant,
+	EventTypeMsgArrivals,
+	EventTypeJoinLeaveTopic,
+	EventTypeConnectDisconnectPeer,
+}
+
 type EventSubType int8
 
 const (
