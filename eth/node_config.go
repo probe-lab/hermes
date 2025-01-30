@@ -178,10 +178,12 @@ func (n *NodeConfig) Validate() error {
 	}
 	if n.DataStreamType == host.DataStreamTypeS3 {
 		if n.S3Config != nil {
-			// we should have catch the error at the root_cmd, but still adding it here
+			// we should have caught the error at the root_cmd, but still adding it here
 			if err := n.S3Config.CheckValidity(); err != nil {
 				return fmt.Errorf("s3 trace submission is enabled but no valid config was given %w", err)
 			}
+		} else {
+			return fmt.Errorf("s3 configuration is empty %w", err)
 		}
 	}
 

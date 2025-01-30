@@ -313,7 +313,6 @@ func (s3ds *S3DataStream) startPeriodicFlusher(ctx context.Context, interval tim
 			slog.Info("context died, closing the s3 event-periodic-flusher")
 			return
 		case <-flushCheckTicker.C:
-			// thread-safe iterator over the batchers
 			for evType, batcher := range s3ds.eventStore {
 				if time.Since(batcher.GetLastResetTime()) < interval {
 					slog.Debug("not in time to flush", "event-type", evType, "waiting to pflush", interval-time.Since(batcher.lastResetT))
@@ -323,9 +322,7 @@ func (s3ds *S3DataStream) startPeriodicFlusher(ctx context.Context, interval tim
 				submissionT := &EventSubmissionTask{
 					EventType: evType,
 				}
-				batcher.Lock()
-				submissionT.Events = batcher.reset()
-				batcher.Unlock()
+				submissionT.Events = batcher.Reset()
 				opCtx, cancel := context.WithTimeout(ctx, S3OpTimeout)
 				if err := s3ds.submitRecords(opCtx, submissionT); err != nil {
 					slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", evType)
