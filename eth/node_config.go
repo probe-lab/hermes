@@ -183,7 +183,7 @@ func (n *NodeConfig) Validate() error {
 				return fmt.Errorf("s3 trace submission is enabled but no valid config was given %w", err)
 			}
 		} else {
-			return fmt.Errorf("s3 configuration is empty %w", err)
+			return fmt.Errorf("s3 configuration is empty")
 		}
 	}
 
