@@ -30,15 +30,7 @@ jobs:
         volumes:
           - "./${{ github.workspace }}/s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
 
-
     steps:
-      - name: Wait for LocalStack to be ready
-        run: |
-          until curl -s http://127.0.0.1:4566/health | grep "\"s3\": \"running\""; do
-            echo "Waiting for LocalStack to start..."
-            sleep 5
-          done
-
       - uses: actions/checkout@v4
       - name: Setup Go
         uses: actions/setup-go@v5
