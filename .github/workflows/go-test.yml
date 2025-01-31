@@ -28,7 +28,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
           AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
         volumes:
-          - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py:ro"
+          - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -42,4 +42,7 @@ jobs:
 
       - name: Test with the Go CLI
         run: go test ./host ./eth ./tele  
+
+      - name: Fix permissions for LocalStack files
+        run: sudo chown -R $USER:$USER ./s3_local
 
