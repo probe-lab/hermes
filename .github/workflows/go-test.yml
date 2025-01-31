@@ -22,7 +22,7 @@ jobs:
         image: localstack/localstack:s3-latest
         ports:
           - "127.0.0.1:4566:4566"
-        environment:
+        env:
           - DEBUG=${DEBUG:-0}
           - S3_BUCKET=${S3_BUCKET:-locals3}
           - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-test}
