@@ -160,6 +160,7 @@ func Test_S3_Periodic_Flusher(t *testing.T) {
 func getTestS3client(ctx context.Context, t *testing.T) *S3DataStream {
 	// basic configuration
 	cfg := S3DSConfig{
+		Meter:         tele.NoopMeterProvider().Meter("testing_hermes"),
 		Flushers:      1,
 		FlushInterval: 1 * time.Second,
 		Endpoint:      "http://localhost:4566",

@@ -350,6 +350,7 @@ func rootBefore(c *cli.Context) error {
 		}
 		if dataStreamType == host.DataStreamTypeS3 {
 			s3conf := &host.S3DSConfig{
+				Meter:         tele.NoopMeterProvider().Meter("hermes_s3"),
 				Flushers:      rootConfig.S3Flushers,
 				FlushInterval: rootConfig.S3FlushInterval,
 				ByteLimit:     int64(rootConfig.S3ByteLimit),

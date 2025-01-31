@@ -15,6 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/probe-lab/hermes/tele"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	parquet "github.com/parquet-go/parquet-go"
 )
@@ -23,6 +25,9 @@ var (
 	S3ConnectionTimeout = 5 * time.Second
 	S3OpTimeout         = 10 * time.Second
 	DefaultByteLimit    = int64(10 * 1024 * 1024) // 10MB
+
+	// metrics
+	S3MeterName = "github.com/probe-lab/hermes/s3"
 )
 
 type S3DataStream struct {
@@ -41,7 +46,8 @@ type S3DataStream struct {
 
 	// counter to identify event-files on S3 - unique per peer
 	// should be reset on restart with the peer_id
-	fileCnt atomic.Int64
+	fileCnt     atomic.Int64
+	s3Telemetry *s3Telemetry
 }
 
 var _ DataStream = (*S3DataStream)(nil)
@@ -68,6 +74,10 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 	for _, evType := range allEventTypes {
 		eventStore[evType] = newEventBatcher(baseCfg.ByteLimit)
 	}
+	s3Telemetry, err := newS3Telemetry(baseCfg.Meter)
+	if err != nil {
+		return nil, err
+	}
 	return &S3DataStream{
 		config:           baseCfg,
 		client:           s3client,
@@ -76,6 +86,7 @@ func NewS3DataStream(baseCfg S3DSConfig) (*S3DataStream, error) {
 		flushersDone:     make(chan struct{}),
 		pFlusherDone:     make(chan struct{}),
 		restartPflusherC: make(chan struct{}),
+		s3Telemetry:      s3Telemetry,
 	}, nil
 }
 
@@ -170,11 +181,17 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 		batcher.Lock()
 		batcher.addNewEvents(events)
 		if batcher.isFull() {
+			tSinceLastReset := time.Since(batcher.lastResetT)
 			submissionT := &EventSubmissionTask{
 				EventType: t,
 				Events:    batcher.reset(),
 			}
 			batcher.Unlock()
+			s3ds.s3Telemetry.batcherFlushIntervalHist.Record(
+				ctx,
+				int64(tSinceLastReset.Seconds()),
+				metric.WithAttributes(attribute.String("event_type", t.String())),
+			)
 			return s3ds.submitRecords(ctx, submissionT)
 		}
 		batcher.Unlock()
@@ -314,7 +331,8 @@ func (s3ds *S3DataStream) startPeriodicFlusher(ctx context.Context, interval tim
 			return
 		case <-flushCheckTicker.C:
 			for evType, batcher := range s3ds.eventStore {
-				if time.Since(batcher.GetLastResetTime()) < interval {
+				tSinceLastReset := time.Since(batcher.GetLastResetTime())
+				if tSinceLastReset < interval {
 					slog.Debug("not in time to flush", "event-type", evType, "waiting to pflush", interval-time.Since(batcher.lastResetT))
 					continue
 				}
@@ -327,6 +345,11 @@ func (s3ds *S3DataStream) startPeriodicFlusher(ctx context.Context, interval tim
 				if err := s3ds.submitRecords(opCtx, submissionT); err != nil {
 					slog.Error("submitting last records to s3", tele.LogAttrError(err), "event-type", evType)
 				}
+				s3ds.s3Telemetry.batcherFlushIntervalHist.Record(
+					ctx,
+					int64(tSinceLastReset.Seconds()),
+					metric.WithAttributes(attribute.String("event_type", evType.String())),
+				)
 				cancel()
 			}
 			flushCheckTicker.Reset(1 * time.Second)
@@ -455,12 +478,35 @@ func (s3ds *S3DataStream) startS3Flusher(
 				slog.Error("uploading file to s3", tele.LogAttrError(err))
 				continue
 			}
+			uploadT := time.Since(uploadStartT)
+			totalT := time.Since(formatStartT)
+			// register the metrics
+			s3ds.s3Telemetry.bulkTraceHist.Record(
+				ctx,
+				int64(len(eventT.Events)),
+				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
+			)
+			s3ds.s3Telemetry.parquetFormatingLatencyHist.Record(
+				ctx,
+				formatT.Milliseconds(),
+				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
+			)
+			s3ds.s3Telemetry.s3SubmissionLantencyHist.Record(
+				ctx,
+				uploadT.Milliseconds(),
+				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
+			)
+			s3ds.s3Telemetry.parquetFileSizeHist.Record(
+				ctx,
+				int64(totBytes/(1024*1024)),
+				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
+			)
 			slog.Info("submitted file to s3",
 				"MB", float32(totBytes)/(1024.0*1024.0),
 				"s3key", eventT.S3Key,
 				"formating-time", formatT,
-				"upload-time", time.Since(uploadStartT),
-				"total-time", time.Since(formatStartT),
+				"upload-time", uploadT,
+				"total-time", totalT,
 			)
 
 		case <-ctx.Done():
@@ -499,15 +545,16 @@ func EventsToBytes[T any](
 
 // S3DSConfig belongs to the configuration needed to stablish a connection with an s3 instance
 type S3DSConfig struct {
+	Meter         metric.Meter
 	Flushers      int
 	ByteLimit     int64
+	FlushInterval time.Duration
 	AccessKeyID   string
 	SecretKey     string
 	Region        string
 	Endpoint      string
 	Bucket        string
 	Tag           string
-	FlushInterval time.Duration
 }
 
 // IsValid checks whether the current configuration is valid or not
@@ -643,4 +690,67 @@ func (b *eventBatcher) GetLastResetTime() time.Time {
 	b.RLock()
 	defer b.RUnlock()
 	return b.lastResetT
+}
+
+type s3Telemetry struct {
+	bulkTraceHist               metric.Int64Histogram
+	parquetFormatingLatencyHist metric.Int64Histogram
+	s3SubmissionLantencyHist    metric.Int64Histogram
+	parquetFileSizeHist         metric.Int64Histogram
+	batcherFlushIntervalHist    metric.Int64Histogram
+}
+
+func newS3Telemetry(meter metric.Meter) (*s3Telemetry, error) {
+	bulkTraceHist, err := meter.Int64Histogram(
+		"s3_bulk_traced_events",
+		metric.WithDescription("Number of bulk events added on each s3 submission per event category"),
+		metric.WithExplicitBucketBoundaries(
+			0, 100, 200, 500, 1000, 1500, 4000, 8000, 10000,
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	parquetFormatingLatencyHist, err := meter.Int64Histogram(
+		"s3_parquet_formating_latency_ms",
+		metric.WithDescription("Milliseconds that it took to format the given traces into a parquet file"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s3SubmissionLatencyHist, err := meter.Int64Histogram(
+		"s3_submission_latency_ms",
+		metric.WithDescription("Milliseconds that it took to submite parquet files to s3"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	parquetFileSizeHist, err := meter.Int64Histogram(
+		"s3_parquet_file_size_mb",
+		metric.WithDescription("Size (in MB) of the submited parquet files to s3"),
+		metric.WithExplicitBucketBoundaries(0, 2, 5, 10, 12, 15, 20, 25, 30),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	batcherFlushIntervalHist, err := meter.Int64Histogram(
+		"s3_batcher_flush_interval_s",
+		metric.WithDescription("Interval between batcher flush times (in seconds)"),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 4, 5, 10, 12, 15, 20, 30),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &s3Telemetry{
+		bulkTraceHist:               bulkTraceHist,
+		parquetFormatingLatencyHist: parquetFormatingLatencyHist,
+		s3SubmissionLantencyHist:    s3SubmissionLatencyHist,
+		parquetFileSizeHist:         parquetFileSizeHist,
+		batcherFlushIntervalHist:    batcherFlushIntervalHist,
+	}, nil
 }

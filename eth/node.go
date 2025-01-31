@@ -120,6 +120,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		ds = host.NewCallbackDataStream()
 
 	case host.DataStreamTypeS3:
+		// get the metrics tracer and meter from the root config
+		cfg.S3Config.Meter = cfg.Meter
 		var err error
 		ds, err = host.NewS3DataStream(*cfg.S3Config)
 		if err != nil {
