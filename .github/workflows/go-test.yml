@@ -28,8 +28,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
           AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
         volumes:
-          - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
-        options: --user 1001:1001
+          - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py:ro"
 
     steps:
       - uses: actions/checkout@v4
