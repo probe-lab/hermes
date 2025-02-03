@@ -16,7 +16,7 @@ concurrency:
 jobs:
   go-tests: 
     runs-on: ubuntu-latest
-    timeout-minutes: 2 # in minutes
+    timeout-minutes: 5 # in minutes
     services:
       s3:
         image: localstack/localstack
