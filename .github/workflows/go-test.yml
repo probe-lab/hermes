@@ -19,17 +19,20 @@ jobs:
     timeout-minutes: 2 # in minutes
     services:
       s3:
-        image: localstack/localstack:s3-latest
+        image: localstack/localstack
         ports:
           - "127.0.0.1:4566:4566"
         env:
-          DEBUG: ${DEBUG:-0}
-          S3_BUCKET: ${S3_BUCKET:-locals3}
-          AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-          AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-        volumes:
-          - "./s3_local/init_s3.py:/etc/localstack/init/ready.d/init-s3.py"
-
+          SERVICES: "s3"
+          DEFAULT_REGION: "us-east-1"
+          S3_BUCKET: locals3
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        options: >-
+          --health-cmd "awslocal s3 mb s3://locals3"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - name: Setup Go
@@ -42,7 +45,3 @@ jobs:
 
       - name: Test with the Go CLI
         run: go test ./host ./eth ./tele  
-
-      - name: Fix permissions for LocalStack files
-        run: sudo chown -R $USER:$USER ./s3_local
-
