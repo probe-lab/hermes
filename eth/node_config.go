@@ -79,6 +79,7 @@ type NodeConfig struct {
 	// The Data Stream configuration
 	DataStreamType host.DataStreamType
 	AWSConfig      *aws.Config
+	S3Config       *host.S3DSConfig
 	KinesisRegion  string
 	KinesisStream  string
 
@@ -173,6 +174,16 @@ func (n *NodeConfig) Validate() error {
 			if n.KinesisRegion == "" {
 				return fmt.Errorf("kinesis is enabled but region is not set")
 			}
+		}
+	}
+	if n.DataStreamType == host.DataStreamTypeS3 {
+		if n.S3Config != nil {
+			// we should have caught the error at the root_cmd, but still adding it here
+			if err := n.S3Config.CheckValidity(); err != nil {
+				return fmt.Errorf("s3 trace submission is enabled but no valid config was given %w", err)
+			}
+		} else {
+			return fmt.Errorf("s3 configuration is empty")
 		}
 	}
 

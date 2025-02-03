@@ -29,57 +29,79 @@ const (
 )
 
 var rootConfig = struct {
-	Verbose        bool
-	LogLevel       string
-	LogFormat      string
-	LogSource      bool
-	LogNoColor     bool
-	MetricsEnabled bool
-	MetricsAddr    string
-	MetricsPort    int
-	TracingEnabled bool
-	TracingAddr    string
-	TracingPort    int
-	DataStreamType string
-	KinesisRegion  string
-	KinesisStream  string
+	Verbose         bool
+	LogLevel        string
+	LogFormat       string
+	LogSource       bool
+	LogNoColor      bool
+	MetricsEnabled  bool
+	MetricsAddr     string
+	MetricsPort     int
+	TracingEnabled  bool
+	TracingAddr     string
+	TracingPort     int
+	DataStreamType  string
+	KinesisRegion   string
+	KinesisStream   string
+	S3Flushers      int
+	S3FlushInterval time.Duration
+	S3ByteLimit     int
+	S3Region        string
+	S3Bucket        string
+	S3Tag           string
+	S3Endpoint      string
+	AWSAccessKeyID  string
+	AWSSecretKey    string
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
+	s3Config  *host.S3DSConfig
 
 	// Functions that shut down the telemetry providers.
 	// Both block until they're done
 	metricsShutdownFunc func(ctx context.Context) error
 	tracerShutdownFunc  func(ctx context.Context) error
 }{
-	Verbose:        false,
-	LogLevel:       "info",
-	LogFormat:      "hlog",
-	LogSource:      false,
-	LogNoColor:     false,
-	MetricsEnabled: false,
-	MetricsAddr:    "localhost",
-	MetricsPort:    6060,
-	TracingEnabled: false,
-	TracingAddr:    "localhost",
-	TracingPort:    4317, // default jaeger port
-	DataStreamType: host.DataStreamTypeLogger.String(),
-	KinesisRegion:  "",
-	KinesisStream:  "",
+	Verbose:         false,
+	LogLevel:        "info",
+	LogFormat:       "hlog",
+	LogSource:       false,
+	LogNoColor:      false,
+	MetricsEnabled:  false,
+	MetricsAddr:     "localhost",
+	MetricsPort:     6060,
+	TracingEnabled:  false,
+	TracingAddr:     "localhost",
+	TracingPort:     4317, // default jaeger port
+	DataStreamType:  host.DataStreamTypeLogger.String(),
+	KinesisRegion:   "",
+	KinesisStream:   "",
+	S3Region:        "",
+	S3Endpoint:      "",
+	S3Bucket:        "hermes",
+	S3Flushers:      2,
+	S3FlushInterval: 2 * time.Second,
+	S3ByteLimit:     10 * 1024 * 1024, // 10MB
+	AWSAccessKeyID:  "",
+	AWSSecretKey:    "",
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
+	s3Config:            nil,
 	tracerShutdownFunc:  nil,
 	metricsShutdownFunc: nil,
 }
 
 var app = &cli.App{
-	Name:     "hermes",
-	Usage:    "a gossipsub listener",
-	Flags:    rootFlags,
-	Before:   rootBefore,
-	Commands: []*cli.Command{cmdEth},
-	After:    rootAfter,
+	Name:   "hermes",
+	Usage:  "a gossipsub listener",
+	Flags:  rootFlags,
+	Before: rootBefore,
+	Commands: []*cli.Command{
+		cmdEth,
+		cmdBenchmark,
+	},
+	After: rootAfter,
 }
 
 var rootFlags = []cli.Flag{
@@ -196,6 +218,78 @@ var rootFlags = []cli.Flag{
 		Destination: &rootConfig.KinesisStream,
 		Category:    flagCategoryDataStream,
 	},
+	&cli.StringFlag{
+		Name:        "s3.region",
+		EnvVars:     []string{"HERMES_S3_REGION"},
+		Usage:       "The name of the region where the s3 bucket will be stored",
+		Value:       rootConfig.S3Region,
+		Destination: &rootConfig.S3Region,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "s3.endpoint",
+		EnvVars:     []string{"HERMES_S3_CUSTOM_ENDPOINT"},
+		Usage:       "The endpoint of our custom S3 instance to override the AWS defaults",
+		Value:       rootConfig.S3Endpoint,
+		Destination: &rootConfig.S3Endpoint,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "s3.bucket",
+		EnvVars:     []string{"HERMES_S3_BUCKET"},
+		Usage:       "name of the S3 bucket that will be used as reference to submit the traces",
+		Value:       rootConfig.S3Bucket,
+		Destination: &rootConfig.S3Bucket,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "s3.tag",
+		EnvVars:     []string{"HERMES_S3_TAG"},
+		Usage:       "tag within the S3 bucket that will be used as reference to submit the traces",
+		Value:       rootConfig.S3Tag,
+		Destination: &rootConfig.S3Tag,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.IntFlag{
+		Name:        "s3.byte.limit",
+		EnvVars:     []string{"HERMES_S3_BYTE_LIMIT"},
+		Usage:       "Soft upper limite of bytes for the S3 dumps",
+		Value:       rootConfig.S3ByteLimit,
+		Destination: &rootConfig.S3ByteLimit,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.IntFlag{
+		Name:        "s3.flushers",
+		EnvVars:     []string{"HERMES_S3_FLUSHERS"},
+		Usage:       "Number of flushers that will be spawned to dump traces into S3",
+		Value:       rootConfig.S3Flushers,
+		Destination: &rootConfig.S3Flushers,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.DurationFlag{
+		Name:        "s3.flush.interval",
+		EnvVars:     []string{"HERMES_S3_FLUSH_INTERVAL"},
+		Usage:       "Minimum time interval at which the batched traces will be dump in S3",
+		Value:       rootConfig.S3FlushInterval,
+		Destination: &rootConfig.S3FlushInterval,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "aws.secret.key",
+		EnvVars:     []string{"HERMES_AWS_SECRET_KEY"},
+		Usage:       "Secret key of the AWS account for the S3 bucket",
+		Value:       rootConfig.AWSSecretKey,
+		Destination: &rootConfig.AWSSecretKey,
+		Category:    flagCategoryDataStream,
+	},
+	&cli.StringFlag{
+		Name:        "aws.key.id",
+		EnvVars:     []string{"HERMES_AWS_ACCESS_KEY_ID"},
+		Usage:       "Access key ID of the AWS account for the s3 bucket",
+		Value:       rootConfig.AWSAccessKeyID,
+		Destination: &rootConfig.AWSAccessKeyID,
+		Category:    flagCategoryDataStream,
+	},
 }
 
 func main() {
@@ -254,8 +348,25 @@ func rootBefore(c *cli.Context) error {
 				rootConfig.awsConfig = &awsConfig
 			}
 		}
+		if dataStreamType == host.DataStreamTypeS3 {
+			s3conf := &host.S3DSConfig{
+				Meter:         tele.NoopMeterProvider().Meter("hermes_s3"),
+				Flushers:      rootConfig.S3Flushers,
+				FlushInterval: rootConfig.S3FlushInterval,
+				ByteLimit:     int64(rootConfig.S3ByteLimit),
+				Region:        rootConfig.S3Region,
+				Endpoint:      rootConfig.S3Endpoint,
+				Bucket:        rootConfig.S3Bucket,
+				Tag:           rootConfig.S3Tag,
+				SecretKey:     rootConfig.AWSSecretKey,
+				AccessKeyID:   rootConfig.AWSAccessKeyID,
+			}
+			if err := s3conf.CheckValidity(); err != nil {
+				return fmt.Errorf("loading S3 configuration: %w", err)
+			}
+			rootConfig.s3Config = s3conf
+		}
 	}
-
 	return nil
 }
 
@@ -282,7 +393,7 @@ func rootAfter(c *cli.Context) error {
 }
 
 // configureLogger configures the global logger based on the provided CLI
-// context. It sets the log level based on the "--log-level" flag or the
+// context. It sets the log level based on the "--log.level" flag or the
 // "--verbose" flag. The log format is determined by the "--log.format" flag.
 // The function returns an error if the log level or log format is not supported.
 // Possible log formats include "tint", "hlog", "text", and "json". The default
@@ -291,7 +402,7 @@ func configureLogger(c *cli.Context) error {
 	// set default log level
 	logLevel := slog.LevelInfo
 
-	if c.IsSet("log-level") {
+	if c.IsSet("log.level") {
 		switch strings.ToLower(rootConfig.LogLevel) {
 		case "debug":
 			logLevel = slog.LevelDebug

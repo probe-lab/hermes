@@ -91,9 +91,9 @@ func (k *KinesisOutput) renderPhase0Block(
 	}
 
 	return map[string]any{
-		"PeerID":     msg.ReceivedFrom.String(),
+		"PeerID":     msg.ReceivedFrom,
 		"Topic":      msg.GetTopic(),
-		"Seq":        msg.GetSeqno(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":    len(msg.Data),
 		"Slot":       block.GetBlock().GetSlot(),
@@ -113,9 +113,9 @@ func (k *KinesisOutput) renderAltairBlock(
 	}
 
 	return map[string]any{
-		"PeerID":     msg.ReceivedFrom.String(),
+		"PeerID":     msg.ReceivedFrom,
 		"Topic":      msg.GetTopic(),
-		"Seq":        msg.GetSeqno(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":    len(msg.Data),
 		"Slot":       block.GetBlock().GetSlot(),
@@ -135,9 +135,9 @@ func (k *KinesisOutput) renderBellatrixBlock(
 	}
 
 	return map[string]any{
-		"PeerID":     msg.ReceivedFrom.String(),
+		"PeerID":     msg.ReceivedFrom,
 		"Topic":      msg.GetTopic(),
-		"Seq":        msg.GetSeqno(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":    len(msg.Data),
 		"Slot":       block.GetBlock().GetSlot(),
@@ -157,9 +157,9 @@ func (k *KinesisOutput) renderCapellaBlock(
 	}
 
 	return map[string]any{
-		"PeerID":     msg.ReceivedFrom.String(),
+		"PeerID":     msg.ReceivedFrom,
 		"Topic":      msg.GetTopic(),
-		"Seq":        msg.GetSeqno(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":    len(msg.Data),
 		"Slot":       block.GetBlock().GetSlot(),
@@ -179,9 +179,9 @@ func (k *KinesisOutput) renderDenebBlock(
 	}
 
 	return map[string]any{
-		"PeerID":     msg.ReceivedFrom.String(),
+		"PeerID":     msg.ReceivedFrom,
 		"Topic":      msg.GetTopic(),
-		"Seq":        msg.GetSeqno(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":    len(msg.Data),
 		"Slot":       block.GetBlock().GetSlot(),
@@ -196,9 +196,9 @@ func (k *KinesisOutput) renderAttestation(
 	attestation *ethtypes.Attestation,
 ) (map[string]any, error) {
 	payload := map[string]any{
-		"PeerID":          msg.ReceivedFrom.String(),
+		"PeerID":          msg.ReceivedFrom,
 		"Topic":           msg.GetTopic(),
-		"Seq":             msg.GetSeqno(),
+		"Seq":             hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":           hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":         len(msg.Data),
 		"CommIdx":         attestation.GetData().GetCommitteeIndex(),
@@ -224,9 +224,9 @@ func (k *KinesisOutput) renderAggregateAttestationAndProof(
 	agg *ethtypes.SignedAggregateAttestationAndProof,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":         msg.ReceivedFrom.String(),
+		"PeerID":         msg.ReceivedFrom,
 		"Topic":          msg.GetTopic(),
-		"Seq":            msg.GetSeqno(),
+		"Seq":            hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":          hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":        len(msg.Data),
 		"Sig":            hexutil.Encode(agg.GetSignature()),
@@ -240,9 +240,9 @@ func (k *KinesisOutput) renderContributionAndProof(
 	cp *ethtypes.SignedContributionAndProof,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":                  msg.ReceivedFrom.String(),
+		"PeerID":                  msg.ReceivedFrom,
 		"Topic":                   msg.GetTopic(),
-		"Seq":                     msg.GetSeqno(),
+		"Seq":                     hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":                   hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":                 len(msg.Data),
 		"Sig":                     hexutil.Encode(cp.GetSignature()),
@@ -258,9 +258,9 @@ func (k *KinesisOutput) renderVoluntaryExit(
 	ve *ethtypes.VoluntaryExit,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":  msg.ReceivedFrom.String(),
+		"PeerID":  msg.ReceivedFrom,
 		"Topic":   msg.GetTopic(),
-		"Seq":     msg.GetSeqno(),
+		"Seq":     hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize": len(msg.Data),
 		"Epoch":   ve.GetEpoch(),
@@ -273,11 +273,11 @@ func (k *KinesisOutput) renderSyncCommitteeMessage(
 	sc *ethtypes.SyncCommitteeMessage,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":    msg.ReceivedFrom.String(),
+		"PeerID":    msg.ReceivedFrom,
 		"MsgID":     hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":   len(msg.Data),
 		"Topic":     msg.GetTopic(),
-		"Seq":       msg.GetSeqno(),
+		"Seq":       hex.EncodeToString(msg.GetSeqno()),
 		"Slot":      sc.GetSlot(),
 		"ValIdx":    sc.GetValidatorIndex(),
 		"BlockRoot": hexutil.Encode(sc.GetBlockRoot()),
@@ -290,11 +290,11 @@ func (k *KinesisOutput) renderBLSToExecutionChange(
 	blsec *ethtypes.BLSToExecutionChange,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":             msg.ReceivedFrom.String(),
+		"PeerID":             msg.ReceivedFrom,
 		"MsgID":              hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":            len(msg.Data),
 		"Topic":              msg.GetTopic(),
-		"Seq":                msg.GetSeqno(),
+		"Seq":                hex.EncodeToString(msg.GetSeqno()),
 		"ValIdx":             blsec.GetValidatorIndex(),
 		"FromBlsPubkey":      hexutil.Encode(blsec.GetFromBlsPubkey()),
 		"ToExecutionAddress": hexutil.Encode(blsec.GetToExecutionAddress()),
@@ -303,11 +303,11 @@ func (k *KinesisOutput) renderBLSToExecutionChange(
 
 func (k *KinesisOutput) renderBlobSidecar(msg *pubsub.Message, blob *ethtypes.BlobSidecar) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":     msg.ReceivedFrom.String(),
+		"PeerID":     msg.ReceivedFrom,
 		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":    len(msg.Data),
 		"Topic":      msg.GetTopic(),
-		"Seq":        msg.GetSeqno(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"Slot":       blob.GetSignedBlockHeader().GetHeader().GetSlot(),
 		"ValIdx":     blob.GetSignedBlockHeader().GetHeader().GetProposerIndex(),
 		"index":      blob.GetIndex(),
@@ -322,11 +322,11 @@ func (k *KinesisOutput) renderProposerSlashing(
 	ps *ethtypes.ProposerSlashing,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":                msg.ReceivedFrom.String(),
+		"PeerID":                msg.ReceivedFrom,
 		"MsgID":                 hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":               len(msg.Data),
 		"Topic":                 msg.GetTopic(),
-		"Seq":                   msg.GetSeqno(),
+		"Seq":                   hex.EncodeToString(msg.GetSeqno()),
 		"Header1_Slot":          ps.GetHeader_1().GetHeader().GetSlot(),
 		"Header1_ProposerIndex": ps.GetHeader_1().GetHeader().GetProposerIndex(),
 		"Header1_StateRoot":     hexutil.Encode(ps.GetHeader_1().GetHeader().GetStateRoot()),
@@ -341,11 +341,11 @@ func (k *KinesisOutput) renderAttesterSlashing(
 	as *ethtypes.AttesterSlashing,
 ) (map[string]any, error) {
 	return map[string]any{
-		"PeerID":       msg.ReceivedFrom.String(),
+		"PeerID":       msg.ReceivedFrom,
 		"MsgID":        hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":      len(msg.Data),
 		"Topic":        msg.GetTopic(),
-		"Seq":          msg.GetSeqno(),
+		"Seq":          hex.EncodeToString(msg.GetSeqno()),
 		"Att1_indices": as.GetAttestation_1().GetAttestingIndices(),
 		"Att2_indices": as.GetAttestation_2().GetAttestingIndices(),
 	}, nil

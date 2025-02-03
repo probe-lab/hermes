@@ -129,7 +129,8 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		pubsub.WithRawTracer(h),
 		pubsub.WithRawTracer(mt),
 		pubsub.WithEventTracer(h),
-		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq))
+		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
+	)
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new gossip sub: %w", err)
@@ -287,11 +288,11 @@ func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 			PeerID:    h.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]any{
-				"PeerID":  msg.ReceivedFrom.String(),
+				"PeerID":  msg.ReceivedFrom,
 				"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 				"MsgSize": len(msg.Data),
 				"Topic":   msg.GetTopic(),
-				"Seq":     msg.GetSeqno(),
+				"Seq":     hex.EncodeToString(msg.GetSeqno()),
 			},
 		}
 

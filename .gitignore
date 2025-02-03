@@ -147,9 +147,11 @@ fabric.properties
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,go,goland+all,git
-
+*.json
 *.sh
 *.txt
 .vscode
+.env
 */venv
 build/
+s3_local/data/

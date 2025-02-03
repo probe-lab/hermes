@@ -68,6 +68,7 @@ func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
 	switch cfg.DataStream.OutputType() {
 	case host.DataStreamOutputTypeFull:
 		dsr = NewFullOutput(cfg)
+	// TODO: If wanted, add a new S3ParquetOutput
 	default:
 		dsr = NewKinesisOutput(cfg)
 	}

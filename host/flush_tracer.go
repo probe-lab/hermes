@@ -126,7 +126,7 @@ func (h *Host) ValidateMessage(msg *pubsub.Message) {
 		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 		"Local":   msg.Local,
 		"MsgSize": msg.Size(),
-		"SeqNo":   hex.EncodeToString(msg.GetSeqno()),
+		"Seq":     hex.EncodeToString(msg.GetSeqno()),
 	})
 }
 

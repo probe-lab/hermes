@@ -119,6 +119,14 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	case host.DataStreamTypeCallback:
 		ds = host.NewCallbackDataStream()
 
+	case host.DataStreamTypeS3:
+		// get the metrics tracer and meter from the root config
+		cfg.S3Config.Meter = cfg.Meter
+		var err error
+		ds, err = host.NewS3DataStream(*cfg.S3Config)
+		if err != nil {
+			return nil, fmt.Errorf("new s3 producer %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
