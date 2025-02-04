@@ -44,7 +44,7 @@ func (e EventType) String() string {
 	case EventTypeGenericEvent:
 		return "generic"
 	case EventTypeAddRemovePeer:
-		return "add_remove_peer"
+		return "add_remove"
 	case EventTypeGraftPrune:
 		return "graft_prune"
 	case EventTypeControlRPC:
@@ -58,7 +58,7 @@ func (e EventType) String() string {
 	case EventTypeMsgArrivals:
 		return "msg_arrival"
 	case EventTypeJoinLeaveTopic:
-		return "join_topic"
+		return "join_leave"
 	case EventTypeConnectDisconnectPeer:
 		return "connect_disconnect"
 	default:
