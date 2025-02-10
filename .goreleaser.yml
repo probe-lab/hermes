@@ -1,0 +1,87 @@
+project_name: hermes
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: linux-amd64
+    main: ./cmd/hermes
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    binary: hermes
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: linux-arm64
+    main: ./cmd/hermes
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    binary: hermes
+    goos:
+      - linux
+    goarch:
+      - arm64
+    ldflags:
+      - -s -w
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+dockers:
+  - use: buildx
+    goos: linux
+    goarch: amd64
+    dockerfile: goreleaser.Dockerfile
+    image_templates:
+      - "ethpandaops/hermes:{{ .Version }}-amd64"
+      - "ethpandaops/hermes:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+  - use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: goreleaser.Dockerfile
+    image_templates:
+      - "ethpandaops/hermes:{{ .Version }}-arm64v8"
+      - "ethpandaops/hermes:latest-arm64v8"
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+docker_manifests:
+  - name_template: ethpandaops/hermes:{{ .Version }}
+    image_templates:
+      - ethpandaops/hermes:{{ .Version }}-amd64
+      - ethpandaops/hermes:{{ .Version }}-arm64v8
+  - name_template: ethpandaops/hermes:latest
+    image_templates:
+      - ethpandaops/hermes:latest-amd64
+      - ethpandaops/hermes:latest-arm64v8
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
