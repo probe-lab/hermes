@@ -129,7 +129,7 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		pubsub.WithRawTracer(h),
 		pubsub.WithRawTracer(mt),
 		pubsub.WithEventTracer(h),
-		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
+		// pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
 	)
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
