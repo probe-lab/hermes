@@ -1068,6 +1068,13 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 		}
 		return blocks.NewSignedBeaconBlock(blk)
 
+	case ElectraForkVersion:
+		blk := &pb.SignedBeaconBlockElectra{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
 	default:
 		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
 		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)

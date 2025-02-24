@@ -37,7 +37,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
 	ElectraForkVersion = ForkVersion(beaconConfig.ElectraForkVersion)
-	currentBeaconConfig = beaconConfig
+
 	globalBeaconConfig = beaconConfig
 }
 
@@ -103,6 +103,7 @@ func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) 
 	bellatrixD, _ := signing.ComputeForkDigest(BellatrixForkVersion[:], genesisRoot)
 	capellaD, _ := signing.ComputeForkDigest(CapellaForkVersion[:], genesisRoot)
 	denebD, _ := signing.ComputeForkDigest(DenebForkVersion[:], genesisRoot)
+	electraD, _ := signing.ComputeForkDigest(ElectraForkVersion[:], genesisRoot)
 	switch forkD {
 	case phase0D:
 		forkV = Phase0ForkVersion
@@ -114,6 +115,8 @@ func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) 
 		forkV = CapellaForkVersion
 	case denebD:
 		forkV = DenebForkVersion
+	case electraD:
+		forkV = ElectraForkVersion
 	default:
 		forkV = ForkVersion{}
 		err = fmt.Errorf("not recognized fork_version for (%s)", hex.EncodeToString([]byte(forkD[:])))

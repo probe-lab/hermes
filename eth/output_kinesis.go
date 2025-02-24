@@ -191,6 +191,28 @@ func (k *KinesisOutput) renderDenebBlock(
 	}, nil
 }
 
+func (k *KinesisOutput) renderElectraBlock(
+	msg *pubsub.Message,
+	block *ethtypes.SignedBeaconBlockElectra,
+) (map[string]any, error) {
+	root, err := block.GetBlock().HashTreeRoot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine block hash tree root: %w", err)
+	}
+
+	return map[string]any{
+		"PeerID":     msg.ReceivedFrom,
+		"Topic":      msg.GetTopic(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":    len(msg.Data),
+		"Slot":       block.GetBlock().GetSlot(),
+		"Root":       root,
+		"ValIdx":     block.GetBlock().GetProposerIndex(),
+		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+	}, nil
+}
+
 func (k *KinesisOutput) renderAttestation(
 	msg *pubsub.Message,
 	attestation *ethtypes.Attestation,
