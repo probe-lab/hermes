@@ -114,6 +114,24 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			},
 		},
 		{
+			name: "renderAttestationElectra",
+			payload: &ethtypes.AttestationElectra{
+				Data: &ethtypes.AttestationData{
+					Slot:            1,
+					CommitteeIndex:  2,
+					BeaconBlockRoot: genMockBytes(32),
+					Source:          &ethtypes.Checkpoint{},
+					Target:          &ethtypes.Checkpoint{},
+				},
+				CommitteeBits:   genMockBytes(8),
+				AggregationBits: genMockBytes(131072),
+			},
+			expected: commonExpected,
+			render: func(msg *pubsub.Message, payload any) (map[string]any, error) {
+				return renderer.renderAttestationElectra(msg, payload.(*ethtypes.AttestationElectra))
+			},
+		},
+		{
 			name: "renderAggregateAttestationAndProof",
 			payload: &ethtypes.SignedAggregateAttestationAndProof{
 				Signature: genMockBytes(96),
@@ -125,6 +143,29 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			expected: commonExpected,
 			render: func(msg *pubsub.Message, payload any) (map[string]any, error) {
 				return renderer.renderAggregateAttestationAndProof(msg, payload.(*ethtypes.SignedAggregateAttestationAndProof))
+			},
+		},
+		{
+			name: "renderAggregateAttestationAndProofElectra",
+			payload: &ethtypes.SignedAggregateAttestationAndProofElectra{
+				Signature: genMockBytes(96),
+				Message: &ethtypes.AggregateAttestationAndProofElectra{
+					AggregatorIndex: 1,
+					SelectionProof:  genMockBytes(96),
+					Aggregate: &ethtypes.AttestationElectra{
+						Data: &ethtypes.AttestationData{
+							Slot:            1,
+							CommitteeIndex:  2,
+							BeaconBlockRoot: genMockBytes(32),
+						},
+						CommitteeBits:   genMockBytes(8),
+						AggregationBits: genMockBytes(131072),
+					},
+				},
+			},
+			expected: commonExpected,
+			render: func(msg *pubsub.Message, payload any) (map[string]any, error) {
+				return renderer.renderAggregateAttestationAndProofElectra(msg, payload.(*ethtypes.SignedAggregateAttestationAndProofElectra))
 			},
 		},
 		{
@@ -346,6 +387,16 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			case *ethtypes.AttesterSlashing:
 				require.Equal(t, typedResult.GetAttestation_1().GetAttestingIndices(), result["Att1_indices"])
 				require.Equal(t, typedResult.GetAttestation_2().GetAttestingIndices(), result["Att2_indices"])
+			case *ethtypes.AttestationElectra:
+				require.Equal(t, typedResult.GetData().GetSlot(), result["Slot"])
+				require.Equal(t, typedResult.GetData().GetCommitteeIndex(), result["CommIdx"])
+				require.Equal(t, typedResult.GetData().GetBeaconBlockRoot(), result["BeaconBlockRoot"])
+				require.Equal(t, typedResult.GetData().GetSource(), result["Source"])
+				require.Equal(t, typedResult.GetData().GetTarget(), result["Target"])
+			case *ethtypes.SignedAggregateAttestationAndProofElectra:
+				require.Equal(t, typedResult.GetMessage().GetAggregatorIndex(), result["AggIdx"])
+				require.Equal(t, hexutil.Encode(typedResult.GetMessage().GetSelectionProof()), result["SelectionProof"])
+				require.Equal(t, hexutil.Encode(typedResult.GetSignature()), result["Sig"])
 			default:
 				t.Fatalf("unexpected result type: %T", result)
 			}

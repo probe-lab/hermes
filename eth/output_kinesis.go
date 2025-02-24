@@ -52,8 +52,12 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderDenebBlock(msg, d)
 	case *ethtypes.Attestation:
 		payload, err = k.renderAttestation(msg, d)
+	case *ethtypes.AttestationElectra:
+		payload, err = k.renderAttestationElectra(msg, d)
 	case *ethtypes.SignedAggregateAttestationAndProof:
 		payload, err = k.renderAggregateAttestationAndProof(msg, d)
+	case *ethtypes.SignedAggregateAttestationAndProofElectra:
+		payload, err = k.renderAggregateAttestationAndProofElectra(msg, d)
 	case *ethtypes.SignedContributionAndProof:
 		payload, err = k.renderContributionAndProof(msg, d)
 	case *ethtypes.VoluntaryExit:
@@ -241,9 +245,53 @@ func (k *KinesisOutput) renderAttestation(
 	return payload, nil
 }
 
+func (k *KinesisOutput) renderAttestationElectra(
+	msg *pubsub.Message,
+	attestation *ethtypes.AttestationElectra,
+) (map[string]any, error) {
+	payload := map[string]any{
+		"PeerID":          msg.ReceivedFrom,
+		"Topic":           msg.GetTopic(),
+		"Seq":             hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":           hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":         len(msg.Data),
+		"CommIdx":         attestation.GetData().GetCommitteeIndex(),
+		"Slot":            attestation.GetData().GetSlot(),
+		"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
+		"Source":          attestation.GetData().GetSource(),
+		"Target":          attestation.GetData().GetTarget(),
+	}
+
+	// If the attestation only has one aggregation bit set, we can add a field to the payload that denotes _which_
+	// aggregation bit is set. This is required to determine which validator created the attestation. In the
+	// pursuit of reducing the amount of data stored in the data stream we omit this field if the attestation is
+	// aggregated.
+	if attestation.GetAggregationBits().Count() == 1 {
+		payload["AggregatePos"] = attestation.AggregationBits.BitIndices()[0]
+	}
+
+	return payload, nil
+}
+
 func (k *KinesisOutput) renderAggregateAttestationAndProof(
 	msg *pubsub.Message,
 	agg *ethtypes.SignedAggregateAttestationAndProof,
+) (map[string]any, error) {
+	return map[string]any{
+		"PeerID":         msg.ReceivedFrom,
+		"Topic":          msg.GetTopic(),
+		"Seq":            hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":          hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":        len(msg.Data),
+		"Sig":            hexutil.Encode(agg.GetSignature()),
+		"AggIdx":         agg.GetMessage().GetAggregatorIndex(),
+		"SelectionProof": hexutil.Encode(agg.GetMessage().GetSelectionProof()),
+	}, nil
+}
+
+func (k *KinesisOutput) renderAggregateAttestationAndProofElectra(
+	msg *pubsub.Message,
+	agg *ethtypes.SignedAggregateAttestationAndProofElectra,
 ) (map[string]any, error) {
 	return map[string]any{
 		"PeerID":         msg.ReceivedFrom,
