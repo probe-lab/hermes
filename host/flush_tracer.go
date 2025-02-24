@@ -18,9 +18,18 @@ import (
 
 type TraceEvent struct {
 	Type      string
+	Topic     string
 	PeerID    peer.ID
 	Timestamp time.Time
 	Payload   any `json:"Data"` // cannot use field "Data" because of gk.Record method
+}
+
+type TraceEventPayloadMetaData struct {
+	PeerID  string `json:"PeerID"`
+	Topic   string `json:"Topic"`
+	Seq     []byte `json:"Seq"`
+	MsgID   string `json:"MsgID"`
+	MsgSize int    `json:"MsgSize"`
 }
 
 func (t *TraceEvent) PartitionKey() string {
@@ -117,7 +126,7 @@ func (h *Host) ValidateMessage(msg *pubsub.Message) {
 		"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 		"Local":   msg.Local,
 		"MsgSize": msg.Size(),
-		"SeqNo":   hex.EncodeToString(msg.GetSeqno()),
+		"Seq":     hex.EncodeToString(msg.GetSeqno()),
 	})
 }
 

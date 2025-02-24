@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/attribute"
@@ -80,7 +81,11 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	initNetworkForkVersions(cfg.BeaconConfig)
 
 	var ds host.DataStream
-	if cfg.AWSConfig != nil {
+	switch cfg.DataStreamType {
+	case host.DataStreamTypeLogger:
+		ds = new(host.TraceLogger)
+
+	case host.DataStreamTypeKinesis:
 		droppedTraces, err := cfg.Meter.Int64Counter("dropped_traces")
 		if err != nil {
 			return nil, fmt.Errorf("new dropped_traces counter: %w", err)
@@ -110,8 +115,20 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		}
 
 		ds = host.NewKinesisDataStream(p)
-	} else {
+
+	case host.DataStreamTypeCallback:
 		ds = host.NewCallbackDataStream()
+
+	case host.DataStreamTypeS3:
+		// get the metrics tracer and meter from the root config
+		cfg.S3Config.Meter = cfg.Meter
+		var err error
+		ds, err = host.NewS3DataStream(*cfg.S3Config)
+		if err != nil {
+			return nil, fmt.Errorf("new s3 producer %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
 
 	hostCfg := &host.Config{
@@ -209,7 +226,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		reqResp:        reqResp,
 		pubSub:         pubSub,
 		pryClient:      pryClient,
-		peerer:         NewPeerer(h, pryClient),
+		peerer:         NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
 		disc:           disc,
 		eventCallbacks: []func(ctx context.Context, event *host.TraceEvent){},
 	}
@@ -398,15 +415,25 @@ func (n *Node) Start(ctx context.Context) error {
 	connSignal := n.host.ConnSignal(timeoutCtx, addrInfo.ID)
 
 	// register ourselves as a trusted peer by submitting our private ip address
-	privateMaddr, err := n.host.PrivateListenMaddr()
-	if err != nil {
-		return err
+	var trustedMaddr ma.Multiaddr
+	if n.cfg.LocalTrustedAddr {
+		trustedMaddr, err = n.host.LocalListenMaddr()
+		if err != nil {
+			return err
+		}
+		slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(n.host.ID()), "on local maddr", trustedMaddr)
+	} else {
+		trustedMaddr, err = n.host.PrivateListenMaddr()
+		if err != nil {
+			return err
+		}
+		slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(n.host.ID()), "on priv maddr", trustedMaddr)
 	}
 
-	slog.Info("Adding ourselves as a trusted peer to Prysm", tele.LogAttrPeerID(n.host.ID()), "maddr", privateMaddr)
-	if err := n.pryClient.AddTrustedPeer(ctx, n.host.ID(), privateMaddr); err != nil {
+	if err := n.pryClient.AddTrustedPeer(ctx, n.host.ID(), trustedMaddr); err != nil {
 		return fmt.Errorf("failed adding ourself as trusted peer: %w", err)
 	}
+
 	defer func() {
 		// unregister ourselves as a trusted peer from prysm. Context timeout
 		// is not necessary because the pryClient applies a 5s timeout to each API call

@@ -86,13 +86,17 @@ func (h *Host) Serve(ctx context.Context) error {
 				AgentVersion string
 				Direction    string
 				Opened       time.Time
-				Transient    bool
+				Limited      bool
 			}{
 				RemotePeer:   c.RemotePeer().String(),
 				RemoteMaddrs: c.RemoteMultiaddr(),
 				AgentVersion: h.AgentVersion(c.RemotePeer()),
 				Direction:    c.Stat().Direction.String(),
 				Opened:       c.Stat().Opened,
+<<<<<<< HEAD
+=======
+				Limited:      c.Stat().Limited,
+>>>>>>> d293cbe03f05fd8ffda442011404ca012185cf39
 			},
 		}
 
@@ -128,7 +132,8 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		pubsub.WithRawTracer(h),
 		pubsub.WithRawTracer(mt),
 		pubsub.WithEventTracer(h),
-		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq))
+		// pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
+	)
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new gossip sub: %w", err)
@@ -267,6 +272,17 @@ func (h *Host) PrivateListenMaddr() (ma.Multiaddr, error) {
 	return nil, fmt.Errorf("no private multi address found in %s", h.Addrs())
 }
 
+// LocalListenMaddr returns the first multiaddress in a localhost IP range that
+// this host is listening on.
+func (h *Host) LocalListenMaddr() (ma.Multiaddr, error) {
+	for _, maddr := range h.Addrs() {
+		if manet.IsIPLoopback(maddr) {
+			return maddr, nil
+		}
+	}
+	return nil, fmt.Errorf("no local multi address found in %s", h.Addrs())
+}
+
 func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 	return func(ctx context.Context, msg *pubsub.Message) error {
 		slog.Debug("Handling gossip message", "topic", msg.GetTopic())
@@ -275,11 +291,11 @@ func (h *Host) TracedTopicHandler(handler TopicHandler) TopicHandler {
 			PeerID:    h.ID(),
 			Timestamp: time.Now(),
 			Payload: map[string]any{
-				"PeerID":  msg.ReceivedFrom.String(),
+				"PeerID":  msg.ReceivedFrom,
 				"MsgID":   hex.EncodeToString([]byte(msg.ID)),
 				"MsgSize": len(msg.Data),
 				"Topic":   msg.GetTopic(),
-				"Seq":     msg.GetSeqno(),
+				"Seq":     hex.EncodeToString(msg.GetSeqno()),
 			},
 		}
 
