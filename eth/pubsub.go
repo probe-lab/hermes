@@ -466,7 +466,7 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 	now := time.Now()
 
 	switch p.cfg.ForkVersion {
-	case DenebForkVersion:
+	case DenebForkVersion, ElectraForkVersion:
 		var blob ethtypes.BlobSidecar
 		err := p.cfg.Encoder.DecodeGossip(msg.Data, &blob)
 		if err != nil {
@@ -585,7 +585,18 @@ func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb G
 			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
 		}
 		return genericSbb, root, nil
-
+	case ElectraForkVersion:
+		electraSbb := ethtypes.SignedBeaconBlockElectra{}
+		err = p.cfg.Encoder.DecodeGossip(msgData, &electraSbb)
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("error decoding electra beacon block gossip message: %w", err)
+		}
+		genericSbb = electraSbb.GetBlock()
+		root, err = electraSbb.Block.HashTreeRoot()
+		if err != nil {
+			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
+		}
+		return genericSbb, root, nil
 	default:
 		return genericSbb, [32]byte{}, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
 	}

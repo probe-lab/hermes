@@ -23,6 +23,7 @@ var (
 	BellatrixForkVersion ForkVersion
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
+	ElectraForkVersion   ForkVersion
 
 	currentBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
@@ -34,6 +35,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
+	ElectraForkVersion = ForkVersion(beaconConfig.ElectraForkVersion)
 	currentBeaconConfig = beaconConfig
 }
 
@@ -81,8 +83,11 @@ func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconCha
 	case epoch < beaconConfg.DenebForkEpoch:
 		return [4]byte(beaconConfg.CapellaForkVersion), nil
 
-	case epoch >= beaconConfg.DenebForkEpoch:
+	case epoch < beaconConfg.ElectraForkEpoch:
 		return [4]byte(beaconConfg.DenebForkVersion), nil
+
+	case epoch >= beaconConfg.ElectraForkEpoch:
+		return [4]byte(beaconConfg.ElectraForkVersion), nil
 
 	default:
 		return [4]byte{}, fmt.Errorf("not recognized case for epoch %d", epoch)
