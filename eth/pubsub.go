@@ -2,19 +2,17 @@ package eth
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ssz "github.com/prysmaticlabs/fastssz"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
 	ethtypes "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 
@@ -57,6 +55,7 @@ type PubSub struct {
 	host *host.Host
 	cfg  *PubSubConfig
 	gs   *pubsub.PubSub
+	dsr  host.DataStreamRenderer
 }
 
 func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
@@ -64,12 +63,21 @@ func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
 		return nil, fmt.Errorf("validate configuration: %w", err)
 	}
 
-	ps := &PubSub{
-		host: h,
-		cfg:  cfg,
+	var dsr host.DataStreamRenderer
+
+	switch cfg.DataStream.OutputType() {
+	case host.DataStreamOutputTypeFull:
+		dsr = NewFullOutput(cfg)
+	// TODO: If wanted, add a new S3ParquetOutput
+	default:
+		dsr = NewKinesisOutput(cfg)
 	}
 
-	return ps, nil
+	return &PubSub{
+		host: h,
+		cfg:  cfg,
+		dsr:  dsr,
+	}, nil
 }
 
 func (p *PubSub) Serve(ctx context.Context) error {
@@ -122,7 +130,7 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	case strings.Contains(topic, p2p.GossipProposerSlashingMessage):
 		return p.handleProposerSlashingMessage
 	case strings.Contains(topic, p2p.GossipContributionAndProofMessage):
-		return p.handleContributtionAndProofMessage
+		return p.handleContributionAndProofMessage
 	case strings.Contains(topic, p2p.GossipSyncCommitteeMessage):
 		return p.handleSyncCommitteeMessage
 	case strings.Contains(topic, p2p.GossipBlsToExecutionChangeMessage):
@@ -152,120 +160,110 @@ func (n *Node) FilterIncomingSubscriptions(id peer.ID, subs []*pubsubpb.RPC_SubO
 }
 
 func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+		block ssz.Unmarshaler
+	)
 
-	genericBlock, root, err := p.getSignedBeaconBlockForForkDigest(msg.Data)
-	if err != nil {
-		return err
+	switch p.cfg.ForkVersion {
+	case Phase0ForkVersion:
+		block = &ethtypes.SignedBeaconBlock{}
+	case AltairForkVersion:
+		block = &ethtypes.SignedBeaconBlockAltair{}
+	case BellatrixForkVersion:
+		block = &ethtypes.SignedBeaconBlockBellatrix{}
+	case CapellaForkVersion:
+		block = &ethtypes.SignedBeaconBlockCapella{}
+	case DenebForkVersion:
+		block = &ethtypes.SignedBeaconBlockDeneb{}
+	default:
+		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %s", p.cfg.ForkVersion.String())
 	}
 
-	slot := genericBlock.GetSlot()
-	ProposerIndex := genericBlock.GetProposerIndex()
+	evt, err = p.dsr.RenderPayload(evt, msg, block)
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 
-	slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
-
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":     msg.ReceivedFrom.String(),
-			"MsgID":      hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":    len(msg.Data),
-			"Topic":      msg.GetTopic(),
-			"Seq":        msg.GetSeqno(),
-			"ValIdx":     ProposerIndex,
-			"Slot":       slot,
-			"Root":       root,
-			"TimeInSlot": now.Sub(slotStart).Seconds(),
-		},
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
 	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
-		return fmt.Errorf("nil message or topic")
+		return fmt.Errorf("handleAttestation(): nil message or topic")
 	}
 
-	attestation := ethtypes.Attestation{}
-	err := p.cfg.Encoder.DecodeGossip(msg.Data, &attestation)
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.Attestation{})
 	if err != nil {
-		return fmt.Errorf("decode attestation gossip message: %w", err)
-	}
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 
-	payload := map[string]any{
-		"PeerID":          msg.ReceivedFrom.String(),
-		"MsgID":           hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize":         len(msg.Data),
-		"Topic":           msg.GetTopic(),
-		"Seq":             msg.GetSeqno(),
-		"CommIdx":         attestation.GetData().GetCommitteeIndex(),
-		"Slot":            attestation.GetData().GetSlot(),
-		"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
-		"Source":          attestation.GetData().GetSource(),
-		"Target":          attestation.GetData().GetTarget(),
-	}
-
-	// If the attestation only has one aggregation bit set, we can add an additional field to the payload
-	// that denotes _which_ aggregation bit is set. This is required to determine which validator created the attestation.
-	// In the pursuit of reducing the amount of data stored in the data stream we omit this field if the attestation is
-	// aggregated.
-	if attestation.GetAggregationBits().Count() == 1 {
-		payload["AggregatePos"] = attestation.AggregationBits.BitIndices()[0]
-	}
-
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload:   payload,
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	ap := &ethtypes.SignedAggregateAttestationAndProof{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ap); err != nil {
-		return fmt.Errorf("decode aggregate and proof message: %w", err)
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleAggregateAndProof(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":         msg.ReceivedFrom.String(),
-			"MsgID":          hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":        len(msg.Data),
-			"Topic":          msg.GetTopic(),
-			"Seq":            msg.GetSeqno(),
-			"Sig":            hexutil.Encode(ap.GetSignature()),
-			"AggIdx":         ap.GetMessage().GetAggregatorIndex(),
-			"SelectionProof": hexutil.Encode(ap.GetMessage().GetSelectionProof()),
-			// There are other details in the SignedAggregateAttestationAndProof message, add them when needed.
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProof{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn(
-			"failed putting topic handler event",
-			"topic", msg.GetTopic(),
-			"err", tele.LogAttrError(err),
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
 		)
 	}
 
@@ -273,320 +271,239 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 }
 
 func (p *PubSub) handleExitMessage(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	ve := &ethtypes.VoluntaryExit{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ve); err != nil {
-		return fmt.Errorf("decode voluntary exit message: %w", err)
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleExitMessage(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":  msg.ReceivedFrom.String(),
-			"MsgID":   hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize": len(msg.Data),
-			"Topic":   msg.GetTopic(),
-			"Seq":     msg.GetSeqno(),
-			"Epoch":   ve.GetEpoch(),
-			"ValIdx":  ve.GetValidatorIndex(),
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.VoluntaryExit{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting voluntary exit event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleAttesterSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	as := &ethtypes.AttesterSlashing{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, as); err != nil {
-		return fmt.Errorf("decode attester slashing message: %w", err)
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleAttesterSlashingMessage(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":       msg.ReceivedFrom.String(),
-			"MsgID":        hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":      len(msg.Data),
-			"Topic":        msg.GetTopic(),
-			"Seq":          msg.GetSeqno(),
-			"Att1_indices": as.GetAttestation_1().GetAttestingIndices(),
-			"Att2_indices": as.GetAttestation_2().GetAttestingIndices(),
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.AttesterSlashing{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting attester slashing event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleProposerSlashingMessage(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	ps := &ethtypes.ProposerSlashing{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, ps); err != nil {
-		return fmt.Errorf("decode proposer slashing message: %w", err)
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleProposerSlashingMessage(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":                msg.ReceivedFrom.String(),
-			"MsgID":                 hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":               len(msg.Data),
-			"Topic":                 msg.GetTopic(),
-			"Seq":                   msg.GetSeqno(),
-			"Header1_Slot":          ps.GetHeader_1().GetHeader().GetSlot(),
-			"Header1_ProposerIndex": ps.GetHeader_1().GetHeader().GetProposerIndex(),
-			"Header1_StateRoot":     hexutil.Encode(ps.GetHeader_1().GetHeader().GetStateRoot()),
-			"Header2_Slot":          ps.GetHeader_2().GetHeader().GetSlot(),
-			"Header2_ProposerIndex": ps.GetHeader_2().GetHeader().GetProposerIndex(),
-			"Header2_StateRoot":     hexutil.Encode(ps.GetHeader_2().GetHeader().GetStateRoot()),
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.ProposerSlashing{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting proposer slashing event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
-func (p *PubSub) handleContributtionAndProofMessage(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	cp := &ethtypes.SignedContributionAndProof{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, cp); err != nil {
-		return fmt.Errorf("decode contribution and proof message: %w", err)
+func (p *PubSub) handleContributionAndProofMessage(ctx context.Context, msg *pubsub.Message) error {
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleContributionAndProofMessage(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":                  msg.ReceivedFrom.String(),
-			"MsgID":                   hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":                 len(msg.Data),
-			"Topic":                   msg.GetTopic(),
-			"Seq":                     msg.GetSeqno(),
-			"Sig":                     hexutil.Encode(cp.GetSignature()),
-			"AggIdx":                  cp.GetMessage().GetAggregatorIndex(),
-			"Contrib_Slot":            cp.GetMessage().GetContribution().GetSlot(),
-			"Contrib_SubCommitteeIdx": cp.GetMessage().GetContribution().GetSubcommitteeIndex(),
-			"Contrib_BlockRoot":       cp.GetMessage().GetContribution().GetBlockRoot(),
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedContributionAndProof{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting contribution and proof event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	sc := &ethtypes.SyncCommitteeMessage{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, sc); err != nil {
-		return fmt.Errorf("decode sync committee message: %w", err)
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleSyncCommitteeMessage(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":    msg.ReceivedFrom.String(),
-			"MsgID":     hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":   len(msg.Data),
-			"Topic":     msg.GetTopic(),
-			"Seq":       msg.GetSeqno(),
-			"Slot":      sc.GetSlot(),
-			"ValIdx":    sc.GetValidatorIndex(),
-			"BlockRoot": hexutil.Encode(sc.GetBlockRoot()),
-			"Signature": hexutil.Encode(sc.GetSignature()),
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SyncCommitteeMessage{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting sync committee event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleBlsToExecutionChangeMessage(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
-
-	pb := &ethtypes.BLSToExecutionChange{}
-	if err := p.cfg.Encoder.DecodeGossip(msg.Data, pb); err != nil {
-		return fmt.Errorf("decode bls to execution change message: %w", err)
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleBlsToExecutionChangeMessage(): nil message or topic")
 	}
 
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		PeerID:    p.host.ID(),
-		Timestamp: now,
-		Payload: map[string]any{
-			"PeerID":             msg.ReceivedFrom.String(),
-			"MsgID":              hex.EncodeToString([]byte(msg.ID)),
-			"MsgSize":            len(msg.Data),
-			"Topic":              msg.GetTopic(),
-			"Seq":                msg.GetSeqno(),
-			"ValIdx":             pb.GetValidatorIndex(),
-			"FromBlsPubkey":      hexutil.Encode(pb.GetFromBlsPubkey()),
-			"ToExecutionAddress": hexutil.Encode(pb.GetToExecutionAddress()),
-		},
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.BLSToExecutionChange{})
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn("failed putting bls to execution change event", tele.LogAttrError(err))
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
 	}
 
 	return nil
 }
 
 func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) error {
-	now := time.Now()
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleBlobSidecar(): nil message or topic")
+	}
+
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
 
 	switch p.cfg.ForkVersion {
 	case DenebForkVersion:
-		var blob ethtypes.BlobSidecar
-		err := p.cfg.Encoder.DecodeGossip(msg.Data, &blob)
+		blob := ethtypes.BlobSidecar{}
+
+		evt, err = p.dsr.RenderPayload(evt, msg, &blob)
 		if err != nil {
-			slog.Error("decode blob sidecar gossip message", tele.LogAttrError(err))
-			return err
-		}
+			slog.Warn(
+				"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+			)
 
-		slot := blob.GetSignedBlockHeader().GetHeader().GetSlot()
-		slotStart := p.cfg.GenesisTime.Add(time.Duration(slot) * p.cfg.SecondsPerSlot)
-		proposerIndex := blob.GetSignedBlockHeader().GetHeader().GetProposerIndex()
-
-		evt := &host.TraceEvent{
-			Type:      "HANDLE_MESSAGE",
-			PeerID:    p.host.ID(),
-			Timestamp: now,
-			Payload: map[string]any{
-				"PeerID":     msg.ReceivedFrom.String(),
-				"MsgID":      hex.EncodeToString([]byte(msg.ID)),
-				"MsgSize":    len(msg.Data),
-				"Topic":      msg.GetTopic(),
-				"Seq":        msg.GetSeqno(),
-				"Slot":       slot,
-				"ValIdx":     proposerIndex,
-				"index":      blob.GetIndex(),
-				"TimeInSlot": now.Sub(slotStart).Seconds(),
-				"StateRoot":  hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetStateRoot()),
-				"BodyRoot":   hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetBodyRoot()),
-				"ParentRoot": hexutil.Encode(blob.GetSignedBlockHeader().GetHeader().GetParentRoot()),
-			},
+			return nil
 		}
 
 		if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-			slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
+			slog.Warn(
+				"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+			)
 		}
 	default:
 		return fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
 	}
 
 	return nil
-}
-
-type GenericSignedBeaconBlock interface {
-	GetBlock() GenericBeaconBlock
-}
-
-type GenericBeaconBlock interface {
-	GetSlot() primitives.Slot
-	GetProposerIndex() primitives.ValidatorIndex
-}
-
-func (p *PubSub) getSignedBeaconBlockForForkDigest(msgData []byte) (genericSbb GenericBeaconBlock, root [32]byte, err error) {
-	// get the correct fork
-
-	switch p.cfg.ForkVersion {
-	case Phase0ForkVersion:
-		phase0Sbb := ethtypes.SignedBeaconBlock{}
-		err = p.cfg.Encoder.DecodeGossip(msgData, &phase0Sbb)
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("error decoding phase0 beacon block gossip message: %w", err)
-		}
-		genericSbb = phase0Sbb.GetBlock()
-		root, err = phase0Sbb.Block.HashTreeRoot()
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
-		}
-		return genericSbb, root, nil
-
-	case AltairForkVersion:
-		altairSbb := ethtypes.SignedBeaconBlockAltair{}
-		err = p.cfg.Encoder.DecodeGossip(msgData, &altairSbb)
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("error decoding altair beacon block gossip message: %w", err)
-		}
-		genericSbb = altairSbb.GetBlock()
-		root, err = altairSbb.Block.HashTreeRoot()
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
-		}
-		return genericSbb, root, nil
-
-	case BellatrixForkVersion:
-		BellatrixSbb := ethtypes.SignedBeaconBlockBellatrix{}
-		err = p.cfg.Encoder.DecodeGossip(msgData, &BellatrixSbb)
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("error decoding bellatrix beacon block gossip message: %w", err)
-		}
-		genericSbb = BellatrixSbb.GetBlock()
-		root, err = BellatrixSbb.Block.HashTreeRoot()
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
-		}
-		return genericSbb, root, nil
-
-	case CapellaForkVersion:
-		capellaSbb := ethtypes.SignedBeaconBlockCapella{}
-		err = p.cfg.Encoder.DecodeGossip(msgData, &capellaSbb)
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("error decoding capella beacon block gossip message: %w", err)
-		}
-		genericSbb = capellaSbb.GetBlock()
-		root, err = capellaSbb.Block.HashTreeRoot()
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
-		}
-		return genericSbb, root, nil
-
-	case DenebForkVersion:
-		denebSbb := ethtypes.SignedBeaconBlockDeneb{}
-		err = p.cfg.Encoder.DecodeGossip(msgData, &denebSbb)
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("error decoding deneb beacon block gossip message: %w", err)
-		}
-		genericSbb = denebSbb.GetBlock()
-		root, err = denebSbb.Block.HashTreeRoot()
-		if err != nil {
-			return genericSbb, [32]byte{}, fmt.Errorf("invalid hash tree root: %w", err)
-		}
-		return genericSbb, root, nil
-
-	default:
-		return genericSbb, [32]byte{}, fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
-	}
 }

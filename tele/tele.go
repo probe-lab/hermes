@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"time"
@@ -141,9 +142,17 @@ func OtelCollectorTraceProvider(ctx context.Context, host string, port int) (*sd
 	defer cancel()
 
 	slog.Debug("Connecting to trace collector", "addr", addr)
-	conn, err := grpc.DialContext(ctx, addr,
+
+	// Set up a custom context-aware dialer.
+	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", addr)
+	}
+
+	conn, err := grpc.NewClient(
+		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
+		grpc.WithContextDialer(dialer),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to otel collector: %w", err)

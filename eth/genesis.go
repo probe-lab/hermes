@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
 )
@@ -24,7 +25,7 @@ var (
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
 
-	currentBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
+	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
 
 // configure global ForkVersion variables
@@ -34,7 +35,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
-	currentBeaconConfig = beaconConfig
+	globalBeaconConfig = beaconConfig
 }
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root
@@ -87,4 +88,29 @@ func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconCha
 	default:
 		return [4]byte{}, fmt.Errorf("not recognized case for epoch %d", epoch)
 	}
+}
+
+func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) {
+	genesisRoot := GenesisConfigs[globalBeaconConfig.ConfigName].GenesisValidatorRoot
+	phase0D, _ := signing.ComputeForkDigest(Phase0ForkVersion[:], genesisRoot)
+	altairD, _ := signing.ComputeForkDigest(AltairForkVersion[:], genesisRoot)
+	bellatrixD, _ := signing.ComputeForkDigest(BellatrixForkVersion[:], genesisRoot)
+	capellaD, _ := signing.ComputeForkDigest(CapellaForkVersion[:], genesisRoot)
+	denebD, _ := signing.ComputeForkDigest(DenebForkVersion[:], genesisRoot)
+	switch forkD {
+	case phase0D:
+		forkV = Phase0ForkVersion
+	case altairD:
+		forkV = AltairForkVersion
+	case bellatrixD:
+		forkV = BellatrixForkVersion
+	case capellaD:
+		forkV = CapellaForkVersion
+	case denebD:
+		forkV = DenebForkVersion
+	default:
+		forkV = ForkVersion{}
+		err = fmt.Errorf("not recognized fork_version for (%s)", hex.EncodeToString([]byte(forkD[:])))
+	}
+	return forkV, err
 }

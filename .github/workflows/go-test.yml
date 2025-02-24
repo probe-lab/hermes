@@ -14,9 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go-test:
-    uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
-    with:
-      go-versions: '["this"]'
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  go-tests: 
+    runs-on: ubuntu-latest
+    timeout-minutes: 5 # in minutes
+    services:
+      s3:
+        image: localstack/localstack
+        ports:
+          - "127.0.0.1:4566:4566"
+        env:
+          SERVICES: "s3"
+          DEFAULT_REGION: "us-east-1"
+          S3_BUCKET: locals3
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        options: >-
+          --health-cmd "awslocal s3 mb s3://locals3"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: './go.mod'
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Test with the Go CLI
+        run: go test ./host ./eth ./tele  
