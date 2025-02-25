@@ -50,6 +50,8 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderCapellaBlock(msg, d)
 	case *ethtypes.SignedBeaconBlockDeneb:
 		payload, err = k.renderDenebBlock(msg, d)
+	case *ethtypes.SignedBeaconBlockElectra:
+		payload, err = k.renderElectraBlock(msg, d)
 	case *ethtypes.Attestation:
 		payload, err = k.renderAttestation(msg, d)
 	case *ethtypes.AttestationElectra:

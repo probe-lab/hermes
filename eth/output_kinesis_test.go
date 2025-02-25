@@ -342,6 +342,16 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
 				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+			case *ethtypes.SignedBeaconBlockElectra:
+				root, err := typedResult.GetBlock().HashTreeRoot()
+				if err != nil {
+					t.Fatalf("failed to determine block hash tree root: %v", err)
+				}
+
+				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
+				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
+				require.Equal(t, root, result["Root"])
+				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.Attestation:
 				require.Equal(t, typedResult.GetData().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetData().GetCommitteeIndex(), result["CommIdx"])
