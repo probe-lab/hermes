@@ -54,6 +54,8 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderAttestation(msg, d)
 	case *ethtypes.AttestationElectra:
 		payload, err = k.renderAttestationElectra(msg, d)
+	case *ethtypes.SingleAttestation:
+		payload, err = k.renderSingleAttestation(msg, d)
 	case *ethtypes.SignedAggregateAttestationAndProof:
 		payload, err = k.renderAggregateAttestationAndProof(msg, d)
 	case *ethtypes.SignedAggregateAttestationAndProofElectra:
@@ -271,6 +273,26 @@ func (k *KinesisOutput) renderAttestationElectra(
 	}
 
 	return payload, nil
+}
+
+func (k *KinesisOutput) renderSingleAttestation(
+	msg *pubsub.Message,
+	attestation *ethtypes.SingleAttestation,
+) (map[string]any, error) {
+	return map[string]any{
+		"PeerID":          msg.ReceivedFrom,
+		"Topic":           msg.GetTopic(),
+		"Seq":             hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":           hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":         len(msg.Data),
+		"CommIdx":         attestation.GetData().GetCommitteeIndex(),
+		"Slot":            attestation.GetData().GetSlot(),
+		"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
+		"Source":          attestation.GetData().GetSource(),
+		"Target":          attestation.GetData().GetTarget(),
+		"CommitteeId":     attestation.GetCommitteeId(),
+		"AttesterIndex":   attestation.GetAttesterIndex(),
+	}, nil
 }
 
 func (k *KinesisOutput) renderAggregateAttestationAndProof(

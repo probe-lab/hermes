@@ -261,6 +261,12 @@ func TestFullOutputRenderMethods(t *testing.T) {
 				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
 				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
 				require.Equal(t, tc.payload.(*ethtypes.AttestationElectra), typedResult.AttestationElectra)
+			case *TraceEventSingleAttestation:
+				require.Equal(t, baseMsg.ReceivedFrom.String(), typedResult.PeerID)
+				require.Equal(t, baseMsg.GetTopic(), typedResult.Topic)
+				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
+				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
+				require.Equal(t, tc.payload.(*ethtypes.SingleAttestation), typedResult.SingleAttestation)
 			case *TraceEventSignedAggregateAttestationAndProofElectra:
 				require.Equal(t, baseMsg.ReceivedFrom.String(), typedResult.PeerID)
 				require.Equal(t, baseMsg.GetTopic(), typedResult.Topic)

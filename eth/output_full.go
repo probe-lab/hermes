@@ -50,6 +50,11 @@ type TraceEventAttestationElectra struct {
 	AttestationElectra *ethtypes.AttestationElectra
 }
 
+type TraceEventSingleAttestation struct {
+	host.TraceEventPayloadMetaData
+	SingleAttestation *ethtypes.SingleAttestation
+}
+
 type TraceEventSignedAggregateAttestationAndProof struct {
 	host.TraceEventPayloadMetaData
 	SignedAggregateAttestationAndProof *ethtypes.SignedAggregateAttestationAndProof
@@ -139,6 +144,8 @@ func (t *FullOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, ds
 		payload, err = t.renderAttestation(msg, d)
 	case *ethtypes.AttestationElectra:
 		payload, err = t.renderAttestationElectra(msg, d)
+	case *ethtypes.SingleAttestation:
+		payload, err = t.renderSingleAttestation(msg, d)
 	case *ethtypes.SignedAggregateAttestationAndProof:
 		payload, err = t.renderAggregateAttestationAndProof(msg, d)
 	case *ethtypes.SignedAggregateAttestationAndProofElectra:
@@ -295,6 +302,22 @@ func (t *FullOutput) renderAttestationElectra(
 			MsgSize: len(msg.Data),
 		},
 		AttestationElectra: attestation,
+	}, nil
+}
+
+func (t *FullOutput) renderSingleAttestation(
+	msg *pubsub.Message,
+	attestation *ethtypes.SingleAttestation,
+) (*TraceEventSingleAttestation, error) {
+	return &TraceEventSingleAttestation{
+		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{
+			PeerID:  msg.ReceivedFrom.String(),
+			Topic:   msg.GetTopic(),
+			Seq:     msg.GetSeqno(),
+			MsgID:   hex.EncodeToString([]byte(msg.ID)),
+			MsgSize: len(msg.Data),
+		},
+		SingleAttestation: attestation,
 	}, nil
 }
 

@@ -393,6 +393,14 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetData().GetBeaconBlockRoot(), result["BeaconBlockRoot"])
 				require.Equal(t, typedResult.GetData().GetSource(), result["Source"])
 				require.Equal(t, typedResult.GetData().GetTarget(), result["Target"])
+			case *ethtypes.SingleAttestation:
+				require.Equal(t, typedResult.GetData().GetSlot(), result["Slot"])
+				require.Equal(t, typedResult.GetData().GetCommitteeIndex(), result["CommIdx"])
+				require.Equal(t, typedResult.GetData().GetBeaconBlockRoot(), result["BeaconBlockRoot"])
+				require.Equal(t, typedResult.GetData().GetSource(), result["Source"])
+				require.Equal(t, typedResult.GetData().GetTarget(), result["Target"])
+				require.Equal(t, typedResult.GetCommitteeId(), result["CommitteeId"])
+				require.Equal(t, typedResult.GetAttesterIndex(), result["AttesterIndex"])
 			case *ethtypes.SignedAggregateAttestationAndProofElectra:
 				require.Equal(t, typedResult.GetMessage().GetAggregatorIndex(), result["AggIdx"])
 				require.Equal(t, hexutil.Encode(typedResult.GetMessage().GetSelectionProof()), result["SelectionProof"])
