@@ -393,7 +393,10 @@ func desiredPubSubBaseTopics() []string {
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
 		p2p.GossipAttestationMessage,
-		p2p.GossipExitMessage,
+		// In relation to https://github.com/probe-lab/hermes/issues/24
+		// we unfortunatelly can't validate the messages (yet)
+		// thus, better not to forward invalid messages
+		// p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
@@ -443,10 +446,10 @@ func topicFormatFromBase(topicBase string) (string, error) {
 func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 	switch topic {
 	case p2p.GossipAttestationMessage:
-		return uint64(2), true
+		return globalBeaconConfig.AttestationSubnetCount, true
 
 	case p2p.GossipSyncCommitteeMessage:
-		return uint64(2), true
+		return globalBeaconConfig.SyncCommitteeSubnetCount, true
 
 	case p2p.GossipBlobSidecarMessage:
 		return globalBeaconConfig.BlobsidecarSubnetCount, true

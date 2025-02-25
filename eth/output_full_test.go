@@ -82,11 +82,27 @@ func TestFullOutputRenderMethods(t *testing.T) {
 			},
 		},
 		{
+			name:         "renderAttestationElectra",
+			payload:      &ethtypes.AttestationElectra{},
+			expectedType: &TraceEventAttestationElectra{},
+			render: func(msg *pubsub.Message, payload any) (any, error) {
+				return renderer.renderAttestationElectra(msg, payload.(*ethtypes.AttestationElectra))
+			},
+		},
+		{
 			name:         "renderAggregateAttestationAndProof",
 			payload:      &ethtypes.SignedAggregateAttestationAndProof{},
 			expectedType: &TraceEventSignedAggregateAttestationAndProof{},
 			render: func(msg *pubsub.Message, payload any) (any, error) {
 				return renderer.renderAggregateAttestationAndProof(msg, payload.(*ethtypes.SignedAggregateAttestationAndProof))
+			},
+		},
+		{
+			name:         "renderAggregateAttestationAndProofElectra",
+			payload:      &ethtypes.SignedAggregateAttestationAndProofElectra{},
+			expectedType: &TraceEventSignedAggregateAttestationAndProofElectra{},
+			render: func(msg *pubsub.Message, payload any) (any, error) {
+				return renderer.renderAggregateAttestationAndProofElectra(msg, payload.(*ethtypes.SignedAggregateAttestationAndProofElectra))
 			},
 		},
 		{
@@ -239,6 +255,24 @@ func TestFullOutputRenderMethods(t *testing.T) {
 				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
 				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
 				require.Equal(t, tc.payload.(*ethtypes.AttesterSlashing), typedResult.AttesterSlashing)
+			case *TraceEventAttestationElectra:
+				require.Equal(t, baseMsg.ReceivedFrom.String(), typedResult.PeerID)
+				require.Equal(t, baseMsg.GetTopic(), typedResult.Topic)
+				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
+				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
+				require.Equal(t, tc.payload.(*ethtypes.AttestationElectra), typedResult.AttestationElectra)
+			case *TraceEventSingleAttestation:
+				require.Equal(t, baseMsg.ReceivedFrom.String(), typedResult.PeerID)
+				require.Equal(t, baseMsg.GetTopic(), typedResult.Topic)
+				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
+				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
+				require.Equal(t, tc.payload.(*ethtypes.SingleAttestation), typedResult.SingleAttestation)
+			case *TraceEventSignedAggregateAttestationAndProofElectra:
+				require.Equal(t, baseMsg.ReceivedFrom.String(), typedResult.PeerID)
+				require.Equal(t, baseMsg.GetTopic(), typedResult.Topic)
+				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
+				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
+				require.Equal(t, tc.payload.(*ethtypes.SignedAggregateAttestationAndProofElectra), typedResult.SignedAggregateAttestationAndProofElectra)
 			default:
 				t.Fatalf("unexpected result type: %T", result)
 			}

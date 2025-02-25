@@ -45,9 +45,24 @@ type TraceEventAttestation struct {
 	Attestation *ethtypes.Attestation
 }
 
+type TraceEventAttestationElectra struct {
+	host.TraceEventPayloadMetaData
+	AttestationElectra *ethtypes.AttestationElectra
+}
+
+type TraceEventSingleAttestation struct {
+	host.TraceEventPayloadMetaData
+	SingleAttestation *ethtypes.SingleAttestation
+}
+
 type TraceEventSignedAggregateAttestationAndProof struct {
 	host.TraceEventPayloadMetaData
 	SignedAggregateAttestationAndProof *ethtypes.SignedAggregateAttestationAndProof
+}
+
+type TraceEventSignedAggregateAttestationAndProofElectra struct {
+	host.TraceEventPayloadMetaData
+	SignedAggregateAttestationAndProofElectra *ethtypes.SignedAggregateAttestationAndProofElectra
 }
 
 type TraceEventSignedContributionAndProof struct {
@@ -127,8 +142,14 @@ func (t *FullOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, ds
 		payload, err = t.renderElectraBlock(msg, d)
 	case *ethtypes.Attestation:
 		payload, err = t.renderAttestation(msg, d)
+	case *ethtypes.AttestationElectra:
+		payload, err = t.renderAttestationElectra(msg, d)
+	case *ethtypes.SingleAttestation:
+		payload, err = t.renderSingleAttestation(msg, d)
 	case *ethtypes.SignedAggregateAttestationAndProof:
 		payload, err = t.renderAggregateAttestationAndProof(msg, d)
+	case *ethtypes.SignedAggregateAttestationAndProofElectra:
+		payload, err = t.renderAggregateAttestationAndProofElectra(msg, d)
 	case *ethtypes.SignedContributionAndProof:
 		payload, err = t.renderContributionAndProof(msg, d)
 	case *ethtypes.VoluntaryExit:
@@ -248,6 +269,7 @@ func (t *FullOutput) renderElectraBlock(
 			MsgID:   hex.EncodeToString([]byte(msg.ID)),
 			MsgSize: len(msg.Data),
 		},
+		Block: block,
 	}, nil
 }
 
@@ -267,6 +289,38 @@ func (t *FullOutput) renderAttestation(
 	}, nil
 }
 
+func (t *FullOutput) renderAttestationElectra(
+	msg *pubsub.Message,
+	attestation *ethtypes.AttestationElectra,
+) (*TraceEventAttestationElectra, error) {
+	return &TraceEventAttestationElectra{
+		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{
+			PeerID:  msg.ReceivedFrom.String(),
+			Topic:   msg.GetTopic(),
+			Seq:     msg.GetSeqno(),
+			MsgID:   hex.EncodeToString([]byte(msg.ID)),
+			MsgSize: len(msg.Data),
+		},
+		AttestationElectra: attestation,
+	}, nil
+}
+
+func (t *FullOutput) renderSingleAttestation(
+	msg *pubsub.Message,
+	attestation *ethtypes.SingleAttestation,
+) (*TraceEventSingleAttestation, error) {
+	return &TraceEventSingleAttestation{
+		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{
+			PeerID:  msg.ReceivedFrom.String(),
+			Topic:   msg.GetTopic(),
+			Seq:     msg.GetSeqno(),
+			MsgID:   hex.EncodeToString([]byte(msg.ID)),
+			MsgSize: len(msg.Data),
+		},
+		SingleAttestation: attestation,
+	}, nil
+}
+
 func (t *FullOutput) renderAggregateAttestationAndProof(
 	msg *pubsub.Message,
 	agg *ethtypes.SignedAggregateAttestationAndProof,
@@ -280,6 +334,22 @@ func (t *FullOutput) renderAggregateAttestationAndProof(
 			MsgSize: len(msg.Data),
 		},
 		SignedAggregateAttestationAndProof: agg,
+	}, nil
+}
+
+func (t *FullOutput) renderAggregateAttestationAndProofElectra(
+	msg *pubsub.Message,
+	agg *ethtypes.SignedAggregateAttestationAndProofElectra,
+) (*TraceEventSignedAggregateAttestationAndProofElectra, error) {
+	return &TraceEventSignedAggregateAttestationAndProofElectra{
+		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{
+			PeerID:  msg.ReceivedFrom.String(),
+			Topic:   msg.GetTopic(),
+			Seq:     msg.GetSeqno(),
+			MsgID:   hex.EncodeToString([]byte(msg.ID)),
+			MsgSize: len(msg.Data),
+		},
+		SignedAggregateAttestationAndProofElectra: agg,
 	}, nil
 }
 
