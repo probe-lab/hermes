@@ -1,3 +1,5 @@
+![Hermes ProbeLab Logo](./resources/banner-hermes.svg)
+
 # Hermes
 
 [![ProbeLab](https://img.shields.io/badge/made%20by-ProbeLab-blue.svg)](https://probelab.io)
