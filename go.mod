@@ -12,7 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.72.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/dennis-tra/go-kinesis v0.0.0-20240326083914-7acf5f8dc24e
-	github.com/ethereum/go-ethereum v1.14.13
+	github.com/ethereum/go-ethereum v1.15.3
 	github.com/ferranbt/fastssz v0.1.4
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -200,7 +200,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/afero v1.11.0 // indirect
-	github.com/supranational/blst v0.3.13 // indirect
+	github.com/supranational/blst v0.3.14 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 // indirect
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
