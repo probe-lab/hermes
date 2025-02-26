@@ -401,8 +401,8 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 					RemotePeerID: remoteID.String(),
 				},
 				Ihaves:     int32(ihavesMsgs),
-				Iwants:     int32(ihavesMsgs),
-				Idontwants: int32(ihavesMsgs),
+				Iwants:     int32(iwantsMsgs),
+				Idontwants: int32(idontwantsMsgs),
 			},
 		}
 	}
