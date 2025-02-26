@@ -45,7 +45,7 @@ git clone git@github.com:probe-lab/hermes.git
 Start Hermes by running
 
 ```shell
-go run ./cmd/hermes # requires Go >=1.22
+go run ./cmd/hermes # requires Go >=1.23
 ```
 
 <details>
