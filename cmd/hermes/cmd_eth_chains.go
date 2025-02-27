@@ -39,6 +39,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 			config.Beacon.BellatrixForkVersion,
 			config.Beacon.CapellaForkVersion,
 			config.Beacon.DenebForkVersion,
+			config.Beacon.ElectraForkVersion,
 		}
 
 		for _, forkVersion := range forkVersions {

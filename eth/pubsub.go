@@ -182,6 +182,8 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 		block = &ethtypes.SignedBeaconBlockCapella{}
 	case DenebForkVersion:
 		block = &ethtypes.SignedBeaconBlockDeneb{}
+	case ElectraForkVersion:
+		block = &ethtypes.SignedBeaconBlockElectra{}
 	default:
 		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %s", p.cfg.ForkVersion.String())
 	}
@@ -219,7 +221,13 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		}
 	)
 
-	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.Attestation{})
+	switch p.cfg.ForkVersion {
+	case ElectraForkVersion:
+		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SingleAttestation{})
+	default:
+		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.Attestation{})
+	}
+
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -252,7 +260,13 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 		}
 	)
 
-	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProof{})
+	switch p.cfg.ForkVersion {
+	case ElectraForkVersion:
+		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProofElectra{})
+	default:
+		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProof{})
+	}
+
 	if err != nil {
 		slog.Warn(
 			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
@@ -484,7 +498,7 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 	)
 
 	switch p.cfg.ForkVersion {
-	case DenebForkVersion:
+	case DenebForkVersion, ElectraForkVersion:
 		blob := ethtypes.BlobSidecar{}
 
 		evt, err = p.dsr.RenderPayload(evt, msg, &blob)
