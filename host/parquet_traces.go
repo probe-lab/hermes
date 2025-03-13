@@ -26,6 +26,7 @@ const (
 	EventTypeIhave
 	EventTypeIwant
 	EventTypeIdontwant
+	EventTypeSentMsg
 	// Gossip Message arrivals
 	EventTypeMsgArrivals
 	// Gossip Join/Leave Topic
@@ -55,6 +56,8 @@ func (e EventType) String() string {
 		return "iwant"
 	case EventTypeIdontwant:
 		return "idontwant"
+	case EventTypeSentMsg:
+		return "sent_msg"
 	case EventTypeMsgArrivals:
 		return "msg_arrival"
 	case EventTypeJoinLeaveTopic:
@@ -74,6 +77,7 @@ var allEventTypes = []EventType{
 	EventTypeIhave,
 	EventTypeIwant,
 	EventTypeIdontwant,
+	EventTypeSentMsg,
 	EventTypeMsgArrivals,
 	EventTypeJoinLeaveTopic,
 	EventTypeConnectDisconnectPeer,
@@ -220,6 +224,7 @@ type SendRecvRPCEvent struct {
 	Ihaves     int32 `parquet:"ihaves"`
 	Iwants     int32 `parquet:"iwants"`
 	Idontwants int32 `parquet:"idontwants"`
+	SentMsgs   int32 `parquet:"sent_msgs"`
 }
 
 type BaseRPCEvent struct {
@@ -246,6 +251,12 @@ type GossipIdontwantEvent struct {
 	BaseRPCEvent
 	MsgIDs []string `parquet:"msg_ids,list"`
 	Msgs   int      `parquet:"msgs"`
+}
+
+type GossipSentMsgEvent struct {
+	BaseRPCEvent
+	MsgID string `parquet:"msg_ids"`
+	Topic string `parquet:"topic"`
 }
 
 type RPCdirection int8
@@ -296,8 +307,9 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 	rpcMeta := rawEvent.Payload.(*RpcMeta)
 	remoteID := rpcMeta.PeerID
 	eventSubevents := make(map[EventType][]any)
-	// if no control event - continue
-	if rpcMeta.Control == nil {
+	// if no control event, nor out-going messages, continue
+	// only track messages if the they are outgoing - prevent spam of traces as we already trace down arrival ones
+	if (rpcMeta.Messages == nil || (rpcMeta.Messages != nil && rpcDirection != RPCdirectionOut)) && rpcMeta.Control == nil {
 		return eventSubevents, nil
 	}
 
@@ -305,6 +317,7 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 	ihavesMsgs := 0
 	iwantsMsgs := 0
 	idontwantsMsgs := 0
+	totSentMsgs := 0
 
 	isOg := func(isFirst *bool) bool {
 		defer func() {
@@ -312,80 +325,112 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 		}()
 		return *isFirst
 	}
-	// Ihaves
-	if len(rpcMeta.Control.IHave) > 0 {
-		ihaves := make([]any, len(rpcMeta.Control.IHave))
-		for idx, ihave := range rpcMeta.Control.IHave {
-			event := &GossipIhaveEvent{
-				BaseRPCEvent: BaseRPCEvent{
-					BaseEvent: BaseEvent{
-						Timestamp:  timestamp,
-						Type:       EventTypeIhave.String(),
-						ProducerID: producerID,
+	// Sent Msgs
+	if rpcMeta.Messages != nil {
+		if len(rpcMeta.Messages) > 0 && rpcDirection == RPCdirectionOut {
+			sentMsgs := make([]any, len(rpcMeta.Messages))
+			for idx, msg := range rpcMeta.Messages {
+				event := &GossipSentMsgEvent{
+					BaseRPCEvent: BaseRPCEvent{
+						BaseEvent: BaseEvent{
+							Timestamp:  timestamp,
+							Type:       EventTypeSentMsg.String(),
+							ProducerID: producerID,
+						},
+						IsOg:         false,
+						Direction:    rpcDirection.String(),
+						RemotePeerID: remoteID.String(),
 					},
-					IsOg:         isOg(&isFirst),
-					Direction:    rpcDirection.String(),
-					RemotePeerID: remoteID.String(),
-				},
-				Topic:  ihave.TopicID,
-				MsgIDs: ihave.MsgIDs,
-				Msgs:   len(ihave.MsgIDs),
+					Topic: msg.Topic,
+					MsgID: msg.MsgID,
+				}
+				sentMsgs[idx] = event
+				totSentMsgs++
 			}
-			ihaves[idx] = event
-			ihavesMsgs++
+			eventSubevents[EventTypeSentMsg] = sentMsgs
 		}
-		eventSubevents[EventTypeIhave] = ihaves
+	}
+
+	// Ihaves
+	if rpcMeta.Control != nil {
+		if len(rpcMeta.Control.IHave) > 0 {
+			ihaves := make([]any, len(rpcMeta.Control.IHave))
+			for idx, ihave := range rpcMeta.Control.IHave {
+				event := &GossipIhaveEvent{
+					BaseRPCEvent: BaseRPCEvent{
+						BaseEvent: BaseEvent{
+							Timestamp:  timestamp,
+							Type:       EventTypeIhave.String(),
+							ProducerID: producerID,
+						},
+						IsOg:         isOg(&isFirst),
+						Direction:    rpcDirection.String(),
+						RemotePeerID: remoteID.String(),
+					},
+					Topic:  ihave.TopicID,
+					MsgIDs: ihave.MsgIDs,
+					Msgs:   len(ihave.MsgIDs),
+				}
+				ihaves[idx] = event
+				ihavesMsgs++
+			}
+			eventSubevents[EventTypeIhave] = ihaves
+		}
 	}
 
 	// Iwants
-	if len(rpcMeta.Control.IWant) > 0 {
-		iwants := make([]any, len(rpcMeta.Control.IWant))
-		for idx, iwant := range rpcMeta.Control.IWant {
-			event := &GossipIwantEvent{
-				BaseRPCEvent: BaseRPCEvent{
-					BaseEvent: BaseEvent{
-						Timestamp:  timestamp,
-						Type:       EventTypeIwant.String(),
-						ProducerID: producerID,
+	if rpcMeta.Control != nil {
+		if len(rpcMeta.Control.IWant) > 0 {
+			iwants := make([]any, len(rpcMeta.Control.IWant))
+			for idx, iwant := range rpcMeta.Control.IWant {
+				event := &GossipIwantEvent{
+					BaseRPCEvent: BaseRPCEvent{
+						BaseEvent: BaseEvent{
+							Timestamp:  timestamp,
+							Type:       EventTypeIwant.String(),
+							ProducerID: producerID,
+						},
+						IsOg:         isOg(&isFirst),
+						Direction:    rpcDirection.String(),
+						RemotePeerID: remoteID.String(),
 					},
-					IsOg:         isOg(&isFirst),
-					Direction:    rpcDirection.String(),
-					RemotePeerID: remoteID.String(),
-				},
-				MsgIDs: iwant.MsgIDs,
-				Msgs:   len(iwant.MsgIDs),
+					MsgIDs: iwant.MsgIDs,
+					Msgs:   len(iwant.MsgIDs),
+				}
+				iwants[idx] = event
+				iwantsMsgs++
 			}
-			iwants[idx] = event
-			iwantsMsgs++
+			eventSubevents[EventTypeIwant] = iwants
 		}
-		eventSubevents[EventTypeIwant] = iwants
 	}
 
 	// Idontwants
-	if len(rpcMeta.Control.Idontwant) > 0 {
-		idontwants := make([]any, len(rpcMeta.Control.Idontwant))
-		for idx, idw := range rpcMeta.Control.Idontwant {
-			event := &GossipIdontwantEvent{
-				BaseRPCEvent: BaseRPCEvent{
-					BaseEvent: BaseEvent{
-						Timestamp:  timestamp,
-						Type:       EventTypeIdontwant.String(),
-						ProducerID: producerID,
+	if rpcMeta.Control != nil {
+		if len(rpcMeta.Control.Idontwant) > 0 {
+			idontwants := make([]any, len(rpcMeta.Control.Idontwant))
+			for idx, idw := range rpcMeta.Control.Idontwant {
+				event := &GossipIdontwantEvent{
+					BaseRPCEvent: BaseRPCEvent{
+						BaseEvent: BaseEvent{
+							Timestamp:  timestamp,
+							Type:       EventTypeIdontwant.String(),
+							ProducerID: producerID,
+						},
+						IsOg:         isOg(&isFirst),
+						Direction:    rpcDirection.String(),
+						RemotePeerID: remoteID.String(),
 					},
-					IsOg:         isOg(&isFirst),
-					Direction:    rpcDirection.String(),
-					RemotePeerID: remoteID.String(),
-				},
-				MsgIDs: idw.MsgIDs,
-				Msgs:   len(idw.MsgIDs),
+					MsgIDs: idw.MsgIDs,
+					Msgs:   len(idw.MsgIDs),
+				}
+				idontwants[idx] = event
+				idontwantsMsgs++
 			}
-			idontwants[idx] = event
-			idontwantsMsgs++
+			eventSubevents[EventTypeIdontwant] = idontwants
 		}
-		eventSubevents[EventTypeIdontwant] = idontwants
 	}
 
-	if ihavesMsgs > 0 || iwantsMsgs > 0 || idontwantsMsgs > 0 {
+	if ihavesMsgs > 0 || iwantsMsgs > 0 || idontwantsMsgs > 0 || totSentMsgs > 0 {
 		// if there is any kind of control message we are interested in
 		// create an extra RPC event with the summary
 		eventSubevents[EventTypeControlRPC] = []any{
@@ -401,8 +446,9 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 					RemotePeerID: remoteID.String(),
 				},
 				Ihaves:     int32(ihavesMsgs),
-				Iwants:     int32(ihavesMsgs),
-				Idontwants: int32(ihavesMsgs),
+				Iwants:     int32(iwantsMsgs),
+				Idontwants: int32(idontwantsMsgs),
+				SentMsgs:   int32(totSentMsgs),
 			},
 		}
 	}

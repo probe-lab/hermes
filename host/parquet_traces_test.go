@@ -210,6 +210,12 @@ func TestParquetFormating(t *testing.T) {
 							},
 						},
 					},
+					Messages: []RpcMetaMsg{
+						{
+							MsgID: dummyMsgID1,
+							Topic: testTopic,
+						},
+					},
 				},
 			),
 			expectedFormat: map[EventType]any{
@@ -250,12 +256,19 @@ func TestParquetFormating(t *testing.T) {
 							},
 						},
 					},
+					Messages: []RpcMetaMsg{
+						{
+							MsgID: dummyMsgID1,
+							Topic: testTopic,
+						},
+					},
 				},
 			),
 			expectedFormat: map[EventType]any{
 				EventTypeIhave:      &GossipIhaveEvent{},
 				EventTypeIwant:      &GossipIwantEvent{},
 				EventTypeIdontwant:  &GossipIdontwantEvent{},
+				EventTypeSentMsg:    &GossipSentMsgEvent{},
 				EventTypeControlRPC: &SendRecvRPCEvent{},
 			},
 		},
@@ -288,6 +301,12 @@ func TestParquetFormating(t *testing.T) {
 									dummyMsgID2,
 								},
 							},
+						},
+					},
+					Messages: []RpcMetaMsg{
+						{
+							MsgID: dummyMsgID1,
+							Topic: testTopic,
 						},
 					},
 				},
@@ -393,7 +412,11 @@ func TestParquetFormating(t *testing.T) {
 						direction, err := directionFromRPC(test.rawEvent.Type)
 						require.NoError(t, err)
 						requireBaseRPCEvent(t, direction, false, e.BaseRPCEvent)
-						requireSendRecvRPCEvent(t, e)
+						if test.rawEvent.Type == pubsub_pb.TraceEvent_SEND_RPC.String() {
+							requireSendRecvRPCEvent(t, 1, e)
+						} else {
+							requireSendRecvRPCEvent(t, 0, e)
+						}
 
 					case *GossipIhaveEvent:
 						// only the first IHAVE event should be the OG one
@@ -423,8 +446,14 @@ func TestParquetFormating(t *testing.T) {
 						requireBaseRPCEvent(t, direction, false, e.BaseRPCEvent)
 						requireIdontwantEvent(t, e)
 
+					case *GossipSentMsgEvent:
+						requireBaseEvent(t, EventTypeSentMsg, e.BaseEvent)
+						direction, err := directionFromRPC(test.rawEvent.Type)
+						require.NoError(t, err)
+						requireBaseRPCEvent(t, direction, false, e.BaseRPCEvent)
+						requireSentMsgEvent(t, e)
+
 					case *GossipMsgArrivalEvent:
-						// only the first IHAVE event should be the OG one
 						requireBaseEvent(t, EventTypeMsgArrivals, e.BaseEvent)
 						switch test.rawEvent.Type {
 						case pubsub_pb.TraceEvent_DELIVER_MESSAGE.String():
@@ -507,13 +536,14 @@ func requireBaseRPCEvent(t *testing.T, direction RPCdirection, isOg bool, event 
 	require.Equal(t, event.RemotePeerID, dummyRemoteID.String())
 }
 
-func requireSendRecvRPCEvent(t *testing.T, event *SendRecvRPCEvent) {
+func requireSendRecvRPCEvent(t *testing.T, msgs int, event *SendRecvRPCEvent) {
 	require.Equal(t, event.RemotePeerID, dummyRemoteID.String())
 	// TODO: hardcoded so far
 	// 1 item per control
 	require.Equal(t, event.Ihaves, int32(1))
 	require.Equal(t, event.Iwants, int32(1))
 	require.Equal(t, event.Ihaves, int32(1))
+	require.Equal(t, event.SentMsgs, int32(msgs))
 }
 
 func requireIhaveEvent(t *testing.T, event *GossipIhaveEvent) {
@@ -536,6 +566,13 @@ func requireIdontwantEvent(t *testing.T, event *GossipIdontwantEvent) {
 	// TODO: hardcoded so far
 	require.Equal(t, len(event.MsgIDs), event.Msgs)
 	require.Equal(t, event.Msgs, 1)
+}
+
+func requireSentMsgEvent(t *testing.T, event *GossipSentMsgEvent) {
+	require.Equal(t, event.RemotePeerID, dummyRemoteID.String())
+	// TODO: hardcoded so far
+	require.Equal(t, event.MsgID, dummyMsgID1)
+	require.Equal(t, event.Topic, testTopic)
 }
 
 func requireMsgArrivalEvent(t *testing.T, subType EventSubType, event *GossipMsgArrivalEvent) {

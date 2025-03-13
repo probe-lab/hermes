@@ -442,6 +442,13 @@ func (s3ds *S3DataStream) startS3Flusher(
 					continue
 				}
 
+			case EventTypeSentMsg:
+				totBytes, buf, err = EventsToBytes[GossipSentMsgEvent](eventT.Events, parquetOpts...)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
 			case EventTypeMsgArrivals:
 				totBytes, buf, err = EventsToBytes[GossipMsgArrivalEvent](eventT.Events, parquetOpts...)
 				if err != nil {
