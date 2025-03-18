@@ -23,6 +23,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 		params.MainnetName,
 		params.SepoliaName,
 		params.HoleskyName,
+		params.HoodiName,
 	}
 
 	slog.Info("Supported chains:")
