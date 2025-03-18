@@ -41,6 +41,12 @@ func DeriveKnownNetworkConfig(ctx context.Context, network string) (*NetworkConf
 			Beacon:  params.HoleskyConfig(),
 			Network: defaultBeaconNetworkConfig,
 		}, nil
+	case params.HoodiName:
+		return &NetworkConfig{
+			Genesis: GenesisConfigs[network],
+			Beacon:  params.HoodiConfig(),
+			Network: defaultBeaconNetworkConfig,
+		}, nil
 	case params.DevnetName:
 		return nil, errors.New("network devnet not supported")
 	default:
