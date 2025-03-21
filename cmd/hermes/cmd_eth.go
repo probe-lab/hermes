@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"github.com/prysmaticlabs/prysm/v5/time/slots"
@@ -39,6 +42,22 @@ var ethConfig = &struct {
 	ConfigURL                   string
 	BootnodesURL                string
 	DepositContractBlockURL     string
+	// Subnet configuration.
+	SubnetAttestationType      string
+	SubnetAttestationSubnets   string
+	SubnetAttestationCount     uint64
+	SubnetAttestationStart     uint64
+	SubnetAttestationEnd       uint64
+	SubnetSyncCommitteeType    string
+	SubnetSyncCommitteeSubnets string
+	SubnetSyncCommitteeCount   uint64
+	SubnetSyncCommitteeStart   uint64
+	SubnetSyncCommitteeEnd     uint64
+	SubnetBlobSidecarType      string
+	SubnetBlobSidecarSubnets   string
+	SubnetBlobSidecarCount     uint64
+	SubnetBlobSidecarStart     uint64
+	SubnetBlobSidecarEnd       uint64
 }{
 	PrivateKeyStr:               "", // unset means it'll be generated
 	Chain:                       params.MainnetName,
@@ -59,6 +78,22 @@ var ethConfig = &struct {
 	ConfigURL:                   "",
 	BootnodesURL:                "",
 	DepositContractBlockURL:     "",
+	// Default subnet configuration values.
+	SubnetAttestationType:      "all",
+	SubnetAttestationSubnets:   "",
+	SubnetAttestationCount:     0,
+	SubnetAttestationStart:     0,
+	SubnetAttestationEnd:       0,
+	SubnetSyncCommitteeType:    "all",
+	SubnetSyncCommitteeSubnets: "",
+	SubnetSyncCommitteeCount:   0,
+	SubnetSyncCommitteeStart:   0,
+	SubnetSyncCommitteeEnd:     0,
+	SubnetBlobSidecarType:      "all",
+	SubnetBlobSidecarSubnets:   "",
+	SubnetBlobSidecarCount:     0,
+	SubnetBlobSidecarStart:     0,
+	SubnetBlobSidecarEnd:       0,
 }
 
 var cmdEth = &cli.Command{
@@ -213,6 +248,114 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.DepositContractBlockURL,
 		Destination: &ethConfig.DepositContractBlockURL,
 	},
+	// Subnet flags for attestation.
+	&cli.StringFlag{
+		Name:        "subnet.attestation.type",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_ATTESTATION_TYPE"},
+		Usage:       "Subnet selection strategy for attestation topics (all, static, random, static_range)",
+		Value:       ethConfig.SubnetAttestationType,
+		Destination: &ethConfig.SubnetAttestationType,
+	},
+	&cli.StringFlag{
+		Name:        "subnet.attestation.subnets",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_ATTESTATION_SUBNETS"},
+		Usage:       "Comma-separated list of subnet IDs for attestation when type=static",
+		Value:       ethConfig.SubnetAttestationSubnets,
+		Destination: &ethConfig.SubnetAttestationSubnets,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.attestation.count",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_ATTESTATION_COUNT"},
+		Usage:       "Number of random attestation subnets to select when type=random",
+		Value:       ethConfig.SubnetAttestationCount,
+		Destination: &ethConfig.SubnetAttestationCount,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.attestation.start",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_ATTESTATION_START"},
+		Usage:       "Start of subnet range (inclusive) for attestation when type=static_range",
+		Value:       ethConfig.SubnetAttestationStart,
+		Destination: &ethConfig.SubnetAttestationStart,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.attestation.end",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_ATTESTATION_END"},
+		Usage:       "End of subnet range (exclusive) for attestation when type=static_range",
+		Value:       ethConfig.SubnetAttestationEnd,
+		Destination: &ethConfig.SubnetAttestationEnd,
+	},
+	// Subnet flags for sync committee.
+	&cli.StringFlag{
+		Name:        "subnet.synccommittee.type",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_TYPE"},
+		Usage:       "Subnet selection strategy for sync committee topics (all, static, random, static_range)",
+		Value:       ethConfig.SubnetSyncCommitteeType,
+		Destination: &ethConfig.SubnetSyncCommitteeType,
+	},
+	&cli.StringFlag{
+		Name:        "subnet.synccommittee.subnets",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_SUBNETS"},
+		Usage:       "Comma-separated list of subnet IDs for sync committee when type=static",
+		Value:       ethConfig.SubnetSyncCommitteeSubnets,
+		Destination: &ethConfig.SubnetSyncCommitteeSubnets,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.synccommittee.count",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_COUNT"},
+		Usage:       "Number of random sync committee subnets to select when type=random",
+		Value:       ethConfig.SubnetSyncCommitteeCount,
+		Destination: &ethConfig.SubnetSyncCommitteeCount,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.synccommittee.start",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_START"},
+		Usage:       "Start of subnet range (inclusive) for sync committee when type=static_range",
+		Value:       ethConfig.SubnetSyncCommitteeStart,
+		Destination: &ethConfig.SubnetSyncCommitteeStart,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.synccommittee.end",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_END"},
+		Usage:       "End of subnet range (exclusive) for sync committee when type=static_range",
+		Value:       ethConfig.SubnetSyncCommitteeEnd,
+		Destination: &ethConfig.SubnetSyncCommitteeEnd,
+	},
+	// Subnet flags for blob sidecar.
+	&cli.StringFlag{
+		Name:        "subnet.blobsidecar.type",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_TYPE"},
+		Usage:       "Subnet selection strategy for blob sidecar topics (all, static, random, static_range)",
+		Value:       ethConfig.SubnetBlobSidecarType,
+		Destination: &ethConfig.SubnetBlobSidecarType,
+	},
+	&cli.StringFlag{
+		Name:        "subnet.blobsidecar.subnets",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_SUBNETS"},
+		Usage:       "Comma-separated list of subnet IDs for blob sidecar when type=static",
+		Value:       ethConfig.SubnetBlobSidecarSubnets,
+		Destination: &ethConfig.SubnetBlobSidecarSubnets,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.blobsidecar.count",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_COUNT"},
+		Usage:       "Number of random blob sidecar subnets to select when type=random",
+		Value:       ethConfig.SubnetBlobSidecarCount,
+		Destination: &ethConfig.SubnetBlobSidecarCount,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.blobsidecar.start",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_START"},
+		Usage:       "Start of subnet range (inclusive) for blob sidecar when type=static_range",
+		Value:       ethConfig.SubnetBlobSidecarStart,
+		Destination: &ethConfig.SubnetBlobSidecarStart,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.blobsidecar.end",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_END"},
+		Usage:       "End of subnet range (exclusive) for blob sidecar when type=static_range",
+		Value:       ethConfig.SubnetBlobSidecarEnd,
+		Destination: &ethConfig.SubnetBlobSidecarEnd,
+	},
 }
 
 func cmdEthAction(c *cli.Context) error {
@@ -304,6 +447,7 @@ func cmdEthAction(c *cli.Context) error {
 		// PubSub config
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
 		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10
+		SubnetConfigs:                  createSubnetConfigs(),
 		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
 		Meter:                          otel.GetMeterProvider().Meter("hermes"),
 	}
@@ -314,6 +458,170 @@ func cmdEthAction(c *cli.Context) error {
 	}
 
 	return n.Start(c.Context)
+}
+
+// createSubnetConfigs creates subnet configurations based on the command line flags.
+func createSubnetConfigs() map[string]*eth.SubnetConfig {
+	subnetConfigs := make(map[string]*eth.SubnetConfig)
+
+	// Configure attestation subnets if specified
+	if configureAttestationSubnet() {
+		subnetConfigs[p2p.GossipAttestationMessage] = createAttestationSubnetConfig()
+		slog.Info("Configured attestation subnet",
+			"type", ethConfig.SubnetAttestationType,
+			"config", subnetConfigs[p2p.GossipAttestationMessage])
+	}
+
+	// Configure sync committee subnets if specified
+	if configureSyncCommitteeSubnet() {
+		subnetConfigs[p2p.GossipSyncCommitteeMessage] = createSyncCommitteeSubnetConfig()
+		slog.Info("Configured sync committee subnet",
+			"type", ethConfig.SubnetSyncCommitteeType,
+			"config", subnetConfigs[p2p.GossipSyncCommitteeMessage])
+	}
+
+	// Configure blob sidecar subnets if specified
+	if configureBlobSidecarSubnet() {
+		subnetConfigs[p2p.GossipBlobSidecarMessage] = createBlobSidecarSubnetConfig()
+		slog.Info("Configured blob sidecar subnet",
+			"type", ethConfig.SubnetBlobSidecarType,
+			"config", subnetConfigs[p2p.GossipBlobSidecarMessage])
+	}
+
+	return subnetConfigs
+}
+
+// configureAttestationSubnet checks if attestation subnet configuration is provided
+func configureAttestationSubnet() bool {
+	// If type is "all" (default) and no other params set, we'll use the default behavior
+	if ethConfig.SubnetAttestationType == "all" &&
+		ethConfig.SubnetAttestationSubnets == "" &&
+		ethConfig.SubnetAttestationCount == 0 &&
+		ethConfig.SubnetAttestationStart == 0 &&
+		ethConfig.SubnetAttestationEnd == 0 {
+		return false
+	}
+	return true
+}
+
+// configureSyncCommitteeSubnet checks if sync committee subnet configuration is provided
+func configureSyncCommitteeSubnet() bool {
+	// If type is "all" (default) and no other params set, we'll use the default behavior
+	if ethConfig.SubnetSyncCommitteeType == "all" &&
+		ethConfig.SubnetSyncCommitteeSubnets == "" &&
+		ethConfig.SubnetSyncCommitteeCount == 0 &&
+		ethConfig.SubnetSyncCommitteeStart == 0 &&
+		ethConfig.SubnetSyncCommitteeEnd == 0 {
+		return false
+	}
+	return true
+}
+
+// configureBlobSidecarSubnet checks if blob sidecar subnet configuration is provided.
+func configureBlobSidecarSubnet() bool {
+	// If type is "all" (default) and no other params set, we'll use the default behavior.
+	if ethConfig.SubnetBlobSidecarType == "all" &&
+		ethConfig.SubnetBlobSidecarSubnets == "" &&
+		ethConfig.SubnetBlobSidecarCount == 0 &&
+		ethConfig.SubnetBlobSidecarStart == 0 &&
+		ethConfig.SubnetBlobSidecarEnd == 0 {
+		return false
+	}
+	return true
+}
+
+// createAttestationSubnetConfig creates a SubnetConfig for attestation topics.
+func createAttestationSubnetConfig() *eth.SubnetConfig {
+	config := &eth.SubnetConfig{
+		Type: eth.SubnetSelectionType(ethConfig.SubnetAttestationType),
+	}
+
+	switch config.Type {
+	case eth.SubnetStatic:
+		if ethConfig.SubnetAttestationSubnets != "" {
+			// Parse the comma-separated subnet list.
+			subnets := parseSubnetList(ethConfig.SubnetAttestationSubnets)
+			config.Subnets = subnets
+		}
+	case eth.SubnetRandom:
+		config.Count = ethConfig.SubnetAttestationCount
+	case eth.SubnetStaticRange:
+		config.Start = ethConfig.SubnetAttestationStart
+		config.End = ethConfig.SubnetAttestationEnd
+	}
+
+	return config
+}
+
+// createSyncCommitteeSubnetConfig creates a SubnetConfig for sync committee topics.
+func createSyncCommitteeSubnetConfig() *eth.SubnetConfig {
+	config := &eth.SubnetConfig{
+		Type: eth.SubnetSelectionType(ethConfig.SubnetSyncCommitteeType),
+	}
+
+	switch config.Type {
+	case eth.SubnetStatic:
+		if ethConfig.SubnetSyncCommitteeSubnets != "" {
+			// Parse the comma-separated subnet list.
+			subnets := parseSubnetList(ethConfig.SubnetSyncCommitteeSubnets)
+			config.Subnets = subnets
+		}
+	case eth.SubnetRandom:
+		config.Count = ethConfig.SubnetSyncCommitteeCount
+	case eth.SubnetStaticRange:
+		config.Start = ethConfig.SubnetSyncCommitteeStart
+		config.End = ethConfig.SubnetSyncCommitteeEnd
+	}
+
+	return config
+}
+
+// createBlobSidecarSubnetConfig creates a SubnetConfig for blob sidecar topics.
+func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
+	config := &eth.SubnetConfig{
+		Type: eth.SubnetSelectionType(ethConfig.SubnetBlobSidecarType),
+	}
+
+	switch config.Type {
+	case eth.SubnetStatic:
+		if ethConfig.SubnetBlobSidecarSubnets != "" {
+			// Parse the comma-separated subnet list.
+			subnets := parseSubnetList(ethConfig.SubnetBlobSidecarSubnets)
+			config.Subnets = subnets
+		}
+	case eth.SubnetRandom:
+		config.Count = ethConfig.SubnetBlobSidecarCount
+	case eth.SubnetStaticRange:
+		config.Start = ethConfig.SubnetBlobSidecarStart
+		config.End = ethConfig.SubnetBlobSidecarEnd
+	}
+
+	return config
+}
+
+// parseSubnetList parses a comma-separated list of subnet IDs.
+func parseSubnetList(subnetStr string) []uint64 {
+	if subnetStr == "" {
+		return []uint64{}
+	}
+
+	// Split by comma.
+	subnetStrs := strings.Split(subnetStr, ",")
+	subnets := make([]uint64, 0, len(subnetStrs))
+
+	// Parse each subnet ID.
+	for _, s := range subnetStrs {
+		subnetID, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+		if err != nil {
+			slog.Warn("Invalid subnet ID in list, skipping", "subnet", s, "error", err)
+
+			continue
+		}
+
+		subnets = append(subnets, subnetID)
+	}
+
+	return subnets
 }
 
 // validateKeyFlag verifies that if a key was given it is in hex format and

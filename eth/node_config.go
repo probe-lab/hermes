@@ -2,7 +2,7 @@ package eth
 
 import (
 	"crypto/ecdsa"
-	cryptorand "crypto/rand"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -229,7 +229,7 @@ func (n *NodeConfig) PrivateKey() (*crypto.Secp256k1PrivateKey, error) {
 	var privBytes []byte
 	if n.PrivateKeyStr == "" {
 		slog.Debug("Generating new private key")
-		key, err := ecdsa.GenerateKey(gcrypto.S256(), cryptorand.Reader)
+		key, err := ecdsa.GenerateKey(gcrypto.S256(), rand.Reader)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate key: %w", err)
 		}
@@ -509,4 +509,3 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	}
 	return topicScores
 }
-

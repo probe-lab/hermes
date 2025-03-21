@@ -14,28 +14,6 @@ import (
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 )
 
-func setupTestNodeConfig() *NodeConfig {
-	globalBeaconConfig = defaultTestBeaconConfig()
-
-	return &NodeConfig{
-		GenesisConfig: &GenesisConfig{
-			GenesisTime:          time.Unix(123456789, 0),
-			GenesisValidatorRoot: []byte{1, 2, 3},
-		},
-		NetworkConfig:   &params.NetworkConfig{},
-		BeaconConfig:    globalBeaconConfig,
-		ForkDigest:      [4]byte{1, 2, 3, 4},
-		DialTimeout:     60 * time.Second,
-		Devp2pHost:      "127.0.0.1",
-		Libp2pHost:      "127.0.0.1",
-		PrysmHost:       "127.0.0.1",
-		MaxPeers:        50,
-		DialConcurrency: 10,
-		Tracer:          nooptrace.NewTracerProvider().Tracer("test"),
-		Meter:           noop.NewMeterProvider().Meter("test"),
-	}
-}
-
 func TestNodeConfig_ValidateSubnetConfigs(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -96,9 +74,7 @@ func TestNodeConfig_ValidateSubnetConfigs(t *testing.T) {
 }
 
 func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
-	// Setup a test encoder
 	ssz := encoder.SszNetworkEncoder{}
-
 	tests := []struct {
 		name           string
 		subnetConfigs  map[string]*SubnetConfig
@@ -113,21 +89,25 @@ func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 				},
 			},
 			wantTopicsFunc: func(t *testing.T, topics []string) {
-				// Check that the expected subnet topics are present
+				// Check that the expected subnet topics are present.
 				attTopicFormat, err := topicFormatFromBase(p2p.GossipAttestationMessage)
 				require.NoError(t, err)
 
-				// Check that each of our configured subnets is included
+				// Check that each of our configured subnets is included.
 				for _, subnet := range []uint64{1, 2, 3} {
 					subnetTopic := formatSubnetTopic(attTopicFormat, subnet, ssz)
-					assert.Contains(t, topics, subnetTopic,
-						"Expected subnet topic not found in result")
+					assert.Contains(
+						t, topics, subnetTopic,
+						"Expected subnet topic not found in result",
+					)
 				}
 
 				// Verify subnet 0 is NOT included (not in our static list)
 				subnetZeroTopic := formatSubnetTopic(attTopicFormat, 0, ssz)
-				assert.NotContains(t, topics, subnetZeroTopic,
-					"Subnet topic that wasn't configured was included")
+				assert.NotContains(
+					t, topics, subnetZeroTopic,
+					"Subnet topic that wasn't configured was included",
+				)
 			},
 		},
 		{
@@ -138,14 +118,14 @@ func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 				},
 			},
 			wantTopicsFunc: func(t *testing.T, topics []string) {
-				// For all subnet config, we expect topics for all attestation subnets
+				// For all subnet config, we expect topics for all attestation subnets.
 				attTopicFormat, err := topicFormatFromBase(p2p.GossipAttestationMessage)
 				require.NoError(t, err)
 
 				totalAttSubnets := int(globalBeaconConfig.AttestationSubnetCount)
 				attSubnetTopicCount := 0
 
-				// Count how many attestation subnet topics we have
+				// Count how many attestation subnet topics we have.
 				for _, topic := range topics {
 					for subnet := uint64(0); subnet < globalBeaconConfig.AttestationSubnetCount; subnet++ {
 						if topic == formatSubnetTopic(attTopicFormat, subnet, ssz) {
@@ -155,8 +135,10 @@ func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 					}
 				}
 
-				assert.Equal(t, totalAttSubnets, attSubnetTopicCount,
-					"Expected topics for all attestation subnets")
+				assert.Equal(
+					t, totalAttSubnets, attSubnetTopicCount,
+					"Expected topics for all attestation subnets",
+				)
 			},
 		},
 	}
@@ -172,7 +154,28 @@ func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 	}
 }
 
-// Helper function to format a subnet topic like NodeConfig does
 func formatSubnetTopic(base string, subnet uint64, encoder encoder.NetworkEncoding) string {
 	return fmt.Sprintf(base, [4]byte{1, 2, 3, 4}, subnet) + encoder.ProtocolSuffix()
+}
+
+func setupTestNodeConfig() *NodeConfig {
+	globalBeaconConfig = defaultTestBeaconConfig()
+
+	return &NodeConfig{
+		GenesisConfig: &GenesisConfig{
+			GenesisTime:          time.Unix(123456789, 0),
+			GenesisValidatorRoot: []byte{1, 2, 3},
+		},
+		NetworkConfig:   &params.NetworkConfig{},
+		BeaconConfig:    globalBeaconConfig,
+		ForkDigest:      [4]byte{1, 2, 3, 4},
+		DialTimeout:     60 * time.Second,
+		Devp2pHost:      "127.0.0.1",
+		Libp2pHost:      "127.0.0.1",
+		PrysmHost:       "127.0.0.1",
+		MaxPeers:        50,
+		DialConcurrency: 10,
+		Tracer:          nooptrace.NewTracerProvider().Tracer("test"),
+		Meter:           noop.NewMeterProvider().Meter("test"),
+	}
 }
