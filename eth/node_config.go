@@ -2,7 +2,7 @@ package eth
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -101,6 +101,9 @@ type NodeConfig struct {
 
 	PubSubQueueSize int
 
+	// Configuration for subnet selection by topic
+	SubnetConfigs map[string]*SubnetConfig
+
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
@@ -164,6 +167,22 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("dialer count must be positive, got %d", n.DialConcurrency)
 	}
 
+	// Validate the SubnetConfigs if provided.
+	if n.SubnetConfigs != nil {
+		for topic, config := range n.SubnetConfigs {
+			// Get the subnet count for this topic.
+			subnetCount, hasSubnet := HasSubnets(topic)
+			if !hasSubnet {
+				return fmt.Errorf("topic %s does not support subnets", topic)
+			}
+
+			// Validate the subnet config for this topic.
+			if err := config.Validate(topic, subnetCount); err != nil {
+				return err
+			}
+		}
+	}
+
 	// ensure that if the data stream is AWS, the parameters where given
 	if n.DataStreamType == host.DataStreamTypeKinesis {
 		if n.AWSConfig != nil {
@@ -210,7 +229,7 @@ func (n *NodeConfig) PrivateKey() (*crypto.Secp256k1PrivateKey, error) {
 	var privBytes []byte
 	if n.PrivateKeyStr == "" {
 		slog.Debug("Generating new private key")
-		key, err := ecdsa.GenerateKey(gcrypto.S256(), rand.Reader)
+		key, err := ecdsa.GenerateKey(gcrypto.S256(), cryptorand.Reader)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate key: %w", err)
 		}
@@ -292,7 +311,6 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		libp2p.ResourceManager(rmgr),
 		libp2p.DisableMetrics(),
 	}
-
 	return opts, nil
 }
 
@@ -443,22 +461,6 @@ func topicFormatFromBase(topicBase string) (string, error) {
 	}
 }
 
-func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
-	switch topic {
-	case p2p.GossipAttestationMessage:
-		return globalBeaconConfig.AttestationSubnetCount, true
-
-	case p2p.GossipSyncCommitteeMessage:
-		return globalBeaconConfig.SyncCommitteeSubnetCount, true
-
-	case p2p.GossipBlobSidecarMessage:
-		return globalBeaconConfig.BlobsidecarSubnetCount, true
-
-	default:
-		return uint64(0), false
-	}
-}
-
 func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding) string {
 	return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
 }
@@ -477,9 +479,16 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 			slog.Warn("invalid gossipsub topic", slog.Attr{Key: "topic", Value: slog.StringValue(topicBase)})
 			continue
 		}
-		subnets, withSubnets := hasSubnets(topicBase)
+		subnets, withSubnets := HasSubnets(topicBase)
 		if withSubnets {
-			for subnet := uint64(0); subnet < subnets; subnet++ {
+			// Get the config for this topic if it exists.
+			config, _ := n.SubnetConfigs[topicBase]
+
+			// Get the subnet IDs to subscribe to.
+			subnetsToSubscribe := GetSubscribedSubnets(config, subnets)
+
+			// Add topics for each subnet.
+			for _, subnet := range subnetsToSubscribe {
 				fullTopics = append(fullTopics, n.composeEthTopicWithSubnet(topicFormat, encoder, subnet))
 			}
 		} else {
@@ -500,3 +509,4 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	}
 	return topicScores
 }
+
