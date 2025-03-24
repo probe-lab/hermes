@@ -482,7 +482,7 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 		subnets, withSubnets := HasSubnets(topicBase)
 		if withSubnets {
 			// Get the config for this topic if it exists.
-			config, _ := n.SubnetConfigs[topicBase]
+			config := n.SubnetConfigs[topicBase]
 
 			// Get the subnet IDs to subscribe to.
 			subnetsToSubscribe := GetSubscribedSubnets(config, subnets)
