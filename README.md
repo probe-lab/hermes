@@ -45,7 +45,7 @@ git clone git@github.com:probe-lab/hermes.git
 Start Hermes by running
 
 ```shell
-go run ./cmd/hermes # requires Go >=1.22
+go run ./cmd/hermes # requires Go >=1.24
 ```
 
 <details>
@@ -162,6 +162,73 @@ Further, Hermes requires beacon node in general because it delegates certain req
 - `/eth2/beacon_chain/req/blob_sidecars_by_root/1/ssz_snappy`
 
 These request handlers require knowledge of the chain state wherefore Hermes cannot handle them itself. Still, they are required to be a good citizen of the network and not get pruned by other peers.
+
+#### Subnet Configuration
+
+Hermes supports configuring which subnets to subscribe to for each topic type (attestation, sync committee, and blob sidecar). This can be useful to:
+- Reduce resource usage by subscribing to fewer subnets
+- Target specific subnets for analysis
+- Distribute monitoring across multiple Hermes instances
+
+When creating a Node, you can configure the subnets using the `SubnetConfigs` field:
+
+```go
+// Create a configuration map for different subnet topics
+cfg.SubnetConfigs = map[string]*eth.SubnetConfig{
+    // Subscribe to specific attestation subnets
+    p2p.GossipAttestationMessage: {
+        Type: eth.SubnetStatic,
+        Subnets: []uint64{0, 1, 5, 44},
+    },
+    
+    // Subscribe to all sync committee subnets (this is the default if no config provided)
+    p2p.GossipSyncCommitteeMessage: {
+        Type: eth.SubnetAll,
+    },
+    
+    // Subscribe to a random set of blob sidecar subnets
+    p2p.GossipBlobSidecarMessage: {
+        Type: eth.SubnetRandom,
+        Count: 2,
+    },
+}
+```
+
+For each topic that supports subnets, you can use one of these configuration strategies:
+
+1. **Subscribe to all subnets** (default if no config provided)
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetAll,
+   }
+   ```
+
+2. **Subscribe to specific subnets**
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetStatic,
+       Subnets: []uint64{0, 1, 5, 44},
+   }
+   ```
+
+3. **Subscribe to a random set of subnets**
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetRandom,
+       Count: 8, // Number of subnets to randomly select
+   }
+   ```
+
+4. **Subscribe to a range of subnets**
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetStaticRange,
+       Start: 0,
+       End: 32, // End is exclusive
+   }
+   ```
+
+This configuration allows you to set up multiple Hermes instances that monitor different parts of the network, or to focus monitoring on specific subnets of interest.
 
 To run Hermes for the Ethereum network you would need to point it to the beacon node by providing the
 
