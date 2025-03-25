@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
@@ -44,17 +42,17 @@ var ethConfig = &struct {
 	DepositContractBlockURL     string
 	// Subnet configuration.
 	SubnetAttestationType      string
-	SubnetAttestationSubnets   string
+	SubnetAttestationSubnets   []int64
 	SubnetAttestationCount     uint64
 	SubnetAttestationStart     uint64
 	SubnetAttestationEnd       uint64
 	SubnetSyncCommitteeType    string
-	SubnetSyncCommitteeSubnets string
+	SubnetSyncCommitteeSubnets []int64
 	SubnetSyncCommitteeCount   uint64
 	SubnetSyncCommitteeStart   uint64
 	SubnetSyncCommitteeEnd     uint64
 	SubnetBlobSidecarType      string
-	SubnetBlobSidecarSubnets   string
+	SubnetBlobSidecarSubnets   []int64
 	SubnetBlobSidecarCount     uint64
 	SubnetBlobSidecarStart     uint64
 	SubnetBlobSidecarEnd       uint64
@@ -80,17 +78,17 @@ var ethConfig = &struct {
 	DepositContractBlockURL:     "",
 	// Default subnet configuration values.
 	SubnetAttestationType:      "all",
-	SubnetAttestationSubnets:   "",
+	SubnetAttestationSubnets:   []int64{},
 	SubnetAttestationCount:     0,
 	SubnetAttestationStart:     0,
 	SubnetAttestationEnd:       0,
 	SubnetSyncCommitteeType:    "all",
-	SubnetSyncCommitteeSubnets: "",
+	SubnetSyncCommitteeSubnets: []int64{},
 	SubnetSyncCommitteeCount:   0,
 	SubnetSyncCommitteeStart:   0,
 	SubnetSyncCommitteeEnd:     0,
 	SubnetBlobSidecarType:      "all",
-	SubnetBlobSidecarSubnets:   "",
+	SubnetBlobSidecarSubnets:   []int64{},
 	SubnetBlobSidecarCount:     0,
 	SubnetBlobSidecarStart:     0,
 	SubnetBlobSidecarEnd:       0,
@@ -256,12 +254,14 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.SubnetAttestationType,
 		Destination: &ethConfig.SubnetAttestationType,
 	},
-	&cli.StringFlag{
-		Name:        "subnet.attestation.subnets",
-		EnvVars:     []string{"HERMES_ETH_SUBNET_ATTESTATION_SUBNETS"},
-		Usage:       "Comma-separated list of subnet IDs for attestation when type=static",
-		Value:       ethConfig.SubnetAttestationSubnets,
-		Destination: &ethConfig.SubnetAttestationSubnets,
+	&cli.Int64SliceFlag{
+		Name:    "subnet.attestation.subnets",
+		EnvVars: []string{"HERMES_ETH_SUBNET_ATTESTATION_SUBNETS"},
+		Usage:   "Comma-separated list of subnet IDs for attestation when type=static",
+		Action: func(c *cli.Context, v []int64) error {
+			ethConfig.SubnetAttestationSubnets = v
+			return nil
+		},
 	},
 	&cli.Uint64Flag{
 		Name:        "subnet.attestation.count",
@@ -292,12 +292,14 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.SubnetSyncCommitteeType,
 		Destination: &ethConfig.SubnetSyncCommitteeType,
 	},
-	&cli.StringFlag{
-		Name:        "subnet.synccommittee.subnets",
-		EnvVars:     []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_SUBNETS"},
-		Usage:       "Comma-separated list of subnet IDs for sync committee when type=static",
-		Value:       ethConfig.SubnetSyncCommitteeSubnets,
-		Destination: &ethConfig.SubnetSyncCommitteeSubnets,
+	&cli.Int64SliceFlag{
+		Name:    "subnet.synccommittee.subnets",
+		EnvVars: []string{"HERMES_ETH_SUBNET_SYNCCOMMITTEE_SUBNETS"},
+		Usage:   "Comma-separated list of subnet IDs for sync committee when type=static",
+		Action: func(c *cli.Context, v []int64) error {
+			ethConfig.SubnetSyncCommitteeSubnets = v
+			return nil
+		},
 	},
 	&cli.Uint64Flag{
 		Name:        "subnet.synccommittee.count",
@@ -328,12 +330,14 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.SubnetBlobSidecarType,
 		Destination: &ethConfig.SubnetBlobSidecarType,
 	},
-	&cli.StringFlag{
-		Name:        "subnet.blobsidecar.subnets",
-		EnvVars:     []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_SUBNETS"},
-		Usage:       "Comma-separated list of subnet IDs for blob sidecar when type=static",
-		Value:       ethConfig.SubnetBlobSidecarSubnets,
-		Destination: &ethConfig.SubnetBlobSidecarSubnets,
+	&cli.Int64SliceFlag{
+		Name:    "subnet.blobsidecar.subnets",
+		EnvVars: []string{"HERMES_ETH_SUBNET_BLOBSIDECAR_SUBNETS"},
+		Usage:   "Comma-separated list of subnet IDs for blob sidecar when type=static",
+		Action: func(c *cli.Context, v []int64) error {
+			ethConfig.SubnetBlobSidecarSubnets = v
+			return nil
+		},
 	},
 	&cli.Uint64Flag{
 		Name:        "subnet.blobsidecar.count",
@@ -495,7 +499,7 @@ func createSubnetConfigs() map[string]*eth.SubnetConfig {
 func configureAttestationSubnet() bool {
 	// If type is "all" (default) and no other params set, we'll use the default behavior
 	if ethConfig.SubnetAttestationType == "all" &&
-		ethConfig.SubnetAttestationSubnets == "" &&
+		len(ethConfig.SubnetAttestationSubnets) == 0 &&
 		ethConfig.SubnetAttestationCount == 0 &&
 		ethConfig.SubnetAttestationStart == 0 &&
 		ethConfig.SubnetAttestationEnd == 0 {
@@ -508,7 +512,7 @@ func configureAttestationSubnet() bool {
 func configureSyncCommitteeSubnet() bool {
 	// If type is "all" (default) and no other params set, we'll use the default behavior
 	if ethConfig.SubnetSyncCommitteeType == "all" &&
-		ethConfig.SubnetSyncCommitteeSubnets == "" &&
+		len(ethConfig.SubnetSyncCommitteeSubnets) == 0 &&
 		ethConfig.SubnetSyncCommitteeCount == 0 &&
 		ethConfig.SubnetSyncCommitteeStart == 0 &&
 		ethConfig.SubnetSyncCommitteeEnd == 0 {
@@ -521,7 +525,7 @@ func configureSyncCommitteeSubnet() bool {
 func configureBlobSidecarSubnet() bool {
 	// If type is "all" (default) and no other params set, we'll use the default behavior.
 	if ethConfig.SubnetBlobSidecarType == "all" &&
-		ethConfig.SubnetBlobSidecarSubnets == "" &&
+		len(ethConfig.SubnetBlobSidecarSubnets) == 0 &&
 		ethConfig.SubnetBlobSidecarCount == 0 &&
 		ethConfig.SubnetBlobSidecarStart == 0 &&
 		ethConfig.SubnetBlobSidecarEnd == 0 {
@@ -538,9 +542,13 @@ func createAttestationSubnetConfig() *eth.SubnetConfig {
 
 	switch config.Type {
 	case eth.SubnetStatic:
-		if ethConfig.SubnetAttestationSubnets != "" {
-			// Parse the comma-separated subnet list.
-			subnets := parseSubnetList(ethConfig.SubnetAttestationSubnets)
+		if len(ethConfig.SubnetAttestationSubnets) > 0 {
+			subnets := make([]uint64, 0, len(ethConfig.SubnetAttestationSubnets))
+			for _, subnetID := range ethConfig.SubnetAttestationSubnets {
+				if subnetID >= 0 {
+					subnets = append(subnets, uint64(subnetID))
+				}
+			}
 			config.Subnets = subnets
 		}
 	case eth.SubnetRandom:
@@ -561,9 +569,13 @@ func createSyncCommitteeSubnetConfig() *eth.SubnetConfig {
 
 	switch config.Type {
 	case eth.SubnetStatic:
-		if ethConfig.SubnetSyncCommitteeSubnets != "" {
-			// Parse the comma-separated subnet list.
-			subnets := parseSubnetList(ethConfig.SubnetSyncCommitteeSubnets)
+		if len(ethConfig.SubnetSyncCommitteeSubnets) > 0 {
+			subnets := make([]uint64, 0, len(ethConfig.SubnetSyncCommitteeSubnets))
+			for _, subnetID := range ethConfig.SubnetSyncCommitteeSubnets {
+				if subnetID >= 0 {
+					subnets = append(subnets, uint64(subnetID))
+				}
+			}
 			config.Subnets = subnets
 		}
 	case eth.SubnetRandom:
@@ -584,9 +596,13 @@ func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
 
 	switch config.Type {
 	case eth.SubnetStatic:
-		if ethConfig.SubnetBlobSidecarSubnets != "" {
-			// Parse the comma-separated subnet list.
-			subnets := parseSubnetList(ethConfig.SubnetBlobSidecarSubnets)
+		if len(ethConfig.SubnetBlobSidecarSubnets) > 0 {
+			subnets := make([]uint64, 0, len(ethConfig.SubnetBlobSidecarSubnets))
+			for _, subnetID := range ethConfig.SubnetBlobSidecarSubnets {
+				if subnetID >= 0 {
+					subnets = append(subnets, uint64(subnetID))
+				}
+			}
 			config.Subnets = subnets
 		}
 	case eth.SubnetRandom:
@@ -597,31 +613,6 @@ func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
 	}
 
 	return config
-}
-
-// parseSubnetList parses a comma-separated list of subnet IDs.
-func parseSubnetList(subnetStr string) []uint64 {
-	if subnetStr == "" {
-		return []uint64{}
-	}
-
-	// Split by comma.
-	subnetStrs := strings.Split(subnetStr, ",")
-	subnets := make([]uint64, 0, len(subnetStrs))
-
-	// Parse each subnet ID.
-	for _, s := range subnetStrs {
-		subnetID, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
-		if err != nil {
-			slog.Warn("Invalid subnet ID in list, skipping", "subnet", s, "error", err)
-
-			continue
-		}
-
-		subnets = append(subnets, subnetID)
-	}
-
-	return subnets
 }
 
 // validateKeyFlag verifies that if a key was given it is in hex format and
