@@ -52,6 +52,7 @@ func DeriveKnownNetworkConfig(ctx context.Context, network string) (*NetworkConf
 		}, nil
 	case GnosisName:
 		// returns the bare minimum from the gnosis setup
+		// https://github.com/gnosischain/configs/blob/main/mainnet/config.yaml
 		return &NetworkConfig{
 			Genesis: GenesisConfigs[network],
 			Beacon: &params.BeaconChainConfig{
@@ -63,11 +64,11 @@ func DeriveKnownNetworkConfig(ctx context.Context, network string) (*NetworkConf
 				ElectraForkVersion:   []byte{0x05, 0x00, 0x00, 0x64},
 				ForkVersionSchedule: map[[4]byte]primitives.Epoch{
 					{0x00, 0x00, 0x00, 0x64}: primitives.Epoch(0),
-					{0x01, 0x00, 0x00, 0x64}: primitives.Epoch(0),
-					{0x02, 0x00, 0x00, 0x64}: primitives.Epoch(0),
-					{0x03, 0x00, 0x00, 0x64}: primitives.Epoch(0),
-					{0x04, 0x00, 0x00, 0x64}: primitives.Epoch(0),
-					{0x05, 0x00, 0x00, 0x64}: primitives.Epoch(0),
+					{0x01, 0x00, 0x00, 0x64}: primitives.Epoch(512),
+					{0x02, 0x00, 0x00, 0x64}: primitives.Epoch(385536),
+					{0x03, 0x00, 0x00, 0x64}: primitives.Epoch(648704),
+					{0x04, 0x00, 0x00, 0x64}: primitives.Epoch(889856),
+					{0x05, 0x00, 0x00, 0x64}: primitives.Epoch(18446744073709551615), // temporary
 				},
 				ForkVersionNames: map[[4]byte]string{
 					{0x00, 0x00, 0x00, 0x64}: "phase0",
