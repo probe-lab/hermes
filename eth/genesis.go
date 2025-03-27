@@ -65,6 +65,10 @@ var GenesisConfigs = map[string]*GenesisConfig{
 		GenesisValidatorRoot: hexToBytes("212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f"),
 		GenesisTime:          time.Unix(1742213400, 0),
 	},
+	GnosisName: {
+		GenesisValidatorRoot: hexToBytes("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
+		GenesisTime:          time.Unix(1638968400, 0),
+	},
 }
 
 func hexToBytes(s string) []byte {

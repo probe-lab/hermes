@@ -103,6 +103,7 @@ var cmdEth = &cli.Command{
 	Subcommands: []*cli.Command{
 		cmdEthIds,
 		cmdEthChains,
+		cmdEthForkDigest,
 	},
 }
 
