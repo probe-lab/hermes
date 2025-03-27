@@ -67,7 +67,7 @@ var GenesisConfigs = map[string]*GenesisConfig{
 	},
 	GnosisName: {
 		GenesisValidatorRoot: hexToBytes("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
-		GenesisTime:          time.Unix(1638968400, 0), // TODO:
+		GenesisTime:          time.Unix(1638968400, 0),
 	},
 }
 
