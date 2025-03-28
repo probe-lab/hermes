@@ -237,6 +237,12 @@ To run Hermes for the Ethereum network you would need to point it to the beacon 
 - `--prysm.port.http=3500` # 3500 is the default
 - `--prysm.port.grpc=4000` # 4000 is the default
 
+If your Prysm node requires basic authentication, you can include the credentials in the host parameter:
+- `--prysm.host=username:password@1.2.3.4`
+
+If your password contains special characters, make sure to URL encode them:
+- `--prysm.host=username:my%40special%3Apass@1.2.3.4` # for password 'my@special:pass'
+
 command line flags to the `hermes ethereum` subcommand. Check out the help page via `hermes ethereum --help` for configuration options of the libp2p host or devp2p local node (e.g., listen addrs/ports).
 
 <details>

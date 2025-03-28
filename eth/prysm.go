@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,12 +13,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/prysmaticlabs/prysm/v5/api/client"
 	apiCli "github.com/prysmaticlabs/prysm/v5/api/client/beacon"
 	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-
-	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/prysmaticlabs/prysm/v5/network/httputil"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel"
@@ -33,32 +34,80 @@ import (
 type PrysmClient struct {
 	host            string
 	port            int
+	auth            *AuthConfig
 	nodeClient      eth.NodeClient
 	timeout         time.Duration
 	tracer          trace.Tracer
 	beaconClient    eth.BeaconChainClient
 	beaconApiClient *apiCli.Client
 	genesis         *GenesisConfig
+	httpClient      *http.Client
 }
 
 func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration, genesis *GenesisConfig) (*PrysmClient, error) {
 	tracer := otel.GetTracerProvider().Tracer("prysm_client")
 
-	conn, err := grpc.NewClient(
-		fmt.Sprintf("%s:%d", host, portGRPC),
+	// Parse any auth info from host we might have.
+	auth, err := parseHostAuth(host)
+	if err != nil {
+		return nil, fmt.Errorf("parse host auth: %w", err)
+	}
+
+	// Setup gRPC options.
+	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+
+	// Add auth if credentials provided.
+	if auth.Username != "" && auth.Password != "" {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(&basicAuthCreds{
+			username: auth.Username,
+			password: auth.Password,
+		}))
+	}
+
+	// Create gRPC client.
+	conn, err := grpc.NewClient(
+		fmt.Sprintf("%s:%d", auth.Host, portGRPC),
+		dialOpts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new grpc connection: %w", err)
 	}
-	// get connection to HTTP API
-	apiCli, err := apiCli.NewClient(fmt.Sprintf("%s:%d", host, portHTTP))
+
+	// Create API client options.
+	var (
+		opts       = []client.ClientOpt{}
+		httpClient = http.DefaultClient
+	)
+
+	// Add auth transport if credentials provided.
+	if auth.Username != "" && auth.Password != "" {
+		transport := &basicAuthTransport{
+			username: auth.Username,
+			password: auth.Password,
+			base:     http.DefaultTransport,
+		}
+
+		opts = append(opts, client.WithRoundTripper(transport))
+
+		httpClient = &http.Client{
+			Transport: transport,
+		}
+	}
+
+	// Create API client.
+	apiCli, err := apiCli.NewClient(
+		fmt.Sprintf("%s:%d", auth.Host, portHTTP),
+		opts...,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("new http api client: %w", err)
 	}
 
 	return &PrysmClient{
-		host:            host,
+		host:            auth.Host,
+		auth:            auth,
 		port:            portHTTP,
 		nodeClient:      eth.NewNodeClient(conn),
 		beaconClient:    eth.NewBeaconChainClient(conn),
@@ -66,6 +115,7 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 		timeout:         timeout,
 		tracer:          tracer,
 		genesis:         genesis,
+		httpClient:      httpClient,
 	}, nil
 }
 
@@ -105,24 +155,14 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, pid peer.ID, maddr ma.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", strconv.Itoa(len(data)))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("add trusted peer http post failed: %w", err)
 	}
 	defer logDeferErr(resp.Body.Close, "Failed closing body")
 
 	if resp.StatusCode != http.StatusOK {
-		errResp := &httputil.DefaultJsonError{}
-		respData, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed reading response body: %w", err)
-		}
-
-		if err := json.Unmarshal(respData, errResp); err != nil {
-			return fmt.Errorf("failed unmarshalling response data: %w", err)
-		}
-
-		return errResp
+		return parseErrorResponse(resp)
 	}
 
 	return nil
@@ -151,26 +191,16 @@ func (p *PrysmClient) ListTrustedPeers(ctx context.Context) (peers map[peer.ID]*
 	if err != nil {
 		return nil, fmt.Errorf("new list trusted peer request: %w", err)
 	}
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("list trusted peer http get failed: %w", err)
 	}
 	defer logDeferErr(resp.Body.Close, "Failed closing body")
 
 	if resp.StatusCode != http.StatusOK {
-		errResp := &httputil.DefaultJsonError{}
-		respData, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed reading response body: %w", err)
-		}
-
-		if err := json.Unmarshal(respData, errResp); err != nil {
-			return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
-		}
-
-		return nil, errResp
+		return nil, parseErrorResponse(resp)
 	}
+
 	respData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed reading response body: %w", err)
@@ -217,24 +247,14 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 		return fmt.Errorf("new remove trusted peer request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("remove trusted peer http delete failed: %w", err)
 	}
 	defer logDeferErr(resp.Body.Close, "Failed closing body")
 
 	if resp.StatusCode != http.StatusOK {
-		errResp := &httputil.DefaultJsonError{}
-		respData, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed reading response body: %w", err)
-		}
-
-		if err := json.Unmarshal(respData, errResp); err != nil {
-			return fmt.Errorf("failed unmarshalling response data: %w", err)
-		}
-
-		return errResp
+		return parseErrorResponse(resp)
 	}
 
 	return nil
@@ -340,4 +360,24 @@ func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte)
 		return true, nil
 	}
 	return false, nil
+}
+
+func parseErrorResponse(resp *http.Response) error {
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return errors.New("authorization required")
+	default:
+		respData, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed reading response body: %w", err)
+		}
+
+		errResp := &httputil.DefaultJsonError{}
+
+		if err := json.Unmarshal(respData, errResp); err != nil {
+			return fmt.Errorf("failed unmarshalling response data: %w", err)
+		}
+
+		return errResp
+	}
 }
