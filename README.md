@@ -256,31 +256,47 @@ USAGE:
    hermes eth command [command options]
 
 COMMANDS:
-   ids      generates peer identities in csv format
-   chains   List all supported chains
-   help, h  Shows a list of commands or help for one command
+   ids          generates peer identities in csv format
+   chains       List all supported chains
+   fork-digest  Compute and display the fork digest for any eth-cl-network
+   help, h      Shows a list of commands or help for one command
 
 OPTIONS:
-   --key value, -k value                        The private key for the hermes libp2p/ethereum node in hex format. [$HERMES_ETH_KEY]
-   --chain value                                The beacon chain to participate in. (default: "mainnet") [$HERMES_ETH_CHAIN]
-   --attnets value, -a value                    The attestation network digest. (default: "ffffffffffffffff") [$HERMES_ETH_ATTNETS]
-   --dial.concurrency value                     The maximum number of parallel workers dialing other peers in the network (default: 16) [$HERMES_ETH_DIAL_CONCURRENCY]
-   --dial.timeout value                         The request timeout when contacting other network participants (default: 5s) [$HERMES_ETH_DIAL_TIMEOUT]
-   --devp2p.host value                          Which network interface should devp2p (discv5) bind to. (default: "127.0.0.1") [$HERMES_ETH_DEVP2P_HOST]
-   --devp2p.port value                          On which port should devp2p (disv5) listen (default: random) [$HERMES_ETH_DEVP2P_PORT]
-   --libp2p.host value                          Which network interface should libp2p bind to. (default: "127.0.0.1") [$HERMES_ETH_LIBP2P_HOST]
-   --libp2p.port value                          On which port should libp2p (disv5) listen (default: random) [$HERMES_ETH_LIBP2P_PORT]
-   --libp2p.peerscore.snapshot.frequency value  Frequency at which GossipSub peerscores will be accessed (in seconds) (default: random) [$HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY]
-   --local.trusted.addr                         To advertise the localhost multiaddress to our trusted control Prysm node (default: false) [$HERMES_ETH_LOCAL_TRUSTED_ADDRESS]
-   --prysm.host value                           The host ip/name where Prysm's (beacon) API is accessible [$HERMES_ETH_PRYSM_HOST]
-   --prysm.port.http value                      The port on which Prysm's beacon nodes' Query HTTP API is listening on (default: 3500) [$HERMES_ETH_PRYSM_PORT_HTTP]
-   --prysm.port.grpc value                      The port on which Prysm's gRPC API is listening on (default: 4000) [$HERMES_ETH_PRYSM_PORT_GRPC]
-   --max-peers value                            The maximum number of peers we want to be connected with (default: 30) [$HERMES_ETH_MAX_PEERS]
-   --genesis.ssz.url value                      The .ssz URL from which to fetch the genesis data, requires 'chain=devnet' [$HERMES_ETH_GENESIS_SSZ_URL]
-   --config.yaml.url value                      The .yaml URL from which to fetch the beacon chain config, requires 'chain=devnet' [$HERMES_ETH_CONFIG_URL]
-   --bootnodes.yaml.url value                   The .yaml URL from which to fetch the bootnode ENRs, requires 'chain=devnet' [$HERMES_ETH_BOOTNODES_URL]
-   --deposit-contract-block.txt.url value       The .txt URL from which to fetch the deposit contract block. Requires 'chain=devnet' [$HERMES_ETH_DEPOSIT_CONTRACT_BLOCK_URL]
-   --help, -h
+   --key value, -k value                                                          The private key for the hermes libp2p/ethereum node in hex format. [$HERMES_ETH_KEY]
+   --chain value                                                                  The beacon chain to participate in. (default: "mainnet") [$HERMES_ETH_CHAIN]
+   --attnets value, -a value                                                      The attestation network digest. (default: "ffffffffffffffff") [$HERMES_ETH_ATTNETS]
+   --dial.concurrency value                                                       The maximum number of parallel workers dialing other peers in the network (default: 16) [$HERMES_ETH_DIAL_CONCURRENCY]
+   --dial.timeout value                                                           The request timeout when contacting other network participants (default: 5s) [$HERMES_ETH_DIAL_TIMEOUT]
+   --devp2p.host value                                                            Which network interface should devp2p (discv5) bind to. (default: "127.0.0.1") [$HERMES_ETH_DEVP2P_HOST]
+   --devp2p.port value                                                            On which port should devp2p (disv5) listen (default: random) [$HERMES_ETH_DEVP2P_PORT]
+   --libp2p.host value                                                            Which network interface should libp2p bind to. (default: "127.0.0.1") [$HERMES_ETH_LIBP2P_HOST]
+   --libp2p.port value                                                            On which port should libp2p (disv5) listen (default: random) [$HERMES_ETH_LIBP2P_PORT]
+   --libp2p.peerscore.snapshot.frequency value                                    Frequency at which GossipSub peerscores will be accessed (in seconds) (default: random) [$HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY]
+   --local.trusted.addr                                                           To advertise the localhost multiaddress to our trusted control Prysm node (default: false) [$HERMES_ETH_LOCAL_TRUSTED_ADDRESS]
+   --prysm.host value                                                             The host ip/name where Prysm's (beacon) API is accessible [$HERMES_ETH_PRYSM_HOST]
+   --prysm.port.http value                                                        The port on which Prysm's beacon nodes' Query HTTP API is listening on (default: 3500) [$HERMES_ETH_PRYSM_PORT_HTTP]
+   --prysm.port.grpc value                                                        The port on which Prysm's gRPC API is listening on (default: 4000) [$HERMES_ETH_PRYSM_PORT_GRPC]
+   --max-peers value                                                              The maximum number of peers we want to be connected with (default: 30) [$HERMES_ETH_MAX_PEERS]
+   --genesis.ssz.url value                                                        The .ssz URL from which to fetch the genesis data, requires 'chain=devnet' [$HERMES_ETH_GENESIS_SSZ_URL]
+   --config.yaml.url value                                                        The .yaml URL from which to fetch the beacon chain config, requires 'chain=devnet' [$HERMES_ETH_CONFIG_URL]
+   --bootnodes.yaml.url value                                                     The .yaml URL from which to fetch the bootnode ENRs, requires 'chain=devnet' [$HERMES_ETH_BOOTNODES_URL]
+   --deposit-contract-block.txt.url value                                         The .txt URL from which to fetch the deposit contract block. Requires 'chain=devnet' [$HERMES_ETH_DEPOSIT_CONTRACT_BLOCK_URL]
+   --subnet.attestation.type value                                                Subnet selection strategy for attestation topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_ATTESTATION_TYPE]
+   --subnet.attestation.subnets value [ --subnet.attestation.subnets value ]      Comma-separated list of subnet IDs for attestation when type=static [$HERMES_ETH_SUBNET_ATTESTATION_SUBNETS]
+   --subnet.attestation.count value                                               Number of random attestation subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_COUNT]
+   --subnet.attestation.start value                                               Start of subnet range (inclusive) for attestation when type=static_range (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_START]
+   --subnet.attestation.end value                                                 End of subnet range (exclusive) for attestation when type=static_range (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_END]
+   --subnet.synccommittee.type value                                              Subnet selection strategy for sync committee topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_TYPE]
+   --subnet.synccommittee.subnets value [ --subnet.synccommittee.subnets value ]  Comma-separated list of subnet IDs for sync committee when type=static [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_SUBNETS]
+   --subnet.synccommittee.count value                                             Number of random sync committee subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_COUNT]
+   --subnet.synccommittee.start value                                             Start of subnet range (inclusive) for sync committee when type=static_range (default: 0) [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_START]
+   --subnet.synccommittee.end value                                               End of subnet range (exclusive) for sync committee when type=static_range (default: 0) [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_END]
+   --subnet.blobsidecar.type value                                                Subnet selection strategy for blob sidecar topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_BLOBSIDECAR_TYPE]
+   --subnet.blobsidecar.subnets value [ --subnet.blobsidecar.subnets value ]      Comma-separated list of subnet IDs for blob sidecar when type=static [$HERMES_ETH_SUBNET_BLOBSIDECAR_SUBNETS]
+   --subnet.blobsidecar.count value                                               Number of random blob sidecar subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_BLOBSIDECAR_COUNT]
+   --subnet.blobsidecar.start value                                               Start of subnet range (inclusive) for blob sidecar when type=static_range (default: 0) [$HERMES_ETH_SUBNET_BLOBSIDECAR_START]
+   --subnet.blobsidecar.end value                                                 End of subnet range (exclusive) for blob sidecar when type=static_range (default: 0) [$HERMES_ETH_SUBNET_BLOBSIDECAR_END]
+   --help, -h                                                                     show help
 ```
 
 </details>
