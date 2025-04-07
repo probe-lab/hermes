@@ -202,9 +202,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	// initialize the custom Prysm client to communicate with its API
-	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout, cfg.GenesisConfig)
+	pryClient, err := NewPrysmClientWithTLS(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.PrysmUseTLS, cfg.DialTimeout, cfg.GenesisConfig)
 	if err != nil {
-		return nil, fmt.Errorf("new prysm client")
+		return nil, fmt.Errorf("new prysm client: %w", err)
 	}
 	// check if Prysm is valid
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

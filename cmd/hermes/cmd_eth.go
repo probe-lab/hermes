@@ -33,6 +33,7 @@ var ethConfig = &struct {
 	PrysmHost                   string
 	PrysmPortHTTP               int
 	PrysmPortGRPC               int
+	PrysmUseTLS                 bool
 	DialConcurrency             int
 	DialTimeout                 time.Duration
 	MaxPeers                    int
@@ -69,6 +70,7 @@ var ethConfig = &struct {
 	PrysmHost:                   "",
 	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
 	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmUseTLS:                 false,
 	DialConcurrency:             16,
 	DialTimeout:                 5 * time.Second,
 	MaxPeers:                    30, // arbitrary
@@ -211,6 +213,13 @@ var cmdEthFlags = []cli.Flag{
 		Usage:       "The port on which Prysm's gRPC API is listening on",
 		Value:       ethConfig.PrysmPortGRPC,
 		Destination: &ethConfig.PrysmPortGRPC,
+	},
+	&cli.BoolFlag{
+		Name:        "prysm.tls",
+		EnvVars:     []string{"HERMES_ETH_PRYSM_USE_TLS"},
+		Usage:       "Whether to use TLS when connecting to Prysm",
+		Value:       ethConfig.PrysmUseTLS,
+		Destination: &ethConfig.PrysmUseTLS,
 	},
 	&cli.IntFlag{
 		Name:        "max-peers",
@@ -442,6 +451,7 @@ func cmdEthAction(c *cli.Context) error {
 		PrysmHost:                   ethConfig.PrysmHost,
 		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
 		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,
+		PrysmUseTLS:                 ethConfig.PrysmUseTLS,
 		DataStreamType:              host.DataStreamtypeFromStr(rootConfig.DataStreamType),
 		AWSConfig:                   rootConfig.awsConfig,
 		S3Config:                    rootConfig.s3Config,

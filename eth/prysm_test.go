@@ -446,3 +446,229 @@ func TestPrysmClient_AuthenticatedRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestPrysmClientWithTLS(t *testing.T) {
+	otel.SetTracerProvider(tele.NoopTracerProvider())
+
+	tests := []struct {
+		name           string
+		useTLS         bool
+		host           string
+		httpPort       int
+		grpcPort       int
+		expectedScheme string
+	}{
+		{
+			name:           "no_tls",
+			useTLS:         false,
+			host:           "localhost",
+			httpPort:       8080,
+			grpcPort:       9090,
+			expectedScheme: "http",
+		},
+		{
+			name:           "with_tls",
+			useTLS:         true,
+			host:           "localhost",
+			httpPort:       443,
+			grpcPort:       9090,
+			expectedScheme: "https",
+		},
+		{
+			name:           "with_tls_and_auth",
+			useTLS:         true,
+			host:           "user:pass@localhost",
+			httpPort:       443,
+			grpcPort:       9090,
+			expectedScheme: "https",
+		},
+		{
+			name:           "no_tls_with_https_port",
+			useTLS:         false,
+			host:           "localhost",
+			httpPort:       443, // Typical HTTPS port
+			grpcPort:       9090,
+			expectedScheme: "http", // Should still be HTTP based on flag
+		},
+		{
+			name:           "tls_with_http_port",
+			useTLS:         true,
+			host:           "localhost",
+			httpPort:       80, // Typical HTTP port
+			grpcPort:       9090,
+			expectedScheme: "https", // Should still be HTTPS based on flag
+		},
+		{
+			name:           "different_grpc_http_ports",
+			useTLS:         true,
+			host:           "localhost",
+			httpPort:       8443,
+			grpcPort:       9443,
+			expectedScheme: "https",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Instead of making actual HTTP requests, just verify the client is configured correctly
+			p, err := NewPrysmClientWithTLS(tt.host, tt.httpPort, tt.grpcPort, tt.useTLS, time.Second, nil)
+			require.NoError(t, err)
+
+			// Verify scheme is set correctly
+			assert.Equal(t, tt.expectedScheme, p.scheme)
+			assert.Equal(t, tt.useTLS, p.useTLS)
+
+			// Verify URL construction
+			urlTest := &url.URL{
+				Scheme: p.scheme,
+				Host:   fmt.Sprintf("%s:%d", p.host, p.port),
+				Path:   "/prysm/node/trusted_peers",
+			}
+			assert.Equal(t, tt.expectedScheme, urlTest.Scheme)
+			assert.Equal(t, fmt.Sprintf("%s:%d", p.host, p.port), urlTest.Host)
+		})
+	}
+}
+
+func TestPrysmClientWithTLSHTTPRequests(t *testing.T) {
+	otel.SetTracerProvider(tele.NoopTracerProvider())
+
+	maddr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/1234")
+	require.NoError(t, err)
+
+	pid, err := peer.Decode("16Uiu2HAmBBTgCRezbBY8LbdfDN5PXYi3C1hwdoXJ9DZAorsWs4NR")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		useTLS         bool
+		method         string
+		path           string
+		body           string
+		respStatusCode int
+		respBody       string
+		expectErr      bool
+	}{
+		{
+			name:           "http_success",
+			useTLS:         false,
+			method:         http.MethodPost,
+			path:           "/prysm/node/trusted_peers",
+			body:           fmt.Sprintf("%s/p2p/%s", maddr.String(), pid.String()),
+			respStatusCode: http.StatusOK,
+			respBody:       "",
+			expectErr:      false,
+		},
+		{
+			name:           "https_success",
+			useTLS:         true,
+			method:         http.MethodPost,
+			path:           "/prysm/node/trusted_peers",
+			body:           fmt.Sprintf("%s/p2p/%s", maddr.String(), pid.String()),
+			respStatusCode: http.StatusOK,
+			respBody:       "",
+			expectErr:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a test server
+			var server *httptest.Server
+			if tt.useTLS {
+				server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// Verify request has the expected path and method
+					assert.Equal(t, tt.method, r.Method)
+					assert.Equal(t, tt.path, r.URL.Path)
+
+					// For POST requests, verify body
+					if tt.method == http.MethodPost {
+						data, err := io.ReadAll(r.Body)
+						require.NoError(t, err)
+						defer assert.NoError(t, r.Body.Close())
+
+						reqData := &structs.AddrRequest{}
+						err = json.Unmarshal(data, reqData)
+						require.NoError(t, err)
+
+						assert.Equal(t, tt.body, reqData.Addr)
+					}
+
+					w.WriteHeader(tt.respStatusCode)
+					_, _ = fmt.Fprintln(w, tt.respBody)
+				}))
+			} else {
+				server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// Verify request has the expected path and method
+					assert.Equal(t, tt.method, r.Method)
+					assert.Equal(t, tt.path, r.URL.Path)
+
+					// For POST requests, verify body
+					if tt.method == http.MethodPost {
+						data, err := io.ReadAll(r.Body)
+						require.NoError(t, err)
+						defer assert.NoError(t, r.Body.Close())
+
+						reqData := &structs.AddrRequest{}
+						err = json.Unmarshal(data, reqData)
+						require.NoError(t, err)
+
+						assert.Equal(t, tt.body, reqData.Addr)
+					}
+
+					w.WriteHeader(tt.respStatusCode)
+					_, _ = fmt.Fprintln(w, tt.respBody)
+				}))
+			}
+			defer server.Close()
+
+			// Parse server URL to get host and port
+			serverURL, err := url.Parse(server.URL)
+			require.NoError(t, err)
+
+			port, err := strconv.Atoi(serverURL.Port())
+			require.NoError(t, err)
+
+			// Create Prysm client with appropriate TLS setting
+			// For HTTPS tests, we need to use the TLS-enabled test client
+			var p *PrysmClient
+			if tt.useTLS {
+				// For TLS tests with httptest.NewTLSServer, we need to use the server's client
+				// which has the TLS certificates configured
+				p, err = NewPrysmClientWithTLS(serverURL.Hostname(), port, 0, tt.useTLS, time.Second, nil)
+				require.NoError(t, err)
+
+				// Replace the HTTP client with the test server's client that has TLS certs
+				p.httpClient = server.Client()
+			} else {
+				p, err = NewPrysmClientWithTLS(serverURL.Hostname(), port, 0, tt.useTLS, time.Second, nil)
+				require.NoError(t, err)
+			}
+
+			// Verify scheme is set correctly
+			expectedScheme := "http"
+			if tt.useTLS {
+				expectedScheme = "https"
+			}
+			assert.Equal(t, expectedScheme, p.scheme)
+
+			// Perform request based on method
+			var requestErr error
+			switch tt.method {
+			case http.MethodPost:
+				requestErr = p.AddTrustedPeer(context.Background(), pid, maddr)
+			case http.MethodGet:
+				_, requestErr = p.ListTrustedPeers(context.Background())
+			case http.MethodDelete:
+				requestErr = p.RemoveTrustedPeer(context.Background(), pid)
+			}
+
+			// Check results
+			if tt.expectErr {
+				assert.Error(t, requestErr)
+			} else {
+				assert.NoError(t, requestErr)
+			}
+		})
+	}
+}

@@ -75,6 +75,7 @@ type NodeConfig struct {
 	PrysmHost        string
 	PrysmPortHTTP    int
 	PrysmPortGRPC    int
+	PrysmUseTLS      bool
 
 	// The Data Stream configuration
 	DataStreamType host.DataStreamType
