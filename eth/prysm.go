@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -42,9 +43,15 @@ type PrysmClient struct {
 	beaconApiClient *apiCli.Client
 	genesis         *GenesisConfig
 	httpClient      *http.Client
+	useTLS          bool
+	scheme          string
 }
 
 func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Duration, genesis *GenesisConfig) (*PrysmClient, error) {
+	return NewPrysmClientWithTLS(host, portHTTP, portGRPC, false, timeout, genesis)
+}
+
+func NewPrysmClientWithTLS(host string, portHTTP int, portGRPC int, useTLS bool, timeout time.Duration, genesis *GenesisConfig) (*PrysmClient, error) {
 	tracer := otel.GetTracerProvider().Tracer("prysm_client")
 
 	// Parse any auth info from host we might have.
@@ -54,8 +61,19 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 	}
 
 	// Setup gRPC options.
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	var (
+		dialOpts []grpc.DialOption
+		scheme   string
+	)
+
+	if useTLS {
+		// Use TLS for secure connections.
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, auth.Host)))
+		scheme = "https"
+	} else {
+		// Use insecure credentials for non-TLS connections.
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		scheme = "http"
 	}
 
 	// Add auth if credentials provided.
@@ -98,7 +116,7 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 
 	// Create API client.
 	apiCli, err := apiCli.NewClient(
-		fmt.Sprintf("%s:%d", auth.Host, portHTTP),
+		fmt.Sprintf("%s://%s:%d", scheme, auth.Host, portHTTP),
 		opts...,
 	)
 	if err != nil {
@@ -109,6 +127,7 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 		host:            auth.Host,
 		auth:            auth,
 		port:            portHTTP,
+		scheme:          scheme,
 		nodeClient:      eth.NewNodeClient(conn),
 		beaconClient:    eth.NewBeaconChainClient(conn),
 		beaconApiClient: apiCli,
@@ -116,6 +135,7 @@ func NewPrysmClient(host string, portHTTP int, portGRPC int, timeout time.Durati
 		tracer:          tracer,
 		genesis:         genesis,
 		httpClient:      httpClient,
+		useTLS:          useTLS,
 	}, nil
 }
 
@@ -134,7 +154,7 @@ func (p *PrysmClient) AddTrustedPeer(ctx context.Context, pid peer.ID, maddr ma.
 	}
 
 	u := url.URL{
-		Scheme: "http",
+		Scheme: p.scheme,
 		Host:   fmt.Sprintf("%s:%d", p.host, p.port),
 		Path:   "/prysm/node/trusted_peers",
 	}
@@ -179,7 +199,7 @@ func (p *PrysmClient) ListTrustedPeers(ctx context.Context) (peers map[peer.ID]*
 	}()
 
 	u := url.URL{
-		Scheme: "http",
+		Scheme: p.scheme,
 		Host:   fmt.Sprintf("%s:%d", p.host, p.port),
 		Path:   "/prysm/node/trusted_peers",
 	}
@@ -234,7 +254,7 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 	}()
 
 	u := url.URL{
-		Scheme: "http",
+		Scheme: p.scheme,
 		Host:   fmt.Sprintf("%s:%d", p.host, p.port),
 		Path:   "/prysm/node/trusted_peers/" + pid.String(),
 	}
