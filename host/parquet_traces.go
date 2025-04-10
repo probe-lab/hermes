@@ -255,7 +255,7 @@ type GossipIdontwantEvent struct {
 
 type GossipSentMsgEvent struct {
 	BaseRPCEvent
-	MsgID string `parquet:"msg_ids"`
+	MsgID string `parquet:"msg_id"`
 	Topic string `parquet:"topic"`
 }
 
