@@ -145,7 +145,7 @@ func (n *NodeConfig) Validate() error {
 	}
 
 	if n.Libp2pPort < 0 {
-		return fmt.Errorf("libp2p port must be greater than or equal to 0, got %d", n.Devp2pPort)
+		return fmt.Errorf("libp2p port must be greater than or equal to 0, got %d", n.Libp2pPort)
 	}
 
 	if n.Libp2pPeerscoreSnapshotFreq < 0 {
