@@ -39,6 +39,7 @@ func (t *TopicSubscription) Serve(ctx context.Context) error {
 
 			return fmt.Errorf("failed to read next gossip message for topic %s: %w", t.Sub.Topic(), err)
 		}
+		slog.Error("MESSAGE!")
 
 		// check if it's our own event
 		if msg.ReceivedFrom == t.LocalID {

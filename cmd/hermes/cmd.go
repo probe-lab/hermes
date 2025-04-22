@@ -99,6 +99,7 @@ var app = &cli.App{
 	Before: rootBefore,
 	Commands: []*cli.Command{
 		cmdEth,
+		cmdFil,
 		cmdBenchmark,
 	},
 	After: rootAfter,
