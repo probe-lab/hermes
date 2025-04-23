@@ -271,7 +271,7 @@ func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
 		return nil
 	}, n.connCount)
 	if err != nil {
-		return fmt.Errorf("register connectin_count gauge callback: %w", err)
+		return fmt.Errorf("register connection_count gauge callback: %w", err)
 	}
 
 	n.connBeacon, err = cfg.Meter.Int64ObservableGauge("beacon_connected", metric.WithDescription("Tracks the standing connection to our beacon node (1=connected, 0=disconnected)"))

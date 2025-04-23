@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,8 +34,17 @@ type Node struct {
 	// The PubSub service that implements various gossipsub topics
 	pubSub *PubSub
 
+	// The discovery service, periodically querying the discv5 DHT network
+	disc *Discovery
+
 	// The suture supervisor that is the root of the service tree
 	sup *suture.Supervisor
+
+	// Metrics
+	connCount     metric.Int64ObservableGauge
+	connDurHist   metric.Float64Histogram
+	connAge       metric.Float64Histogram
+	connMedianAge metric.Float64ObservableGauge
 
 	// eventCallbacks contains a list of callbacks that are executed when an event is received
 	eventCallbacks []func(ctx context.Context, event *host.TraceEvent)
@@ -123,6 +133,15 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
 
+	disc, err := NewDiscovery(h.Host, &DiscoveryConfig{
+		Tracer: cfg.Tracer,
+		Meter:  cfg.Meter,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new discovery service: %w", err)
+	}
+	slog.Info("Initialized new discovery service")
+
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
 		Topics: []string{
@@ -137,6 +156,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 			"/fil/msgs/testnetnet",
 			"/indexer/ingest/mainnet",
 		},
+		DataStream: ds,
 	}
 
 	pubSub, err := NewPubSub(h, pubSubConfig)
@@ -148,6 +168,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	n := &Node{
 		cfg:    cfg,
 		host:   h,
+		disc:   disc,
 		ds:     ds,
 		pubSub: pubSub,
 		sup:    suture.NewSimple("fil"),
@@ -162,7 +183,79 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 			}
 		})
 	}
+
+	// initialize custom prometheus metrics
+	if err := n.initMetrics(cfg); err != nil {
+		return nil, fmt.Errorf("init metrics: %w", err)
+	}
+
 	return n, nil
+}
+
+// initMetrics initializes various prometheus metrics and stores the meters
+// on the [Node] object.
+func (n *Node) initMetrics(cfg *NodeConfig) (err error) {
+	n.connDurHist, err = cfg.Meter.Float64Histogram(
+		"connection_duration_min",
+		metric.WithExplicitBucketBoundaries(0.5, 1, 5, 10, 50, 100, 500, 1000),
+	)
+	if err != nil {
+		return fmt.Errorf("new connection_duration_min histogram: %w", err)
+	}
+
+	n.connCount, err = cfg.Meter.Int64ObservableGauge("connection_count")
+	if err != nil {
+		return fmt.Errorf("new connection_count gauge: %w", err)
+	}
+
+	_, err = cfg.Meter.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
+		obs.ObserveInt64(n.connCount, int64(len(n.host.Network().Peers())))
+		return nil
+	}, n.connCount)
+	if err != nil {
+		return fmt.Errorf("register connection_count gauge callback: %w", err)
+	}
+
+	n.connAge, err = cfg.Meter.Float64Histogram("conn_age", metric.WithDescription("Connection age after disconnect in seconds"), metric.WithUnit("s"))
+	if err != nil {
+		return fmt.Errorf("new conn_age histogram: %w", err)
+	}
+
+	n.connMedianAge, err = cfg.Meter.Float64ObservableGauge("conn_median_age", metric.WithDescription("The median age of all currently active connections"), metric.WithUnit("s"))
+	if err != nil {
+		return fmt.Errorf("new conn_median_age gauge: %w", err)
+	}
+	_, err = cfg.Meter.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
+		// get a reference to all connections
+		conns := n.host.Network().Conns()
+		if len(conns) == 0 {
+			// don't measure anything if we have no active connection
+			return nil
+		}
+
+		// calculate connection ages in seconds
+		ages := make([]float64, len(conns))
+		for i, conn := range conns {
+			ages[i] = time.Since(conn.Stat().Opened).Seconds()
+		}
+
+		// calculate median
+		sort.Float64s(ages)
+
+		if len(ages)%2 == 0 {
+			lo, hi := ages[(len(ages)-1)/2], ages[len(ages)/2]
+			obs.ObserveFloat64(n.connMedianAge, (lo+hi)/2)
+		} else {
+			obs.ObserveFloat64(n.connMedianAge, ages[len(ages)/2])
+		}
+
+		return nil
+	}, n.connMedianAge)
+	if err != nil {
+		return fmt.Errorf("register conn_median_age gauge callback: %w", err)
+	}
+
+	return nil
 }
 
 // OnEvent registers a callback that is executed when an event is received.
@@ -216,6 +309,9 @@ func (n *Node) Start(ctx context.Context) error {
 	if errCounter.Load() == int32(len(n.cfg.Bootstrappers)) {
 		return fmt.Errorf("failed to connect to all bootstrappers")
 	}
+
+	// start the discovery service to find peers in the discv5 DHT
+	n.sup.Add(n.disc)
 
 	// start all long-running services
 	return n.sup.Serve(ctx)

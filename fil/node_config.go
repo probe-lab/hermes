@@ -264,6 +264,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 			hash := blake2b.Sum256(pmsg.Data)
 			return string(hash[:])
 		}),
+		pubsub.WithPeerExchange(true),
 		pubsub.WithSubscriptionFilter(subFilter),
 		pubsub.WithPeerScore(
 			&pubsub.PeerScoreParams{
