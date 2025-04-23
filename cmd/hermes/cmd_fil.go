@@ -7,12 +7,10 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
-
-	"github.com/probe-lab/hermes/fil"
-
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
+	"github.com/probe-lab/hermes/fil"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
