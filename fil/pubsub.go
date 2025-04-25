@@ -9,12 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ipni/go-libipni/announce/message"
-
+	"github.com/filecoin-project/go-f3/gpbft"
+	"github.com/filecoin-project/go-f3/manifest"
 	"github.com/filecoin-project/lotus/chain/types"
+	"github.com/ipni/go-libipni/announce/message"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/sirupsen/logrus"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
@@ -200,6 +202,23 @@ func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error
 		PeerID:    p.host.ID(),
 		Timestamp: time.Now(),
 	}
+	m := gpbft.GMessage{}
+	if err := m.UnmarshalCBOR(bytes.NewBuffer(msg.Data)); err != nil {
+		logrus.WithError(err).Error("failed to unmarshal manifest f3 granite message")
+		return fmt.Errorf("unmarshal cbor: %w", err)
+	}
+
+	evt.Payload = map[string]any{
+		"PeerID":        msg.ReceivedFrom,
+		"Topic":         msg.GetTopic(),
+		"Seq":           hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":         hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":       len(msg.Data),
+		"Sender":        m.Sender,
+		"Justification": m.Justification,
+		"Ticket":        m.Ticket,
+		"Vote":          m.Vote,
+	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn(
@@ -217,6 +236,23 @@ func (p *PubSub) handleF3Manifests(ctx context.Context, msg *pubsub.Message) err
 		Topic:     msg.GetTopic(),
 		PeerID:    p.host.ID(),
 		Timestamp: time.Now(),
+	}
+
+	var update manifest.ManifestUpdateMessage
+	err := update.Unmarshal(bytes.NewReader(msg.Data))
+	if err != nil {
+		logrus.WithError(err).Error("failed to unmarshal f3 manifest update message")
+		return fmt.Errorf("unmarshal cbor: %w", err)
+	}
+
+	evt.Payload = map[string]any{
+		"PeerID":   msg.ReceivedFrom,
+		"Topic":    msg.GetTopic(),
+		"Seq":      hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":  len(msg.Data),
+		"Manifest": update.Manifest,
+		"MsgSeq":   update.MessageSequence,
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
