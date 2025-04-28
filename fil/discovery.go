@@ -68,7 +68,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 			return fmt.Errorf("failed to generate random key: %w", err)
 		}
 		start := time.Now()
-		slog.Info("NEW LOOKUP")
+
 		peers, err := dht.GetClosestPeers(ctx, string(k))
 		if errors.Is(err, context.Canceled) {
 			return nil
