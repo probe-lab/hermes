@@ -50,12 +50,6 @@ type NodeConfig struct {
 	KinesisRegion  string
 	KinesisStream  string
 
-	// Limits the number of concurrent connection establishment routines. When
-	// we discover peers over discv5 and are not at our MaxPeers limit we try
-	// to establish a connection to a peer. However, we limit the concurrency to
-	// this DialConcurrency value.
-	DialConcurrency int
-
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
@@ -77,10 +71,6 @@ func (n *NodeConfig) Validate() error {
 
 	if len(n.Bootstrappers) == 0 {
 		return fmt.Errorf("no valid bootstrapper multiaddresses provided, please check the --bootstrappers flag")
-	}
-
-	if n.DialConcurrency <= 0 {
-		return fmt.Errorf("dialer count must be positive, got %d", n.DialConcurrency)
 	}
 
 	// ensure that if the data stream is AWS, the parameters where given
