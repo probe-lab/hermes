@@ -21,7 +21,6 @@ var filConfig = &struct {
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
 	BootrapperMaddrs            *cli.StringSlice
-	DialConcurrency             int
 	DialTimeout                 time.Duration
 }{
 	PrivateKeyStr:               "", // unset means it'll be generated
@@ -29,7 +28,6 @@ var filConfig = &struct {
 	Libp2pPort:                  0,
 	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
 	BootrapperMaddrs:            cli.NewStringSlice(),
-	DialConcurrency:             16,
 	DialTimeout:                 5 * time.Second,
 }
 
@@ -51,13 +49,6 @@ var cmdFilFlags = []cli.Flag{
 		Value:       filConfig.PrivateKeyStr,
 		Destination: &filConfig.PrivateKeyStr,
 		Action:      validateKeyFlag,
-	},
-	&cli.IntFlag{
-		Name:        "dial.concurrency",
-		EnvVars:     []string{"HERMES_FIL_DIAL_CONCURRENCY"},
-		Usage:       "The maximum number of parallel workers dialing other peers in the network",
-		Value:       filConfig.DialConcurrency,
-		Destination: &filConfig.DialConcurrency,
 	},
 	&cli.DurationFlag{
 		Name:        "dial.timeout",
