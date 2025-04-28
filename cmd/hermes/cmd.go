@@ -238,7 +238,7 @@ var rootFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "s3.bucket",
 		EnvVars:     []string{"HERMES_S3_BUCKET"},
-		Usage:       "name of the S3 bucket that will be used as reference to submit the traces",
+		Usage:       "Name of the S3 bucket that will be used as reference to submit the traces",
 		Value:       rootConfig.S3Bucket,
 		Destination: &rootConfig.S3Bucket,
 		Category:    flagCategoryDataStream,
@@ -246,7 +246,7 @@ var rootFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "s3.tag",
 		EnvVars:     []string{"HERMES_S3_TAG"},
-		Usage:       "tag within the S3 bucket that will be used as reference to submit the traces",
+		Usage:       "Tag within the S3 bucket that will be used as reference to submit the traces",
 		Value:       rootConfig.S3Tag,
 		Destination: &rootConfig.S3Tag,
 		Category:    flagCategoryDataStream,
@@ -254,7 +254,7 @@ var rootFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "s3.byte.limit",
 		EnvVars:     []string{"HERMES_S3_BYTE_LIMIT"},
-		Usage:       "Soft upper limite of bytes for the S3 dumps",
+		Usage:       "Soft upper limit of bytes for the S3 dumps",
 		Value:       rootConfig.S3ByteLimit,
 		Destination: &rootConfig.S3ByteLimit,
 		Category:    flagCategoryDataStream,
