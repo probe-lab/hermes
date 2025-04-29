@@ -19,6 +19,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/thejerf/suture/v4"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
@@ -42,6 +43,10 @@ type Host struct {
 	sk    *ScoreKeeper
 
 	meterSubmittedTraces metric.Int64Counter
+	meterMeshSize        metric.Int64Gauge
+	meterAvgMeshAge      metric.Float64Gauge
+	meterAvgMeshScore    metric.Float64Gauge
+	meterAvgMeshAppScore metric.Float64Gauge
 }
 
 func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
@@ -65,6 +70,26 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
 	if err != nil {
 		return nil, fmt.Errorf("new submitted_traces counter: %w", err)
+	}
+
+	hermesHost.meterMeshSize, err = cfg.Meter.Int64Gauge("mesh_size")
+	if err != nil {
+		return nil, fmt.Errorf("new mesh_size gauge: %w", err)
+	}
+
+	hermesHost.meterAvgMeshAge, err = cfg.Meter.Float64Gauge("avg_mesh_age")
+	if err != nil {
+		return nil, fmt.Errorf("new avg_mesh_age gauge: %w", err)
+	}
+
+	hermesHost.meterAvgMeshScore, err = cfg.Meter.Float64Gauge("avg_mesh_score")
+	if err != nil {
+		return nil, fmt.Errorf("new avg_mesh_score gauge: %w", err)
+	}
+
+	hermesHost.meterAvgMeshAppScore, err = cfg.Meter.Float64Gauge("avg_mesh_app_score")
+	if err != nil {
+		return nil, fmt.Errorf("new avg_mesh_app_score gauge: %w", err)
 	}
 
 	return hermesHost, nil
@@ -321,6 +346,7 @@ func MaddrFrom(ip string, port uint) (ma.Multiaddr, error) {
 func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 	// get the event time
 	t := time.Now()
+	ctx := context.Background()
 
 	slog.Debug("updating local peerscore:", tele.LogAttrPeerScoresLen(scores))
 
@@ -332,15 +358,67 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 	for pid, score := range scores {
 		// get the traceEvent from the raw score mapping
 		scoreData := composePeerScoreEventFromRawMap(pid, score)
-		trace := &TraceEvent{
+		evt := &TraceEvent{
 			Type:      PeerScoreEventType,
 			PeerID:    h.ID(),
 			Timestamp: t,
 			Payload:   scoreData,
 		}
 
-		traceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		traceCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		h.cfg.DataStream.PutRecord(traceCtx, trace)
+		if err := h.cfg.DataStream.PutRecord(traceCtx, evt); err != nil {
+			slog.Warn("failed putting peer score event", tele.LogAttrError(err))
+		}
 	}
+
+	type topicState struct {
+		meshSize  int
+		meshTimes []float64
+		scores    []float64
+		appScores []float64
+	}
+
+	states := map[string]*topicState{}
+
+	for _, pss := range scores { // pss: peer score snapshot
+		for topic, tss := range pss.Topics { // tss: topic score snapshot
+
+			// Not sure if the peer score map also includes peers that were
+			// kicked out of the meshes. Therefore, if the time in mesh is 0,
+			// we don't track that peer.
+			if tss.TimeInMesh == 0 {
+				continue
+			}
+
+			if _, ok := states[topic]; !ok {
+				states[topic] = &topicState{
+					meshSize:  0,
+					meshTimes: []float64{},
+					scores:    []float64{},
+					appScores: []float64{},
+				}
+			}
+
+			states[topic].meshSize += 1
+			states[topic].meshTimes = append(states[topic].meshTimes, tss.TimeInMesh.Seconds())
+			states[topic].scores = append(states[topic].scores, pss.Score)
+			states[topic].appScores = append(states[topic].appScores, pss.AppSpecificScore)
+		}
+	}
+
+	for topic, state := range states {
+		h.meterMeshSize.Record(ctx, int64(state.meshSize), metric.WithAttributes(attribute.String("topic", topic)))
+		h.meterAvgMeshAge.Record(ctx, avg(state.meshTimes), metric.WithAttributes(attribute.String("topic", topic)))
+		h.meterAvgMeshScore.Record(ctx, avg(state.scores), metric.WithAttributes(attribute.String("topic", topic)))
+		h.meterAvgMeshAppScore.Record(ctx, avg(state.appScores), metric.WithAttributes(attribute.String("topic", topic)))
+	}
+}
+
+func avg(values []float64) float64 {
+	sum := 0.0
+	for _, v := range values {
+		sum += v
+	}
+	return sum / float64(len(values))
 }

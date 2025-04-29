@@ -26,7 +26,7 @@ var filConfig = &struct {
 	PrivateKeyStr:               "", // unset means it'll be generated
 	Libp2pHost:                  "127.0.0.1",
 	Libp2pPort:                  0,
-	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
+	Libp2pPeerscoreSnapshotFreq: 15 * time.Second,
 	Network:                     "mainnet",
 	DialTimeout:                 5 * time.Second,
 }

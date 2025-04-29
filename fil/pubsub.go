@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/filecoin-project/go-f3/chainexchange"
 	"github.com/filecoin-project/go-f3/gpbft"
 	"github.com/filecoin-project/go-f3/manifest"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -26,7 +27,7 @@ import (
 const eventTypeHandleMessage = "HANDLE_MESSAGE"
 
 type PubSubConfig struct {
-	Topics     []string
+	Topics     map[string][]pubsub.TopicOpt
 	DataStream host.DataStream
 }
 
@@ -58,8 +59,20 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 	supervisor := suture.NewSimple("pubsub")
 
-	for _, topicName := range p.cfg.Topics {
-		topic, err := p.gs.Join(topicName)
+	for topicName, topicOpts := range p.cfg.Topics {
+
+		var err error
+		switch {
+		case strings.HasPrefix(topicName, "/f3/granite"):
+			err = p.gs.RegisterTopicValidator(topicName, p.validateF3Granite)
+		case strings.HasPrefix(topicName, "/f3/chainexchange"):
+			err = p.gs.RegisterTopicValidator(topicName, p.validateF3ChainExchange)
+		}
+		if err != nil {
+			return fmt.Errorf("register topic validator %s: %w", topicName, err)
+		}
+
+		topic, err := p.gs.Join(topicName, topicOpts...)
 		if err != nil {
 			return fmt.Errorf("join pubsub topic %s: %w", topicName, err)
 		}
@@ -88,10 +101,12 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	switch {
-	case strings.HasPrefix(topic, "/f3/manifests/0.0.2"):
+	case strings.HasPrefix(topic, "/f3/manifests"):
 		return p.handleF3Manifests
-	case strings.HasPrefix(topic, "/f3/granite/0.0.3/filecoin"):
+	case strings.HasPrefix(topic, "/f3/granite"):
 		return p.handleF3Granite
+	case strings.HasPrefix(topic, "/f3/chainexchange"):
+		return p.handleF3ChainExchange
 	case topic == "/fil/msgs/testnetnet":
 		return p.handleFilMessage
 	case topic == "/indexer/ingest/mainnet":
@@ -194,19 +209,23 @@ func (p *PubSub) handleIndexerIngest(ctx context.Context, msg *pubsub.Message) e
 	return nil
 }
 
+func (p *PubSub) validateF3Granite(ctx context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	var gmsg gpbft.GMessage
+	if err := gmsg.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
+		return pubsub.ValidationReject
+	}
+	msg.ValidatorData = gmsg
+	return pubsub.ValidationAccept
+}
+
 func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error {
-	// err error
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		Topic:     msg.GetTopic(),
 		PeerID:    p.host.ID(),
 		Timestamp: time.Now(),
 	}
-	m := gpbft.GMessage{}
-	if err := m.UnmarshalCBOR(bytes.NewBuffer(msg.Data)); err != nil {
-		logrus.WithError(err).Error("failed to unmarshal manifest f3 granite message")
-		return fmt.Errorf("unmarshal cbor: %w", err)
-	}
+	gmsg := msg.ValidatorData.(gpbft.GMessage)
 
 	evt.Payload = map[string]any{
 		"PeerID":        msg.ReceivedFrom,
@@ -214,10 +233,10 @@ func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error
 		"Seq":           hex.EncodeToString(msg.GetSeqno()),
 		"MsgID":         hex.EncodeToString([]byte(msg.ID)),
 		"MsgSize":       len(msg.Data),
-		"Sender":        m.Sender,
-		"Justification": m.Justification,
-		"Ticket":        m.Ticket,
-		"Vote":          m.Vote,
+		"Sender":        gmsg.Sender,
+		"Justification": gmsg.Justification,
+		"Ticket":        gmsg.Ticket,
+		"Vote":          gmsg.Vote,
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
@@ -230,7 +249,6 @@ func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error
 }
 
 func (p *PubSub) handleF3Manifests(ctx context.Context, msg *pubsub.Message) error {
-	// err error
 	evt := &host.TraceEvent{
 		Type:      eventTypeHandleMessage,
 		Topic:     msg.GetTopic(),
@@ -253,6 +271,55 @@ func (p *PubSub) handleF3Manifests(ctx context.Context, msg *pubsub.Message) err
 		"MsgSize":  len(msg.Data),
 		"Manifest": update.Manifest,
 		"MsgSeq":   update.MessageSequence,
+	}
+
+	if err = p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+	}
+
+	return nil
+}
+
+func (p *PubSub) validateF3ChainExchange(ctx context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	var cmsg chainexchange.Message
+	enc := NewCBOR[*chainexchange.Message]()
+	if err := enc.Decode(msg.Data, &cmsg); err != nil {
+		return pubsub.ValidationReject
+	}
+
+	if cmsg.Chain.IsZero() {
+		return pubsub.ValidationReject
+	}
+
+	if err := cmsg.Chain.Validate(); err != nil {
+		return pubsub.ValidationReject
+	}
+
+	msg.ValidatorData = cmsg
+	return pubsub.ValidationAccept
+}
+
+func (p *PubSub) handleF3ChainExchange(ctx context.Context, msg *pubsub.Message) error {
+	evt := &host.TraceEvent{
+		Type:      eventTypeHandleMessage,
+		Topic:     msg.GetTopic(),
+		PeerID:    p.host.ID(),
+		Timestamp: time.Now(),
+	}
+
+	cmsg := msg.ValidatorData.(chainexchange.Message)
+
+	evt.Payload = map[string]any{
+		"PeerID":    msg.ReceivedFrom,
+		"Topic":     msg.GetTopic(),
+		"Seq":       hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":     hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":   len(msg.Data),
+		"Chain":     cmsg.Chain,
+		"Instance":  cmsg.Instance,
+		"Timestamp": cmsg.Timestamp,
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
