@@ -36,15 +36,16 @@ func (n *Node) Connected(net network.Network, c network.Conn) {
 func (n *Node) Disconnected(net network.Network, c network.Conn) {
 	if !c.Stat().Opened.IsZero() {
 		av := n.host.AgentVersion(c.RemotePeer())
-		parts := strings.Split(av, "/")
-		if len(parts) > 0 {
-			switch strings.ToLower(parts[0]) {
-			case "prysm", "lighthouse", "nimbus", "lodestar", "grandine", "teku", "erigon":
-				av = strings.ToLower(parts[0])
-			default:
-				av = "other"
-			}
-		} else {
+		switch {
+		case strings.Contains(av, "lotus"):
+			av = "lotus"
+		case strings.Contains(av, "boost"):
+			av = "boost"
+		case strings.Contains(av, "venus"):
+			av = "venus"
+		case strings.Contains(av, "forest"):
+			av = "forest"
+		default:
 			av = "unknown"
 		}
 		n.connAge.Record(context.TODO(), time.Since(c.Stat().Opened).Seconds(), metric.WithAttributes(attribute.String("agent", av)))
