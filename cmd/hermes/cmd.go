@@ -198,7 +198,7 @@ var rootFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "data.stream.type",
 		EnvVars:     []string{"HERMES_DATA_STREAM_TYPE"},
-		Usage:       "Format where the traces will be submitted: logger, kinesis, or callback.",
+		Usage:       "Format where the traces will be submitted: logger, kinesis, noop, s3 or callback.",
 		Value:       rootConfig.DataStreamType,
 		Destination: &rootConfig.DataStreamType,
 		Category:    flagCategoryDataStream,
