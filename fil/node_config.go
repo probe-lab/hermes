@@ -220,6 +220,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		}),
 		pubsub.WithPeerExchange(true),
 		pubsub.WithSubscriptionFilter(subFilter),
+		pubsub.WithValidateQueueSize(128), // default is 32
 		pubsub.WithPeerScore(
 			&pubsub.PeerScoreParams{
 				AppSpecificScore:            func(p peer.ID) float64 { return 0 },
