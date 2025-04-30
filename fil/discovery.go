@@ -15,8 +15,9 @@ import (
 )
 
 type DiscoveryConfig struct {
-	Tracer trace.Tracer
-	Meter  metric.Meter
+	Interval time.Duration
+	Tracer   trace.Tracer
+	Meter    metric.Meter
 }
 
 type Discovery struct {
@@ -72,15 +73,14 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		peers, err := dht.GetClosestPeers(ctx, string(k))
 		if errors.Is(err, context.Canceled) {
 			return nil
-		} else if err != nil {
-			slog.Warn("error", "err", err)
+		} else if err == nil {
+			slog.Debug("Found peers", "count", len(peers))
 		}
-		slog.Info("Found peers", "peers", len(peers))
 
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(10*time.Second - time.Since(start)):
+		case <-time.After(d.cfg.Interval - time.Since(start)):
 			continue
 		}
 	}
