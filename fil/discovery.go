@@ -73,7 +73,13 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		peers, err := dht.GetClosestPeers(ctx, string(k))
 		if errors.Is(err, context.Canceled) {
 			return nil
-		} else if err == nil {
+		} else if err != nil {
+			// could be that we don't have any DHT peers in our peer store
+			// -> bootstrap again
+			for _, addrInfo := range kaddht.GetDefaultBootstrapPeerAddrInfos() {
+				_ = d.host.Connect(ctx, addrInfo)
+			}
+		} else {
 			slog.Debug("Found peers", "count", len(peers))
 		}
 
