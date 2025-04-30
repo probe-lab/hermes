@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	f3 "github.com/filecoin-project/go-f3"
 	"github.com/filecoin-project/go-f3/chainexchange"
-	"github.com/filecoin-project/go-f3/gpbft"
 	"github.com/filecoin-project/go-f3/manifest"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/ipni/go-libipni/announce/message"
@@ -26,9 +26,14 @@ import (
 
 const eventTypeHandleMessage = "HANDLE_MESSAGE"
 
+type TopicConfig struct {
+	ScoreParams *pubsub.TopicScoreParams
+	Options     []pubsub.TopicOpt
+}
+
 type PubSubConfig struct {
-	Topics     map[string][]pubsub.TopicOpt
-	DataStream host.DataStream
+	TopicConfigs map[string]*TopicConfig
+	DataStream   host.DataStream
 }
 
 func (p PubSubConfig) Validate() error {
@@ -59,7 +64,7 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 	supervisor := suture.NewSimple("pubsub")
 
-	for topicName, topicOpts := range p.cfg.Topics {
+	for topicName, topicCfg := range p.cfg.TopicConfigs {
 
 		var err error
 		switch {
@@ -72,7 +77,7 @@ func (p *PubSub) Serve(ctx context.Context) error {
 			return fmt.Errorf("register topic validator %s: %w", topicName, err)
 		}
 
-		topic, err := p.gs.Join(topicName, topicOpts...)
+		topic, err := p.gs.Join(topicName, topicCfg.Options...)
 		if err != nil {
 			return fmt.Errorf("join pubsub topic %s: %w", topicName, err)
 		}
@@ -210,11 +215,13 @@ func (p *PubSub) handleIndexerIngest(ctx context.Context, msg *pubsub.Message) e
 }
 
 func (p *PubSub) validateF3Granite(ctx context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
-	var gmsg gpbft.GMessage
-	if err := gmsg.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
+	var pgmsg f3.PartialGMessage
+	enc := NewCBOR[*f3.PartialGMessage]()
+	if err := enc.Decode(msg.Data, &pgmsg); err != nil {
 		return pubsub.ValidationReject
 	}
-	msg.ValidatorData = gmsg
+	msg.ValidatorData = pgmsg
+
 	return pubsub.ValidationAccept
 }
 
@@ -225,7 +232,7 @@ func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error
 		PeerID:    p.host.ID(),
 		Timestamp: time.Now(),
 	}
-	gmsg := msg.ValidatorData.(gpbft.GMessage)
+	gmsg := msg.ValidatorData.(f3.PartialGMessage)
 
 	evt.Payload = map[string]any{
 		"PeerID":        msg.ReceivedFrom,

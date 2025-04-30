@@ -12,7 +12,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -111,6 +110,10 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		if err != nil {
 			return nil, fmt.Errorf("new s3 producer %w", err)
 		}
+
+	case host.DataStreamTypeNoop:
+		ds = new(host.NoopDataStream)
+
 	default:
 		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
@@ -135,8 +138,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
 
 	disc, err := NewDiscovery(h.Host, &DiscoveryConfig{
-		Tracer: cfg.Tracer,
-		Meter:  cfg.Meter,
+		Interval: cfg.LookupInterval,
+		Tracer:   cfg.Tracer,
+		Meter:    cfg.Meter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("new discovery service: %w", err)
@@ -145,19 +149,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
-		Topics: map[string][]pubsub.TopicOpt{
-			"/f3/granite/0.0.3/filecoin":       {pubsub.WithTopicMessageIdFn(GPBFTMessageIdFn)},
-			"/f3/chainexchange/0.0.1/filecoin": {pubsub.WithTopicMessageIdFn(ChainExchangeMessageIdFn)},
-			"/f3/manifests/0.0.1":              {pubsub.WithTopicMessageIdFn(ManifestMessageIdFn)},
-			"/f3/manifests/0.0.2":              {pubsub.WithTopicMessageIdFn(ManifestMessageIdFn)},
-			"/drand/pubsub/v0.0.0/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971": {},
-			"/drand/pubsub/v0.0.0/80c8b872c714f4c00fdd3daa465d5514049f457f01f85a4caf68cdcd394ba039": {},
-			"/drand/pubsub/v0.0.0/8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce": {},
-			"/fil/blocks/testnetnet":  {},
-			"/fil/msgs/testnetnet":    {},
-			"/indexer/ingest/mainnet": {},
-		},
-		DataStream: ds,
+		TopicConfigs: cfg.TopicConfigs,
+		DataStream:   ds,
 	}
 
 	pubSub, err := NewPubSub(h, pubSubConfig)

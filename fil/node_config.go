@@ -38,10 +38,16 @@ type NodeConfig struct {
 	// General timeout when communicating with other network participants
 	DialTimeout time.Duration
 
+	// Topic configurations to subscribe to
+	TopicConfigs map[string]*TopicConfig
+
 	// The address information of the local libp2p host
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+
+	// Pause between two discovery lookups
+	LookupInterval time.Duration
 
 	// The Data Stream configuration
 	DataStreamType host.DataStreamType
@@ -202,54 +208,12 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 }
 
 func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub.Option {
-	//drandTopicParams := &pubsub.TopicScoreParams{
-	//	TopicWeight:                    0.5,     // 5x block topic; max cap is 62.5
-	//	TimeInMeshWeight:               0.00027, // ~1/3600
-	//	TimeInMeshQuantum:              time.Second,
-	//	TimeInMeshCap:                  1,
-	//	FirstMessageDeliveriesWeight:   5, // max value is 125
-	//	FirstMessageDeliveriesDecay:    pubsub.ScoreParameterDecay(time.Hour),
-	//	FirstMessageDeliveriesCap:      25, // the maximum expected in an hour is ~26, including the decay
-	//	InvalidMessageDeliveriesWeight: -1000,
-	//	InvalidMessageDeliveriesDecay:  pubsub.ScoreParameterDecay(time.Hour),
-	//}
-
-	topicParams := map[string]*pubsub.TopicScoreParams{
-		"/fil/blocks/mainnet": {
-			TopicWeight:                    0.1,     // max cap is 50, max mesh penalty is -10, single invalid message is -100
-			TimeInMeshWeight:               0.00027, // ~1/3600
-			TimeInMeshQuantum:              time.Second,
-			TimeInMeshCap:                  1,
-			FirstMessageDeliveriesWeight:   5, // max value is 500
-			FirstMessageDeliveriesDecay:    pubsub.ScoreParameterDecay(time.Hour),
-			FirstMessageDeliveriesCap:      100, // 100 blocks in an hour
-			InvalidMessageDeliveriesWeight: -1000,
-			InvalidMessageDeliveriesDecay:  pubsub.ScoreParameterDecay(time.Hour),
-		},
-		"/fil/msgs/mainnet": {
-			TopicWeight:                    0.1,       // max cap is 5, single invalid message is -100
-			TimeInMeshWeight:               0.0002778, // ~1/3600
-			TimeInMeshQuantum:              time.Second,
-			TimeInMeshCap:                  1,
-			FirstMessageDeliveriesWeight:   0.5, // max value is 50
-			FirstMessageDeliveriesDecay:    pubsub.ScoreParameterDecay(10 * time.Minute),
-			FirstMessageDeliveriesCap:      100, // 100 messages in 10 minutes
-			InvalidMessageDeliveriesWeight: -1000,
-			InvalidMessageDeliveriesDecay:  pubsub.ScoreParameterDecay(time.Hour),
-		},
+	topicParams := make(map[string]*pubsub.TopicScoreParams, len(n.TopicConfigs))
+	for topic, topicConfig := range n.TopicConfigs {
+		topicParams[topic] = topicConfig.ScoreParams
 	}
 
-	const (
-		GossipScoreThreshold             = -500
-		PublishScoreThreshold            = -1000
-		GraylistScoreThreshold           = -2500
-		AcceptPXScoreThreshold           = 1000
-		OpportunisticGraftScoreThreshold = 3.5
-	)
-
 	psOpts := []pubsub.Option{
-		// pubsub.WithMessageSignaturePolicy(pubsub.StrictSign),
-		// pubsub.WithNoAuthor(),
 		pubsub.WithMessageIdFn(func(pmsg *pubsubpb.Message) string {
 			hash := blake2b.Sum256(pmsg.Data)
 			return string(hash[:])
@@ -258,26 +222,10 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		pubsub.WithSubscriptionFilter(subFilter),
 		pubsub.WithPeerScore(
 			&pubsub.PeerScoreParams{
-				AppSpecificScore: func(p peer.ID) float64 {
-					// return a heavy positive score for bootstrappers so that we don't unilaterally prune
-					// them and accept PX from them.
-					// we don't do that in the bootstrappers themselves to avoid creating a closed mesh
-					// between them (however we might want to consider doing just that)
-					//_, ok := bootstrappers[p]
-					//if ok && !isBootstrapNode {
-					//	return 2500
-					//}
-					//
-					//_, ok = drandBootstrappers[p]
-					//if ok && !isBootstrapNode {
-					//	return 1500
-					//}
-
-					return 0
-				},
+				AppSpecificScore:            func(p peer.ID) float64 { return 0 },
 				AppSpecificWeight:           1,
 				IPColocationFactorThreshold: 5,
-				IPColocationFactorWeight:    -100,
+				IPColocationFactorWeight:    0,
 				BehaviourPenaltyThreshold:   6,
 				BehaviourPenaltyWeight:      -10,
 				BehaviourPenaltyDecay:       pubsub.ScoreParameterDecay(time.Hour),
