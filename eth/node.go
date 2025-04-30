@@ -127,6 +127,10 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		if err != nil {
 			return nil, fmt.Errorf("new s3 producer %w", err)
 		}
+
+	case host.DataStreamTypeNoop:
+		ds = new(host.NoopDataStream)
+
 	default:
 		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
