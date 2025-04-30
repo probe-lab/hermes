@@ -6,12 +6,10 @@ package fil
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
 	cbg "github.com/whyrusleeping/cbor-gen"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // maxDecompressedSize is the default maximum amount of memory allocated by the
@@ -59,9 +57,6 @@ type ZSTD[T CBORMarshalUnmarshaler] struct {
 	cborEncoding *CBOR[T]
 	compressor   *zstd.Encoder
 	decompressor *zstd.Decoder
-
-	metricAttr       attribute.KeyValue
-	metricAttrLoader sync.Once
 }
 
 func NewZSTD[T CBORMarshalUnmarshaler]() (*ZSTD[T], error) {
@@ -104,17 +99,4 @@ func (c *ZSTD[T]) Decode(compressed []byte, t T) (_err error) {
 		return err
 	}
 	return c.cborEncoding.Decode(decompressed, t)
-}
-
-func (c *ZSTD[T]) getMetricAttribute() attribute.KeyValue {
-	c.metricAttrLoader.Do(func() {
-		const key = "type"
-		switch target := reflect.TypeFor[T](); {
-		case target.Kind() == reflect.Ptr:
-			c.metricAttr = attribute.String(key, target.Elem().Name())
-		default:
-			c.metricAttr = attribute.String(key, target.Name())
-		}
-	})
-	return c.metricAttr
 }
