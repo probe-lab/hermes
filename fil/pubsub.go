@@ -216,8 +216,13 @@ func (p *PubSub) handleIndexerIngest(ctx context.Context, msg *pubsub.Message) e
 
 func (p *PubSub) validateF3Granite(ctx context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 	var pgmsg f3.PartialGMessage
-	enc := NewCBOR[*f3.PartialGMessage]()
-	if err := enc.Decode(msg.Data, &pgmsg); err != nil {
+	zstd, err := NewZSTD[*f3.PartialGMessage]()
+	if err != nil {
+		slog.Warn("new zstd cbor decoder for *f3.PartialGMessage failed: ", tele.LogAttrError(err))
+		return pubsub.ValidationIgnore
+	}
+
+	if err := zstd.Decode(msg.Data, &pgmsg); err != nil {
 		return pubsub.ValidationReject
 	}
 	msg.ValidatorData = pgmsg
@@ -291,8 +296,13 @@ func (p *PubSub) handleF3Manifests(ctx context.Context, msg *pubsub.Message) err
 
 func (p *PubSub) validateF3ChainExchange(ctx context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 	var cmsg chainexchange.Message
-	enc := NewCBOR[*chainexchange.Message]()
-	if err := enc.Decode(msg.Data, &cmsg); err != nil {
+	zstd, err := NewZSTD[*chainexchange.Message]()
+	if err != nil {
+		slog.Warn("new zstd cbor decoder for *chainexchange.Message failed: ", tele.LogAttrError(err))
+		return pubsub.ValidationIgnore
+	}
+
+	if err := zstd.Decode(msg.Data, &cmsg); err != nil {
 		return pubsub.ValidationReject
 	}
 
