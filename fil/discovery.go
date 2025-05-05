@@ -70,8 +70,10 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		}
 		start := time.Now()
 
-		peers, err := dht.GetClosestPeers(ctx, string(k))
+		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, time.Minute)
+		peers, err := dht.GetClosestPeers(timeoutCtx, string(k))
 		if errors.Is(err, context.Canceled) {
+			timeoutCancel()
 			return nil
 		} else if err != nil {
 			// could be that we don't have any DHT peers in our peer store
@@ -82,6 +84,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		} else {
 			slog.Debug("Found peers", "count", len(peers))
 		}
+		timeoutCancel()
 
 		select {
 		case <-ctx.Done():
