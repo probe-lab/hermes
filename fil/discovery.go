@@ -10,6 +10,7 @@ import (
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/thejerf/suture/v4"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -25,7 +26,7 @@ type Discovery struct {
 	host host.Host
 
 	// Metrics
-	MeterDiscoveredPeers metric.Int64Counter
+	MeterLookups metric.Int64Counter
 }
 
 var _ suture.Service = (*Discovery)(nil)
@@ -39,9 +40,9 @@ func NewDiscovery(h host.Host, cfg *DiscoveryConfig) (*Discovery, error) {
 	}
 
 	var err error
-	d.MeterDiscoveredPeers, err = cfg.Meter.Int64Counter("discovered_peers", metric.WithDescription("Total number of discovered peers"))
+	d.MeterLookups, err = cfg.Meter.Int64Counter("lookups", metric.WithDescription("Total number of performed lookups"))
 	if err != nil {
-		return nil, fmt.Errorf("discovered_peers counter: %w", err)
+		return nil, fmt.Errorf("lookups counter: %w", err)
 	}
 
 	return d, nil
@@ -72,6 +73,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 
 		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, time.Minute)
 		peers, err := dht.GetClosestPeers(timeoutCtx, string(k))
+		d.MeterLookups.Add(ctx, 1, metric.WithAttributes(attribute.Bool("success", err == nil)))
 		if errors.Is(err, context.Canceled) {
 			timeoutCancel()
 			return nil
