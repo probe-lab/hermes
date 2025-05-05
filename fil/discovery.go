@@ -73,11 +73,12 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 
 		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, time.Minute)
 		peers, err := dht.GetClosestPeers(timeoutCtx, string(k))
+		timeoutCancel()
+
 		d.MeterLookups.Add(ctx, 1, metric.WithAttributes(attribute.Bool("success", err == nil)))
-		if errors.Is(err, context.Canceled) {
-			timeoutCancel()
+		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil
-		} else if err != nil {
+		} else if err != nil || len(peers) == 0 {
 			// could be that we don't have any DHT peers in our peer store
 			// -> bootstrap again
 			for _, addrInfo := range kaddht.GetDefaultBootstrapPeerAddrInfos() {
