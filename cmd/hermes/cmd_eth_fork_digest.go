@@ -29,6 +29,7 @@ var cmdEthForkDigest = &cli.Command{
 			Usage:       "Fork version that will be used to compute the fork-digest (hex encoded string).",
 			Value:       forkDigestConfig.forkVersion,
 			Destination: &forkDigestConfig.forkVersion,
+			Required:    true,
 		},
 		&cli.StringFlag{
 			Name:        "genesis.validator.root",
@@ -36,6 +37,7 @@ var cmdEthForkDigest = &cli.Command{
 			Usage:       "The root of all the validators at the genesis (hex encoded string).",
 			Value:       forkDigestConfig.genesisValidatorsRoot,
 			Destination: &forkDigestConfig.genesisValidatorsRoot,
+			Required:    true,
 		},
 	},
 }
