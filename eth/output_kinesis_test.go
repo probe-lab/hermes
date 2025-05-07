@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/OffchainLabs/prysm/v6/proto/engine/v1"
+	ethtypes "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
-	v1 "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
-	ethtypes "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/stretchr/testify/require"
 )
 

@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	"gopkg.in/yaml.v3"
 )
 
