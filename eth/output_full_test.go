@@ -123,10 +123,10 @@ func TestFullOutputRenderMethods(t *testing.T) {
 		},
 		{
 			name:         "renderSyncCommitteeMessage",
-			payload:      &ethtypes.SyncCommitteeMessage{},
+			payload:      &ethtypes.SyncCommitteeMessage{}, //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 			expectedType: &TraceEventSyncCommitteeMessage{},
 			render: func(msg *pubsub.Message, payload any) (any, error) {
-				return renderer.renderSyncCommitteeMessage(msg, payload.(*ethtypes.SyncCommitteeMessage))
+				return renderer.renderSyncCommitteeMessage(msg, payload.(*ethtypes.SyncCommitteeMessage)) //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 			},
 		},
 		{
@@ -230,6 +230,7 @@ func TestFullOutputRenderMethods(t *testing.T) {
 				require.Equal(t, baseMsg.GetTopic(), typedResult.Topic)
 				require.Equal(t, hex.EncodeToString(baseMsg.GetSeqno()), hex.EncodeToString(typedResult.Seq))
 				require.Equal(t, len(baseMsg.GetData()), typedResult.MsgSize)
+				//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 				require.Equal(t, tc.payload.(*ethtypes.SyncCommitteeMessage), typedResult.SyncCommitteeMessage)
 			case *TraceEventBLSToExecutionChange:
 				require.Equal(t, baseMsg.ReceivedFrom.String(), typedResult.PeerID)

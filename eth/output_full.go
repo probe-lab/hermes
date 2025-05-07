@@ -77,7 +77,7 @@ type TraceEventVoluntaryExit struct {
 
 type TraceEventSyncCommitteeMessage struct {
 	host.TraceEventPayloadMetaData
-	SyncCommitteeMessage *ethtypes.SyncCommitteeMessage
+	SyncCommitteeMessage *ethtypes.SyncCommitteeMessage //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 }
 
 type TraceEventBLSToExecutionChange struct {
@@ -154,7 +154,7 @@ func (t *FullOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, ds
 		payload, err = t.renderContributionAndProof(msg, d)
 	case *ethtypes.VoluntaryExit:
 		payload, err = t.renderVoluntaryExit(msg, d)
-	case *ethtypes.SyncCommitteeMessage:
+	case *ethtypes.SyncCommitteeMessage: //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 		payload, err = t.renderSyncCommitteeMessage(msg, d)
 	case *ethtypes.BLSToExecutionChange:
 		payload, err = t.renderBLSToExecutionChange(msg, d)
@@ -387,7 +387,7 @@ func (t *FullOutput) renderVoluntaryExit(
 
 func (t *FullOutput) renderSyncCommitteeMessage(
 	msg *pubsub.Message,
-	sc *ethtypes.SyncCommitteeMessage,
+	sc *ethtypes.SyncCommitteeMessage, //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 ) (*TraceEventSyncCommitteeMessage, error) {
 	return &TraceEventSyncCommitteeMessage{
 		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{

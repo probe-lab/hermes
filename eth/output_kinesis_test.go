@@ -200,7 +200,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 		},
 		{
 			name: "renderSyncCommitteeMessage",
-			payload: &ethtypes.SyncCommitteeMessage{
+			payload: &ethtypes.SyncCommitteeMessage{ //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 				Slot:           1,
 				ValidatorIndex: 2,
 				BlockRoot:      genMockBytes(32),
@@ -208,7 +208,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			},
 			expected: commonExpected,
 			render: func(msg *pubsub.Message, payload any) (map[string]any, error) {
-				return renderer.renderSyncCommitteeMessage(msg, payload.(*ethtypes.SyncCommitteeMessage))
+				return renderer.renderSyncCommitteeMessage(msg, payload.(*ethtypes.SyncCommitteeMessage)) //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 			},
 		},
 		{
@@ -371,7 +371,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 			case *ethtypes.VoluntaryExit:
 				require.Equal(t, typedResult.GetEpoch(), result["Epoch"])
 				require.Equal(t, typedResult.GetValidatorIndex(), result["ValIdx"])
-			case *ethtypes.SyncCommitteeMessage:
+			case *ethtypes.SyncCommitteeMessage: //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 				require.Equal(t, typedResult.GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetValidatorIndex(), result["ValIdx"])
 				require.Equal(t, hexutil.Encode(typedResult.GetBlockRoot()), result["BlockRoot"])

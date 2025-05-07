@@ -66,6 +66,7 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderContributionAndProof(msg, d)
 	case *ethtypes.VoluntaryExit:
 		payload, err = k.renderVoluntaryExit(msg, d)
+	//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 	case *ethtypes.SyncCommitteeMessage:
 		payload, err = k.renderSyncCommitteeMessage(msg, d)
 	case *ethtypes.BLSToExecutionChange:
@@ -364,7 +365,7 @@ func (k *KinesisOutput) renderVoluntaryExit(
 
 func (k *KinesisOutput) renderSyncCommitteeMessage(
 	msg *pubsub.Message,
-	sc *ethtypes.SyncCommitteeMessage,
+	sc *ethtypes.SyncCommitteeMessage, //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 ) (map[string]any, error) {
 	return map[string]any{
 		"PeerID":    msg.ReceivedFrom,

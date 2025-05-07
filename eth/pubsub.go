@@ -431,6 +431,7 @@ func (p *PubSub) handleSyncCommitteeMessage(ctx context.Context, msg *pubsub.Mes
 		}
 	)
 
+	//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 	evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SyncCommitteeMessage{})
 	if err != nil {
 		slog.Warn(
