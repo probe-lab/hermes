@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/api/client"
 	apiCli "github.com/OffchainLabs/prysm/v6/api/client/beacon"
 	"github.com/OffchainLabs/prysm/v6/api/server/structs"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
