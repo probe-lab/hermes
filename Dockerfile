@@ -1,4 +1,4 @@
-FROM golang:1.22 AS builder
+FROM golang:1.24 AS builder
 
 # Switch to an isolated build directory
 WORKDIR /build

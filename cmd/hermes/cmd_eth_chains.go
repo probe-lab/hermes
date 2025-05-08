@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"math"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/urfave/cli/v2"
 
 	"github.com/probe-lab/hermes/eth"

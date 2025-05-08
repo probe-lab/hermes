@@ -10,6 +10,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -22,9 +25,6 @@ import (
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
@@ -324,7 +324,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeVa
 		}),
 		pubsub.WithSubscriptionFilter(subFilter),
 		pubsub.WithPeerOutboundQueueSize(n.PubSubQueueSize),
-		pubsub.WithMaxMessageSize(int(n.BeaconConfig.GossipMaxSize)),
+		pubsub.WithMaxMessageSize(int(n.BeaconConfig.MaxPayloadSize)),
 		pubsub.WithValidateQueueSize(n.PubSubQueueSize),
 		pubsub.WithPeerScore(n.peerScoringParams(activeValidators)),
 		// pubsub.WithPeerScoreInspect(s.peerInspector, time.Minute),

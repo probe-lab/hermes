@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
 )
 
 // SubnetSelectionType defines how subnets are selected for any topic

@@ -2,9 +2,10 @@ module github.com/probe-lab/hermes
 
 go 1.24.0
 
-toolchain go1.24.1
+toolchain go1.24.2
 
 require (
+	github.com/OffchainLabs/prysm/v6 v6.0.1
 	github.com/aws/aws-sdk-go-v2 v1.32.7
 	github.com/aws/aws-sdk-go-v2/config v1.28.7
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.48
@@ -12,7 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.72.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/dennis-tra/go-kinesis v0.0.0-20240326083914-7acf5f8dc24e
-	github.com/ethereum/go-ethereum v1.15.0
+	github.com/ethereum/go-ethereum v1.15.9
 	github.com/ferranbt/fastssz v0.1.4
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -26,7 +27,6 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prysmaticlabs/fastssz v0.0.0-20241008181541-518c4ce73516
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
-	github.com/prysmaticlabs/prysm/v5 v5.3.2-0.20250317054927-5c24978702e0
 	github.com/stretchr/testify v1.10.0
 	github.com/thejerf/suture/v4 v4.0.6
 	github.com/urfave/cli/v2 v2.27.5
@@ -84,6 +84,7 @@ require (
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emicklei/dot v1.6.4 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.3 // indirect
+	github.com/ethereum/c-kzg-4844/v2 v2.1.1 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
@@ -224,15 +225,15 @@ require (
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.35.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/mod v0.23.0 // indirect
-	golang.org/x/net v0.36.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/term v0.29.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.30.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250115164207-1a7da9e5054f // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
