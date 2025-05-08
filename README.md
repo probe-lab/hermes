@@ -1,3 +1,5 @@
+![Hermes ProbeLab Logo](./resources/banner-hermes.svg)
+
 # Hermes
 
 [![ProbeLab](https://img.shields.io/badge/made%20by-ProbeLab-blue.svg)](https://probelab.io)
@@ -43,7 +45,7 @@ git clone git@github.com:probe-lab/hermes.git
 Start Hermes by running
 
 ```shell
-go run ./cmd/hermes # requires Go >=1.22
+go run ./cmd/hermes # requires Go >=1.23
 ```
 
 <details>
@@ -54,10 +56,11 @@ NAME:
    hermes - a gossipsub listener
 
 USAGE:
-   hermes [global options] command [command options] 
+   hermes [global options] command [command options]
 
 COMMANDS:
    eth, ethereum  Listen to gossipsub topics of the Ethereum network
+   benchmark      performs the given set of benchmarks for the hermes internals
    help, h        Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
@@ -65,9 +68,17 @@ GLOBAL OPTIONS:
 
    DataStream Configuration:
 
-   --data.stream.type value  Format where the traces will be submitted: logger, kinesis, or callback. (default: "logger") [$HERMES_DATA_STREAM_TYPE]
-   --kinesis.region value    The region of the AWS Kinesis Data Stream [$HERMES_KINESIS_REGION]
-   --kinesis.stream value    The name of the AWS Kinesis Data Stream [$HERMES_KINESIS_DATA_STREAM]
+   --aws.key.id value         Access key ID of the AWS account for the s3 bucket [$HERMES_AWS_ACCESS_KEY_ID]
+   --aws.secret.key value     Secret key of the AWS account for the S3 bucket [$HERMES_AWS_SECRET_KEY]
+   --data.stream.type value   Format where the traces will be submitted: logger, kinesis, or callback. (default: "logger") [$HERMES_DATA_STREAM_TYPE]
+   --kinesis.region value     The region of the AWS Kinesis Data Stream [$HERMES_KINESIS_REGION]
+   --kinesis.stream value     The name of the AWS Kinesis Data Stream [$HERMES_KINESIS_DATA_STREAM]
+   --s3.bucket value          name of the S3 bucket that will be used as reference to submit the traces (default: "hermes") [$HERMES_S3_BUCKET]
+   --s3.byte.limit value      Soft upper limite of bytes for the S3 dumps (default: 10485760) [$HERMES_S3_BYTE_LIMIT]
+   --s3.endpoint value        The endpoint of our custom S3 instance to override the AWS defaults [$HERMES_S3_CUSTOM_ENDPOINT]
+   --s3.flush.interval value  Minimum time interval at which the batched traces will be dump in S3 (default: 2s) [$HERMES_S3_FLUSH_INTERVAL]
+   --s3.flushers value        Number of flushers that will be spawned to dump traces into S3 (default: 2) [$HERMES_S3_FLUSHERS]
+   --s3.region value          The name of the region where the s3 bucket will be stored [$HERMES_S3_REGION]
 
    Logging Configuration:
 
@@ -111,16 +122,34 @@ As of `2024-03-27`, Hermes supports these networks:
 
 ### General
 
-Hermes currently only supports emitting events to [AWS Kinesis](https://aws.amazon.com/kinesis/). We're using our [own producer library](https://github.com/dennis-tra/go-kinesis) to do that.
-
-In order to hook up Hermes with AWS Kinesis you need to provide the following command line flags:
-
-- `--kinesis.region=us-east-1` # us-east-1 is the default
-- `--kinesis.stream=$YOUR_DATA_STREAM_NAME`
-
-If the name is set, Hermes will start pumping events to that stream.
+There are different ways of keeping track of the events that Hermes generates:
+- [AWS Kinesis](https://aws.amazon.com/kinesis/). We're using our [own producer library](https://github.com/dennis-tra/go-kinesis) to do that.
+    - In order to hook up Hermes with AWS Kinesis you need to provide the following command line flags:
+        - `--data.stream.type="kinesis"`
+        - `--kinesis.region=us-east-1` # just an example
+        - `--kinesis.stream=$YOUR_DATA_STREAM_NAME`
+    - If the name is set, Hermes will start pumping events to that stream.
 
 > It's important to note that the events **will not** be strictly ordered. They will only follow a lose ordering. The reasons are 1) potential retries of event submissions and 2) [record aggregation](https://docs.aws.amazon.com/streams/latest/dev/kinesis-kpl-concepts.html#kinesis-kpl-concepts-aggretation). Depending on the configured number of submission retries the events should be ordered within each 30s time window.
+- [S3](https://aws.amazon.com/s3/). Hermes will batch the traces, format them into a parquet file, and submit them to the given S3 Bucket. These are the flags that should be provided:
+    - `--data.stream.type="s3"`
+    - `--s3.region="us-east-1"` # just an example
+    - `--s3.endpoint=""` # only for local testing
+    - `--s3.bucket=$YOUR_S3_BUCKET_KEY`
+    - `--s3.tag="hermes"` # preferred bucket key used to reference the traces
+    - `--s3.byte.limit=1269760` # 10MB is the default
+    - `--s3.flushers=2` # 2 is the default
+    - `--s3.flush.interval="2s"` # 2s is the default
+    - `--aws.key.id=$YOUR_AWS_KEY_ID` # only necessary for private buckets
+    - `--aws.secret.key=$YOUR_AWS_SECRET_KEY` # only necessary for private buckets
+
+
+- `Code Callbacks`. Hermes will execute the given callback functions whenever an event is traced.
+    - `--data.stream.type="callback"`
+- `Logger`. Hermes will print the JSON formatted traces into `stdout` in a log format (ideal for local testing).
+    - `--data.strea.type="logger"`
+
+_Note: we provide a local s3 setup to use if needed. The configuration of the `localstack s3` instance can be tunned using a copy (`.env`) of the `.env.template` file, which will be read by default when doing `docker compose up s3`. Make sure that the docker container is up running when launching the `hermes` instance._
 
 ### Ethereum
 
@@ -135,11 +164,85 @@ Further, Hermes requires beacon node in general because it delegates certain req
 
 These request handlers require knowledge of the chain state wherefore Hermes cannot handle them itself. Still, they are required to be a good citizen of the network and not get pruned by other peers.
 
+#### Subnet Configuration
+
+Hermes supports configuring which subnets to subscribe to for each topic type (attestation, sync committee, and blob sidecar). This can be useful to:
+- Reduce resource usage by subscribing to fewer subnets
+- Target specific subnets for analysis
+- Distribute monitoring across multiple Hermes instances
+
+When creating a Node, you can configure the subnets using the `SubnetConfigs` field:
+
+```go
+// Create a configuration map for different subnet topics
+cfg.SubnetConfigs = map[string]*eth.SubnetConfig{
+    // Subscribe to specific attestation subnets
+    p2p.GossipAttestationMessage: {
+        Type: eth.SubnetStatic,
+        Subnets: []uint64{0, 1, 5, 44},
+    },
+    
+    // Subscribe to all sync committee subnets (this is the default if no config provided)
+    p2p.GossipSyncCommitteeMessage: {
+        Type: eth.SubnetAll,
+    },
+    
+    // Subscribe to a random set of blob sidecar subnets
+    p2p.GossipBlobSidecarMessage: {
+        Type: eth.SubnetRandom,
+        Count: 2,
+    },
+}
+```
+
+For each topic that supports subnets, you can use one of these configuration strategies:
+
+1. **Subscribe to all subnets** (default if no config provided)
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetAll,
+   }
+   ```
+
+2. **Subscribe to specific subnets**
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetStatic,
+       Subnets: []uint64{0, 1, 5, 44},
+   }
+   ```
+
+3. **Subscribe to a random set of subnets**
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetRandom,
+       Count: 8, // Number of subnets to randomly select
+   }
+   ```
+
+4. **Subscribe to a range of subnets**
+   ```go
+   topicConfig := &eth.SubnetConfig{
+       Type: eth.SubnetStaticRange,
+       Start: 0,
+       End: 32, // End is exclusive
+   }
+   ```
+
+This configuration allows you to set up multiple Hermes instances that monitor different parts of the network, or to focus monitoring on specific subnets of interest.
+
 To run Hermes for the Ethereum network you would need to point it to the beacon node by providing the
 
+- `--local.trusted.address=true` # when the Prysm node is running in the same machine (localhost)
 - `--prysm.host=1.2.3.4`
 - `--prysm.port.http=3500` # 3500 is the default
 - `--prysm.port.grpc=4000` # 4000 is the default
+
+If your Prysm node requires basic authentication, you can include the credentials in the host parameter:
+- `--prysm.host=username:password@1.2.3.4`
+
+If your password contains special characters, make sure to URL encode them:
+- `--prysm.host=username:my%40special%3Apass@1.2.3.4` # for password 'my@special:pass'
 
 command line flags to the `hermes ethereum` subcommand. Check out the help page via `hermes ethereum --help` for configuration options of the libp2p host or devp2p local node (e.g., listen addrs/ports).
 
@@ -151,29 +254,50 @@ NAME:
    hermes eth - Listen to gossipsub topics of the Ethereum network
 
 USAGE:
-   hermes eth command [command options] 
+   hermes eth command [command options]
 
 COMMANDS:
-   ids      generates peer identities in csv format
-   chains   List all supported chains
-   help, h  Shows a list of commands or help for one command
+   ids          generates peer identities in csv format
+   chains       List all supported chains
+   fork-digest  Compute and display the fork digest for any eth-cl-network
+   help, h      Shows a list of commands or help for one command
 
 OPTIONS:
-   --key value, -k value      The private key for the hermes libp2p/ethereum node in hex format. [$HERMES_ETH_KEY]
-   --chain value              The beacon chain to participate in. (default: "mainnet") [$HERMES_ETH_CHAIN]
-   --attnets value, -a value  The attestation network digest. (default: "ffffffffffffffff") [$HERMES_ETH_ATTNETS]
-   --dial.concurrency value   The maximum number of parallel workers dialing other peers in the network (default: 16) [$HERMES_ETH_DIAL_CONCURRENCY]
-   --dial.timeout value       The request timeout when contacting other network participants (default: 5s) [$HERMES_ETH_DIAL_TIMEOUT]
-   --devp2p.host value        Which network interface should devp2p (discv5) bind to. (default: "127.0.0.1") [$HERMES_ETH_DEVP2P_HOST]
-   --devp2p.port value        On which port should devp2p (disv5) listen (default: random) [$HERMES_ETH_DEVP2P_PORT]
-   --libp2p.host value        Which network interface should libp2p bind to. (default: "127.0.0.1") [$HERMES_ETH_LIBP2P_HOST]
-   --libp2p.port value        On which port should libp2p (disv5) listen (default: random) [$HERMES_ETH_LIBP2P_PORT]
-   --prysm.host value         The host ip/name where Prysm's (beacon) API is accessible [$HERMES_ETH_PRYSM_HOST]
-   --prysm.port.http value    The port on which Prysm's beacon nodes' Query HTTP API is listening on (default: 3500) [$HERMES_ETH_PRYSM_PORT_HTTP]
-   --prysm.port.grpc value    The port on which Prysm's gRPC API is listening on (default: 4000) [$HERMES_ETH_PRYSM_PORT_GRPC]
-   --max-peers value          The maximum number of peers we want to be connected with (default: 30) [$HERMES_ETH_MAX_PEERS]
-   --help, -h                 show help
-
+   --key value, -k value                                                          The private key for the hermes libp2p/ethereum node in hex format. [$HERMES_ETH_KEY]
+   --chain value                                                                  The beacon chain to participate in. (default: "mainnet") [$HERMES_ETH_CHAIN]
+   --attnets value, -a value                                                      The attestation network digest. (default: "ffffffffffffffff") [$HERMES_ETH_ATTNETS]
+   --dial.concurrency value                                                       The maximum number of parallel workers dialing other peers in the network (default: 16) [$HERMES_ETH_DIAL_CONCURRENCY]
+   --dial.timeout value                                                           The request timeout when contacting other network participants (default: 5s) [$HERMES_ETH_DIAL_TIMEOUT]
+   --devp2p.host value                                                            Which network interface should devp2p (discv5) bind to. (default: "127.0.0.1") [$HERMES_ETH_DEVP2P_HOST]
+   --devp2p.port value                                                            On which port should devp2p (disv5) listen (default: random) [$HERMES_ETH_DEVP2P_PORT]
+   --libp2p.host value                                                            Which network interface should libp2p bind to. (default: "127.0.0.1") [$HERMES_ETH_LIBP2P_HOST]
+   --libp2p.port value                                                            On which port should libp2p (disv5) listen (default: random) [$HERMES_ETH_LIBP2P_PORT]
+   --libp2p.peerscore.snapshot.frequency value                                    Frequency at which GossipSub peerscores will be accessed (in seconds) (default: random) [$HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY]
+   --local.trusted.addr                                                           To advertise the localhost multiaddress to our trusted control Prysm node (default: false) [$HERMES_ETH_LOCAL_TRUSTED_ADDRESS]
+   --prysm.host value                                                             The host ip/name where Prysm's (beacon) API is accessible [$HERMES_ETH_PRYSM_HOST]
+   --prysm.port.http value                                                        The port on which Prysm's beacon nodes' Query HTTP API is listening on (default: 3500) [$HERMES_ETH_PRYSM_PORT_HTTP]
+   --prysm.port.grpc value                                                        The port on which Prysm's gRPC API is listening on (default: 4000) [$HERMES_ETH_PRYSM_PORT_GRPC]
+   --max-peers value                                                              The maximum number of peers we want to be connected with (default: 30) [$HERMES_ETH_MAX_PEERS]
+   --genesis.ssz.url value                                                        The .ssz URL from which to fetch the genesis data, requires 'chain=devnet' [$HERMES_ETH_GENESIS_SSZ_URL]
+   --config.yaml.url value                                                        The .yaml URL from which to fetch the beacon chain config, requires 'chain=devnet' [$HERMES_ETH_CONFIG_URL]
+   --bootnodes.yaml.url value                                                     The .yaml URL from which to fetch the bootnode ENRs, requires 'chain=devnet' [$HERMES_ETH_BOOTNODES_URL]
+   --deposit-contract-block.txt.url value                                         The .txt URL from which to fetch the deposit contract block. Requires 'chain=devnet' [$HERMES_ETH_DEPOSIT_CONTRACT_BLOCK_URL]
+   --subnet.attestation.type value                                                Subnet selection strategy for attestation topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_ATTESTATION_TYPE]
+   --subnet.attestation.subnets value [ --subnet.attestation.subnets value ]      Comma-separated list of subnet IDs for attestation when type=static [$HERMES_ETH_SUBNET_ATTESTATION_SUBNETS]
+   --subnet.attestation.count value                                               Number of random attestation subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_COUNT]
+   --subnet.attestation.start value                                               Start of subnet range (inclusive) for attestation when type=static_range (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_START]
+   --subnet.attestation.end value                                                 End of subnet range (exclusive) for attestation when type=static_range (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_END]
+   --subnet.synccommittee.type value                                              Subnet selection strategy for sync committee topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_TYPE]
+   --subnet.synccommittee.subnets value [ --subnet.synccommittee.subnets value ]  Comma-separated list of subnet IDs for sync committee when type=static [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_SUBNETS]
+   --subnet.synccommittee.count value                                             Number of random sync committee subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_COUNT]
+   --subnet.synccommittee.start value                                             Start of subnet range (inclusive) for sync committee when type=static_range (default: 0) [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_START]
+   --subnet.synccommittee.end value                                               End of subnet range (exclusive) for sync committee when type=static_range (default: 0) [$HERMES_ETH_SUBNET_SYNCCOMMITTEE_END]
+   --subnet.blobsidecar.type value                                                Subnet selection strategy for blob sidecar topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_BLOBSIDECAR_TYPE]
+   --subnet.blobsidecar.subnets value [ --subnet.blobsidecar.subnets value ]      Comma-separated list of subnet IDs for blob sidecar when type=static [$HERMES_ETH_SUBNET_BLOBSIDECAR_SUBNETS]
+   --subnet.blobsidecar.count value                                               Number of random blob sidecar subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_BLOBSIDECAR_COUNT]
+   --subnet.blobsidecar.start value                                               Start of subnet range (inclusive) for blob sidecar when type=static_range (default: 0) [$HERMES_ETH_SUBNET_BLOBSIDECAR_START]
+   --subnet.blobsidecar.end value                                                 End of subnet range (exclusive) for blob sidecar when type=static_range (default: 0) [$HERMES_ETH_SUBNET_BLOBSIDECAR_END]
+   --help, -h                                                                     show help
 ```
 
 </details>
@@ -205,7 +329,7 @@ Run Hermes with the `--tracing` flag. To change the address of the trace collect
 Hermes jumps to the web3/blockchain/libp2p ecosystem despite a large variety of tools around it, such as the many existing network crawlers or light clients for most mature networks. Although at first sight it might look like a competitor to those, there was still a large incentive to develop it. Here, we describe the gap that Hermes fills as well as the use-cases that it is suitable for.
 Hermes was designed to behave as a light node in each supported network, where, in addition to being an honest participant in the network and supporting all the protocols and RPC endpoints, it also allows streaming of custom internal events (mostly libp2p-related).
 
-Hermes avoids being based on a custom fork of existing full/light clients, which would come with non-negligible maintenance baggage and would complicate having control of events.    
+Hermes avoids being based on a custom fork of existing full/light clients, which would come with non-negligible maintenance baggage and would complicate having control of events.
 
 Currently available similar tools:
 

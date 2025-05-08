@@ -28,6 +28,11 @@ func (c *CallbackDataStream) Type() DataStreamType {
 	return DataStreamTypeCallback
 }
 
+// OutputType returns the output type to be used by this data stream.
+func (c *CallbackDataStream) OutputType() DataStreamOutputType {
+	return DataStreamOutputTypeFull
+}
+
 // OnEvent sets the callback function that will be called when an event is received.
 func (c *CallbackDataStream) OnEvent(onRecord func(ctx context.Context, event *TraceEvent)) {
 	c.cb = onRecord

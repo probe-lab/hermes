@@ -32,6 +32,11 @@ func (t *TraceLogger) Type() DataStreamType {
 	return DataStreamTypeLogger
 }
 
+// OutputType returns the output type to be used by this data stream.
+func (t *TraceLogger) OutputType() DataStreamOutputType {
+	return DataStreamOutputTypeKinesis
+}
+
 type EmptyDataStream struct{}
 
 var _ DataStream = (*EmptyDataStream)(nil)
@@ -48,6 +53,10 @@ func (t *EmptyDataStream) Stop(ctx context.Context) error {
 func (t *EmptyDataStream) PutRecord(ctx context.Context, event *TraceEvent) error {
 	// do nothing
 	return nil
+}
+
+func (t *EmptyDataStream) OutputType() DataStreamOutputType {
+	return DataStreamOutputTypeKinesis
 }
 
 func (t *EmptyDataStream) Type() DataStreamType {

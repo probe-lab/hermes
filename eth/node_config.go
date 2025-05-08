@@ -10,6 +10,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -22,9 +25,6 @@ import (
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
@@ -78,10 +78,12 @@ type NodeConfig struct {
 	PrysmHost        string
 	PrysmPortHTTP    int
 	PrysmPortGRPC    int
+	PrysmUseTLS      bool
 
 	// The Data Stream configuration
 	DataStreamType host.DataStreamType
 	AWSConfig      *aws.Config
+	S3Config       *host.S3DSConfig
 	KinesisRegion  string
 	KinesisStream  string
 
@@ -102,6 +104,9 @@ type NodeConfig struct {
 	PubSubSubscriptionRequestLimit int
 
 	PubSubQueueSize int
+
+	// Configuration for subnet selection by topic
+	SubnetConfigs map[string]*SubnetConfig
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -166,6 +171,22 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("dialer count must be positive, got %d", n.DialConcurrency)
 	}
 
+	// Validate the SubnetConfigs if provided.
+	if n.SubnetConfigs != nil {
+		for topic, config := range n.SubnetConfigs {
+			// Get the subnet count for this topic.
+			subnetCount, hasSubnet := HasSubnets(topic)
+			if !hasSubnet {
+				return fmt.Errorf("topic %s does not support subnets", topic)
+			}
+
+			// Validate the subnet config for this topic.
+			if err := config.Validate(topic, subnetCount); err != nil {
+				return err
+			}
+		}
+	}
+
 	// ensure that if the data stream is AWS, the parameters where given
 	if n.DataStreamType == host.DataStreamTypeKinesis {
 		if n.AWSConfig != nil {
@@ -176,6 +197,16 @@ func (n *NodeConfig) Validate() error {
 			if n.KinesisRegion == "" {
 				return fmt.Errorf("kinesis is enabled but region is not set")
 			}
+		}
+	}
+	if n.DataStreamType == host.DataStreamTypeS3 {
+		if n.S3Config != nil {
+			// we should have caught the error at the root_cmd, but still adding it here
+			if err := n.S3Config.CheckValidity(); err != nil {
+				return fmt.Errorf("s3 trace submission is enabled but no valid config was given %w", err)
+			}
+		} else {
+			return fmt.Errorf("s3 configuration is empty")
 		}
 	}
 
@@ -284,7 +315,6 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		libp2p.ResourceManager(rmgr),
 		libp2p.DisableMetrics(),
 	}
-
 	return opts, nil
 }
 
@@ -297,7 +327,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeVa
 		}),
 		pubsub.WithSubscriptionFilter(subFilter),
 		pubsub.WithPeerOutboundQueueSize(n.PubSubQueueSize),
-		pubsub.WithMaxMessageSize(int(n.BeaconConfig.GossipMaxSize)),
+		pubsub.WithMaxMessageSize(int(n.BeaconConfig.MaxPayloadSize)),
 		pubsub.WithValidateQueueSize(n.PubSubQueueSize),
 		pubsub.WithPeerScore(n.peerScoringParams(activeValidators)),
 		// pubsub.WithPeerScoreInspect(s.peerInspector, time.Minute),
@@ -435,22 +465,6 @@ func topicFormatFromBase(topicBase string) (string, error) {
 	}
 }
 
-func hasSubnets(topic string) (subnets uint64, hasSubnets bool) {
-	switch topic {
-	case p2p.GossipAttestationMessage:
-		return globalBeaconConfig.AttestationSubnetCount, true
-
-	case p2p.GossipSyncCommitteeMessage:
-		return globalBeaconConfig.SyncCommitteeSubnetCount, true
-
-	case p2p.GossipBlobSidecarMessage:
-		return globalBeaconConfig.BlobsidecarSubnetCount, true
-
-	default:
-		return uint64(0), false
-	}
-}
-
 func (n *NodeConfig) composeEthTopic(base string, encoder encoder.NetworkEncoding) string {
 	return fmt.Sprintf(base, n.ForkDigest) + encoder.ProtocolSuffix()
 }
@@ -468,9 +482,16 @@ func (n *NodeConfig) GetDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 			slog.Warn("invalid gossipsub topic", slog.Attr{Key: "topic", Value: slog.StringValue(topicBase)})
 			continue
 		}
-		subnets, withSubnets := hasSubnets(topicBase)
+		subnets, withSubnets := HasSubnets(topicBase)
 		if withSubnets {
-			for subnet := uint64(0); subnet < subnets; subnet++ {
+			// Get the config for this topic if it exists.
+			config := n.SubnetConfigs[topicBase]
+
+			// Get the subnet IDs to subscribe to.
+			subnetsToSubscribe := GetSubscribedSubnets(config, subnets)
+
+			// Add topics for each subnet.
+			for _, subnet := range subnetsToSubscribe {
 				fullTopics = append(fullTopics, n.composeEthTopicWithSubnet(topicFormat, encoder, subnet))
 			}
 		} else {

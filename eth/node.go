@@ -8,11 +8,11 @@ import (
 	"sort"
 	"time"
 
+	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -124,6 +124,14 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	case host.DataStreamTypeCallback:
 		ds = host.NewCallbackDataStream()
 
+	case host.DataStreamTypeS3:
+		// get the metrics tracer and meter from the root config
+		cfg.S3Config.Meter = cfg.Meter
+		var err error
+		ds, err = host.NewS3DataStream(*cfg.S3Config)
+		if err != nil {
+			return nil, fmt.Errorf("new s3 producer %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
@@ -199,9 +207,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	// initialize the custom Prysm client to communicate with its API
-	pryClient, err := NewPrysmClient(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.DialTimeout, cfg.GenesisConfig)
+	pryClient, err := NewPrysmClientWithTLS(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.PrysmUseTLS, cfg.DialTimeout, cfg.GenesisConfig)
 	if err != nil {
-		return nil, fmt.Errorf("new prysm client")
+		return nil, fmt.Errorf("new prysm client: %w", err)
 	}
 	// check if Prysm is valid
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -461,9 +469,6 @@ func (n *Node) Start(ctx context.Context) error {
 		slog.Info("Prysm is connected!", tele.LogAttrPeerID(addrInfo.ID), "maddr", n.host.Peerstore().Addrs(addrInfo.ID))
 	}
 
-	// if the connection with the Prysm node when successfully, notify over the channel
-	close(n.readyNotC)
-
 	// protect connection to beacon node so that it's not pruned at some point
 	n.host.ConnManager().Protect(addrInfo.ID, "hermes")
 
@@ -496,6 +501,8 @@ func (n *Node) Start(ctx context.Context) error {
 		n: n.disc.node,
 	}
 	n.sup.Add(aw)
+
+	close(n.readyNotC)
 
 	// start all long-running services
 	return n.sup.Serve(ctx)

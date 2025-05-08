@@ -14,6 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/types"
+	psync "github.com/OffchainLabs/prysm/v6/beacon-chain/sync"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/blocks"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/interfaces"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
+	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/libp2p/go-libp2p/core"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -21,14 +29,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	psync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -977,7 +977,7 @@ func (r *ReqResp) readFirstChunkedBlock(stream core.Stream, encoding encoder.Net
 		return nil, err
 	}
 	if code != 0 {
-		return nil, fmt.Errorf(errMsg)
+		return nil, errors.New(errMsg)
 	}
 	// set deadline for reading from stream
 	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
@@ -1006,7 +1006,7 @@ func (r *ReqResp) readResponseChunk(stream core.Stream, encoding encoder.Network
 		return nil, err
 	}
 	if code != 0 {
-		return nil, fmt.Errorf(errMsg)
+		return nil, errors.New(errMsg)
 	}
 	// No-op for now with the rpc context.
 	forkD, err := r.readForkDigestFromStream(stream)
@@ -1075,6 +1075,13 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 		}
 		return blocks.NewSignedBeaconBlock(blk)
 
+	case ElectraForkVersion:
+		blk := &pb.SignedBeaconBlockElectra{}
+		err = encoding.DecodeWithMaxLength(stream, blk)
+		if err != nil {
+			return sblk, err
+		}
+		return blocks.NewSignedBeaconBlock(blk)
 	default:
 		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
 		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)
@@ -1082,9 +1089,9 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 }
 
 // custom ReqResp handlers for ookla
-func (r *ReqResp) OoklaBlocksByRangeV2(ctx context.Context, pid peer.ID, startSlot, finishSlot uint64) (time.Duration, []*pb.SignedBeaconBlockDeneb, error) {
+func (r *ReqResp) OoklaBlocksByRangeV2(ctx context.Context, pid peer.ID, startSlot, finishSlot uint64) (time.Duration, []*pb.SignedBeaconBlockElectra, error) {
 	var err error
-	blocks := make([]*pb.SignedBeaconBlockDeneb, 0)
+	blocks := make([]*pb.SignedBeaconBlockElectra, 0)
 
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
 	if err != nil {
@@ -1168,7 +1175,7 @@ func (r *ReqResp) OoklaRawMeasurementBlocksByRangeV2(
 // ReadChunkedBlock handles each response chunk that is sent by the
 // peer and converts it into a beacon block.
 // Adaptation from Prysm's -> https://github.com/prysmaticlabs/prysm/blob/2e29164582c3665cdf5a472cd4ec9838655c9754/beacon-chain/sync/rpc_chunked_response.go#L85
-func (r *ReqResp) simpleReadChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding, isFirstChunk bool) (*pb.SignedBeaconBlockDeneb, error) {
+func (r *ReqResp) simpleReadChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding, isFirstChunk bool) (*pb.SignedBeaconBlockElectra, error) {
 	// Handle deadlines differently for first chunk
 	if isFirstChunk {
 		return r.simpleReadFirstChunkedBlock(stream, encoding)
@@ -1177,7 +1184,7 @@ func (r *ReqResp) simpleReadChunkedBlock(stream core.Stream, encoding encoder.Ne
 }
 
 // readFirstChunkedBlock reads the first chunked block and applies the appropriate deadlines to it.
-func (r *ReqResp) simpleReadFirstChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding) (*pb.SignedBeaconBlockDeneb, error) {
+func (r *ReqResp) simpleReadFirstChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding) (*pb.SignedBeaconBlockElectra, error) {
 	// read status
 	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
 	if err != nil {
@@ -1199,12 +1206,12 @@ func (r *ReqResp) simpleReadFirstChunkedBlock(stream core.Stream, encoding encod
 	if err != nil {
 		return nil, err
 	}
-	return r.getDenebBlock(encoding, stream)
+	return r.getElectraBlock(encoding, stream)
 }
 
 // readResponseChunk reads the response from the stream and decodes it into the
 // provided message type.
-func (r *ReqResp) simpleReadResponseChunk(stream core.Stream, encoding encoder.NetworkEncoding) (*pb.SignedBeaconBlockDeneb, error) {
+func (r *ReqResp) simpleReadResponseChunk(stream core.Stream, encoding encoder.NetworkEncoding) (*pb.SignedBeaconBlockElectra, error) {
 	if err := stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
 		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
 	}
@@ -1225,12 +1232,12 @@ func (r *ReqResp) simpleReadResponseChunk(stream core.Stream, encoding encoder.N
 		return nil, err
 	}
 
-	return r.getDenebBlock(encoding, stream)
+	return r.getElectraBlock(encoding, stream)
 }
 
 // getBlockForForkVersion returns an ReadOnlySignedBeaconBlock interface from the block type of each ForkVersion
-func (r *ReqResp) getDenebBlock(encoding encoder.NetworkEncoding, stream network.Stream) (*pb.SignedBeaconBlockDeneb, error) {
-	blk := &pb.SignedBeaconBlockDeneb{}
+func (r *ReqResp) getElectraBlock(encoding encoder.NetworkEncoding, stream network.Stream) (*pb.SignedBeaconBlockElectra, error) {
+	blk := &pb.SignedBeaconBlockElectra{}
 	err := encoding.DecodeWithMaxLength(stream, blk)
 	return blk, err
 }
