@@ -21,6 +21,8 @@ const (
 	// Gossip-mesh
 	EventTypeAddRemovePeer
 	EventTypeGraftPrune
+	// PeerExchange
+	EventTypeGossipPx
 	// Gossip RPCs
 	EventTypeControlRPC
 	EventTypeIhave
@@ -48,6 +50,8 @@ func (e EventType) String() string {
 		return "add_remove"
 	case EventTypeGraftPrune:
 		return "graft_prune"
+	case EventTypeGossipPx:
+		return "peer_exchange"
 	case EventTypeControlRPC:
 		return "control_rpc"
 	case EventTypeIhave:
@@ -73,6 +77,7 @@ var allEventTypes = []EventType{
 	EventTypeGenericEvent,
 	EventTypeAddRemovePeer,
 	EventTypeGraftPrune,
+	EventTypeGossipPx,
 	EventTypeControlRPC,
 	EventTypeIhave,
 	EventTypeIwant,
@@ -253,6 +258,12 @@ type GossipIdontwantEvent struct {
 	Msgs   int      `parquet:"msgs"`
 }
 
+type GossipPeerExchangeEvent struct {
+	BaseRPCEvent
+	Topic   string   `parquet:"topic"`
+	PxPeers []string `parquet:"px_peers"`
+}
+
 type GossipSentMsgEvent struct {
 	BaseRPCEvent
 	MsgID string `parquet:"msg_id"`
@@ -307,7 +318,8 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 	rpcMeta := rawEvent.Payload.(*RpcMeta)
 	remoteID := rpcMeta.PeerID
 	eventSubevents := make(map[EventType][]any)
-	// if no control event, nor out-going messages, continue
+
+	// if no control event, nor out-going messages, nor prune messages, continue
 	// only track messages if the they are outgoing - prevent spam of traces as we already trace down arrival ones
 	if (rpcMeta.Messages == nil || (rpcMeta.Messages != nil && rpcDirection != RPCdirectionOut)) && rpcMeta.Control == nil {
 		return eventSubevents, nil
@@ -348,6 +360,35 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 				totSentMsgs++
 			}
 			eventSubevents[EventTypeSentMsg] = sentMsgs
+		}
+	}
+
+	// PeerExchange
+	if rpcMeta.Control != nil {
+		if len(rpcMeta.Control.Prune) > 0 {
+			pruneMsgs := make([]any, len(rpcMeta.Control.Prune))
+			for idx, prune := range rpcMeta.Control.Prune {
+				peerIDs := make([]string, len(prune.PeerIDs))
+				for i, ids := range prune.PeerIDs {
+					peerIDs[i] = ids.String()
+				}
+				event := &GossipPeerExchangeEvent{
+					BaseRPCEvent: BaseRPCEvent{
+						BaseEvent: BaseEvent{
+							Timestamp:  timestamp,
+							Type:       EventTypeSentMsg.String(),
+							ProducerID: producerID,
+						},
+						IsOg:         false,
+						Direction:    rpcDirection.String(),
+						RemotePeerID: remoteID.String(),
+					},
+					Topic:   prune.TopicID,
+					PxPeers: peerIDs,
+				}
+				pruneMsgs[idx] = event
+			}
+			eventSubevents[EventTypeGossipPx] = pruneMsgs
 		}
 	}
 
