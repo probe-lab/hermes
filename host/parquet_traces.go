@@ -261,7 +261,7 @@ type GossipIdontwantEvent struct {
 type GossipPeerExchangeEvent struct {
 	BaseRPCEvent
 	Topic   string   `parquet:"topic"`
-	PxPeers []string `parquet:"px_peers"`
+	PxPeers []string `parquet:"px_peers,list"`
 }
 
 type GossipSentMsgEvent struct {
@@ -376,7 +376,7 @@ func sendRecvDropRPCFromEvent(rpcDirection RPCdirection, rawEvent *TraceEvent) (
 					BaseRPCEvent: BaseRPCEvent{
 						BaseEvent: BaseEvent{
 							Timestamp:  timestamp,
-							Type:       EventTypeSentMsg.String(),
+							Type:       EventTypeGossipPx.String(),
 							ProducerID: producerID,
 						},
 						IsOg:         false,
