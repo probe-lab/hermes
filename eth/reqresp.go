@@ -69,6 +69,7 @@ type ReqResp struct {
 	// metrics
 	meterRequestCounter metric.Int64Counter
 	latencyHistogram    metric.Float64Histogram
+	goodbyeCounter      metric.Int64Counter
 }
 
 type ContextStreamHandler func(context.Context, network.Stream) (map[string]any, error)
@@ -108,6 +109,14 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new request_latency histogram: %w", err)
+	}
+
+	p.goodbyeCounter, err = cfg.Meter.Int64Counter(
+		"goodbye_messages",
+		metric.WithDescription("Counter for goodbye messages received"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("new goodbye_messages counter: %w", err)
 	}
 
 	return p, nil
@@ -330,9 +339,32 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 		}
 	}
 
+	// Get agent version for the peer
+	rawVal, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), "AgentVersion")
+	agentVersion := "unknown"
+	if err == nil {
+		if av, ok := rawVal.(string); ok {
+			agentVersion = av
+		}
+	}
+
+	// Record metric with labels
+	reason := "unknown"
+	if found {
+		reason = msg
+	}
+
+	attrs := []attribute.KeyValue{
+		attribute.Int64("code", int64(req)),
+		attribute.String("reason", reason),
+		attribute.String("agent", agentVersion),
+	}
+	r.goodbyeCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+
 	traceData := map[string]any{
 		"Code":   req,
 		"Reason": msg,
+		"Agent":  agentVersion,
 	}
 
 	return traceData, stream.Close()
