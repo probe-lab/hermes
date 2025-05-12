@@ -495,7 +495,7 @@ func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []str
 	)
 
 	// If the user has specified a list of topics to subscribe to, use that instead of the default list.
-	if n.SubscriptionTopics != nil && len(n.SubscriptionTopics) > 0 {
+	if len(n.SubscriptionTopics) > 0 {
 		desiredTopics = n.SubscriptionTopics
 
 		slog.Info("Using user-specified topics", slog.Attr{Key: "topics", Value: slog.StringValue(strings.Join(desiredTopics, ", "))})
