@@ -237,7 +237,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 		agentVersion := "n.a."
 		if err == nil {
 			if av, ok := rawVal.(string); ok {
-				agentVersion = av
+				agentVersion = normalizeAgentVersion(av)
 			}
 		}
 
@@ -357,7 +357,7 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 		rawVal, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), "AgentVersion")
 		if err == nil {
 			if av, ok := rawVal.(string); ok {
-				agentVersion = av
+				agentVersion = normalizeAgentVersion(av)
 			}
 		}
 
@@ -1124,4 +1124,31 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
 		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)
 	}
+}
+
+// normalizeAgentVersion extracts the client name from the agent version string
+// to reduce metric cardinality.
+func normalizeAgentVersion(agentVersion string) string {
+	// List of known consensus layer clients
+	knownClients := []string{
+		"prysm", "lighthouse", "nimbus", "lodestar", "grandine", "teku", "erigon", "caplin",
+	}
+
+	// Convert to lowercase for case-insensitive matching.
+	lowerAgent := strings.ToLower(agentVersion)
+
+	// Try to match against known clients.
+	for _, client := range knownClients {
+		if strings.Contains(lowerAgent, client) {
+			return client
+		}
+	}
+
+	// Extract first part before slash if present.
+	parts := strings.Split(lowerAgent, "/")
+	if len(parts) > 0 && parts[0] != "" {
+		return parts[0]
+	}
+
+	return "unknown"
 }
