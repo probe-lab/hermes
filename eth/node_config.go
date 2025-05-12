@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
@@ -105,6 +106,10 @@ type NodeConfig struct {
 	// Configuration for subnet selection by topic
 	SubnetConfigs map[string]*SubnetConfig
 
+	// SubscriptionTopics is a list of topics to subscribe to. If not set,
+	// the default list of topics will be used.
+	SubscriptionTopics []string
+
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
@@ -179,6 +184,19 @@ func (n *NodeConfig) Validate() error {
 
 			// Validate the subnet config for this topic.
 			if err := config.Validate(topic, subnetCount); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Validate the SubscriptionTopics if provided.
+	if n.SubscriptionTopics != nil {
+		for _, topicBase := range n.SubscriptionTopics {
+			if topicBase == "" {
+				return fmt.Errorf("empty gossipsub topic provided")
+			}
+
+			if _, err := topicFormatFromBase(topicBase); err != nil {
 				return err
 			}
 		}
@@ -471,8 +489,17 @@ func (n *NodeConfig) composeEthTopicWithSubnet(base string, encoder encoder.Netw
 }
 
 func (n *NodeConfig) getDesiredFullTopics(encoder encoder.NetworkEncoding) []string {
-	desiredTopics := desiredPubSubBaseTopics()
-	fullTopics := make([]string, 0)
+	var (
+		desiredTopics = desiredPubSubBaseTopics()
+		fullTopics    = make([]string, 0)
+	)
+
+	// If the user has specified a list of topics to subscribe to, use that instead of the default list.
+	if n.SubscriptionTopics != nil && len(n.SubscriptionTopics) > 0 {
+		desiredTopics = n.SubscriptionTopics
+
+		slog.Info("Using user-specified topics", slog.Attr{Key: "topics", Value: slog.StringValue(strings.Join(desiredTopics, ", "))})
+	}
 
 	for _, topicBase := range desiredTopics {
 		topicFormat, err := topicFormatFromBase(topicBase)
