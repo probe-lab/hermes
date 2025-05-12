@@ -331,40 +331,53 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 	}
 
 	msg, found := types.GoodbyeCodeMessages[req]
+	isHandshaked := false
+
 	if found {
-		if _, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), peerstoreKeyIsHandshaked); err == nil {
+		// Check if peer is handshaked
+		_, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), peerstoreKeyIsHandshaked)
+		isHandshaked = err == nil
+
+		if isHandshaked {
 			slog.Info("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
 		} else {
 			slog.Debug("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
 		}
 	}
 
-	// Get agent version for the peer
-	rawVal, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), "AgentVersion")
-	agentVersion := "unknown"
-	if err == nil {
-		if av, ok := rawVal.(string); ok {
-			agentVersion = av
+	// Record metric with labels only for handshaked peers
+	// Otherwise the peer isn't protocol-ready, so would be misleading.
+	if isHandshaked {
+		var (
+			agentVersion = "unknown"
+			reason       = "unknown"
+		)
+
+		// Get agent version (client) for the peer.
+		rawVal, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), "AgentVersion")
+		if err == nil {
+			if av, ok := rawVal.(string); ok {
+				agentVersion = av
+			}
 		}
-	}
 
-	// Record metric with labels
-	reason := "unknown"
-	if found {
-		reason = msg
-	}
+		// This will be one of GoodbyeCodeMessages.
+		if found {
+			reason = msg
+		}
 
-	attrs := []attribute.KeyValue{
-		attribute.Int64("code", int64(req)),
-		attribute.String("reason", reason),
-		attribute.String("agent", agentVersion),
+		r.goodbyeCounter.Add(ctx, 1, metric.WithAttributes(
+			[]attribute.KeyValue{
+				attribute.Int64("code", int64(req)),
+				attribute.String("reason", reason),
+				attribute.String("agent", agentVersion),
+			}...,
+		))
 	}
-	r.goodbyeCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 
 	traceData := map[string]any{
 		"Code":   req,
 		"Reason": msg,
-		"Agent":  agentVersion,
 	}
 
 	return traceData, stream.Close()
