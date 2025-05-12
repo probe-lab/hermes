@@ -43,10 +43,10 @@ type SubnetConfig struct {
 func HasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 	switch topic {
 	case p2p.GossipAttestationMessage:
-		return globalBeaconConfig.AttestationSubnetCount, true
+		return uint64(1), true
 
 	case p2p.GossipSyncCommitteeMessage:
-		return globalBeaconConfig.SyncCommitteeSubnetCount, true
+		return uint64(1), true
 
 	case p2p.GossipBlobSidecarMessage:
 		return globalBeaconConfig.BlobsidecarSubnetCount, true

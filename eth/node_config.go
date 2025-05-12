@@ -410,17 +410,17 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 func desiredPubSubBaseTopics() []string {
 	return []string{
 		p2p.GossipBlockMessage,
-		p2p.GossipAggregateAndProofMessage,
+		// p2p.GossipAggregateAndProofMessage,
 		p2p.GossipAttestationMessage,
 		// In relation to https://github.com/probe-lab/hermes/issues/24
 		// we unfortunatelly can't validate the messages (yet)
 		// thus, better not to forward invalid messages
 		// p2p.GossipExitMessage,
-		p2p.GossipAttesterSlashingMessage,
-		p2p.GossipProposerSlashingMessage,
-		p2p.GossipContributionAndProofMessage,
+		// p2p.GossipAttesterSlashingMessage,
+		// p2p.GossipProposerSlashingMessage,
+		// p2p.GossipContributionAndProofMessage,
 		p2p.GossipSyncCommitteeMessage,
-		p2p.GossipBlsToExecutionChangeMessage,
+		// p2p.GossipBlsToExecutionChangeMessage,
 		p2p.GossipBlobSidecarMessage,
 	}
 }
