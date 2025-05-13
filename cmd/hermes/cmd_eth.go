@@ -57,6 +57,7 @@ var ethConfig = &struct {
 	SubnetBlobSidecarCount     uint64
 	SubnetBlobSidecarStart     uint64
 	SubnetBlobSidecarEnd       uint64
+	SubscriptionTopics         []string
 }{
 	PrivateKeyStr:               "", // unset means it'll be generated
 	Chain:                       params.MainnetName,
@@ -370,6 +371,15 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.SubnetBlobSidecarEnd,
 		Destination: &ethConfig.SubnetBlobSidecarEnd,
 	},
+	&cli.StringSliceFlag{
+		Name:    "subscription.topics",
+		EnvVars: []string{"HERMES_ETH_SUBSCRIPTION_TOPICS"},
+		Usage:   "An optional comma-separated list of topics to subscribe to",
+		Action: func(c *cli.Context, v []string) error {
+			ethConfig.SubscriptionTopics = v
+			return nil
+		},
+	},
 }
 
 func cmdEthAction(c *cli.Context) error {
@@ -463,6 +473,7 @@ func cmdEthAction(c *cli.Context) error {
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
 		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10
 		SubnetConfigs:                  createSubnetConfigs(),
+		SubscriptionTopics:             ethConfig.SubscriptionTopics,
 		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
 		Meter:                          otel.GetMeterProvider().Meter("hermes"),
 	}

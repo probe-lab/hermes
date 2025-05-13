@@ -20,6 +20,8 @@ network.
   - [Deployment](#deployment)
     - [General](#general)
     - [Ethereum](#ethereum)
+      - [Subnet Configuration](#subnet-configuration)
+      - [Topic Subscription](#topic-subscription)
   - [Telemetry](#telemetry)
     - [Metrics](#metrics)
     - [Tracing](#tracing)
@@ -229,7 +231,28 @@ For each topic that supports subnets, you can use one of these configuration str
    }
    ```
 
-This configuration allows you to set up multiple Hermes instances that monitor different parts of the network, or to focus monitoring on specific subnets of interest.
+#### Topic Subscription
+
+In addition to subnet configuration, Hermes allows you to specify exactly which topics to subscribe to using the `--subscription.topics` flag. This gives you fine-grained control over which message types Hermes will monitor.
+
+By default, Hermes subscribes to all standard topics:
+- Block messages
+- Aggregate and proof messages
+- Attestation messages
+- Attester slashing messages
+- Proposer slashing messages
+- Contribution and proof messages
+- Sync committee messages
+- BLS to execution change messages
+- Blob sidecar messages
+
+To subscribe to only specific topics, use the `--subscription.topics` flag with a comma-separated list:
+
+```shell
+hermes eth --subscription.topics="beacon_attestation,beacon_block"
+```
+
+This configuration allows you to set up multiple Hermes instances that monitor different parts of the network, or to focus monitoring on specific subnets and topics of interest.
 
 To run Hermes for the Ethereum network you would need to point it to the beacon node by providing the
 
@@ -282,6 +305,7 @@ OPTIONS:
    --config.yaml.url value                                                        The .yaml URL from which to fetch the beacon chain config, requires 'chain=devnet' [$HERMES_ETH_CONFIG_URL]
    --bootnodes.yaml.url value                                                     The .yaml URL from which to fetch the bootnode ENRs, requires 'chain=devnet' [$HERMES_ETH_BOOTNODES_URL]
    --deposit-contract-block.txt.url value                                         The .txt URL from which to fetch the deposit contract block. Requires 'chain=devnet' [$HERMES_ETH_DEPOSIT_CONTRACT_BLOCK_URL]
+   --subscription.topics value [ --subscription.topics value ]                    Comma-separated list of topics to subscribe to (e.g. beacon_attestation,beacon_block) [$HERMES_ETH_SUBSCRIPTION_TOPICS]
    --subnet.attestation.type value                                                Subnet selection strategy for attestation topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_ATTESTATION_TYPE]
    --subnet.attestation.subnets value [ --subnet.attestation.subnets value ]      Comma-separated list of subnet IDs for attestation when type=static [$HERMES_ETH_SUBNET_ATTESTATION_SUBNETS]
    --subnet.attestation.count value                                               Number of random attestation subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_COUNT]
