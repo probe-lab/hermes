@@ -2,6 +2,7 @@ package fil
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,7 +51,7 @@ func NewDiscovery(h host.Host, cfg *DiscoveryConfig) (*Discovery, error) {
 
 func (d *Discovery) Serve(ctx context.Context) (err error) {
 	slog.Info("Starting discv5 Discovery Service")
-	defer slog.Info("Stopped disv5 Discovery Service")
+	defer slog.Info("Stopped discv5 Discovery Service")
 	defer func() { err = terminateSupervisorTreeOnErr(err) }()
 
 	opts := []kaddht.Option{
@@ -69,8 +70,9 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to generate random key: %w", err)
 		}
-		start := time.Now()
 
+		slog.Info("Looking up random key", "key", hex.EncodeToString(k))
+		start := time.Now()
 		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, time.Minute)
 		peers, err := dht.GetClosestPeers(timeoutCtx, string(k))
 		timeoutCancel()
@@ -81,13 +83,15 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		} else if err != nil || len(peers) == 0 {
 			// could be that we don't have any DHT peers in our peer store
 			// -> bootstrap again
+			slog.Info("Failed to find random key", "key", hex.EncodeToString(k))
 			for _, addrInfo := range kaddht.GetDefaultBootstrapPeerAddrInfos() {
-				_ = d.host.Connect(ctx, addrInfo)
+				timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 5*time.Second)
+				_ = d.host.Connect(timeoutCtx, addrInfo)
+				timeoutCancel()
 			}
 		} else {
-			slog.Debug("Found peers", "count", len(peers))
+			slog.Info("Found peers", "count", len(peers))
 		}
-		timeoutCancel()
 
 		select {
 		case <-ctx.Done():
