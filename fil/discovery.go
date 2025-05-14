@@ -71,10 +71,11 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 			return fmt.Errorf("failed to generate random key: %w", err)
 		}
 
-		slog.Info("Looking up random key", "key", hex.EncodeToString(k))
 		start := time.Now()
 		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, time.Minute)
+		slog.Info("Looking up random key", "key", hex.EncodeToString(k))
 		peers, err := dht.GetClosestPeers(timeoutCtx, string(k))
+		slog.Info("Finished lookup", "count", len(peers), "err", err, "took", time.Since(start).String())
 		timeoutCancel()
 
 		d.MeterLookups.Add(ctx, 1, metric.WithAttributes(attribute.Bool("success", err == nil)))
@@ -83,14 +84,11 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		} else if err != nil || len(peers) == 0 {
 			// could be that we don't have any DHT peers in our peer store
 			// -> bootstrap again
-			slog.Info("Failed to find random key", "key", hex.EncodeToString(k))
 			for _, addrInfo := range kaddht.GetDefaultBootstrapPeerAddrInfos() {
 				timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 5*time.Second)
 				_ = d.host.Connect(timeoutCtx, addrInfo)
 				timeoutCancel()
 			}
-		} else {
-			slog.Info("Found peers", "count", len(peers))
 		}
 
 		select {
