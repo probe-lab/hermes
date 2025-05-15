@@ -22,7 +22,7 @@ require (
 	github.com/ipni/go-libipni v0.6.18
 	github.com/klauspost/compress v1.18.0
 	github.com/libp2p/go-libp2p v0.41.1
-	github.com/libp2p/go-libp2p-kad-dht v0.30.2
+	github.com/libp2p/go-libp2p-kad-dht v0.33.0
 	github.com/libp2p/go-libp2p-mplex v0.10.0
 	github.com/libp2p/go-libp2p-pubsub v0.13.1
 	github.com/lmittmann/tint v1.0.6
@@ -137,7 +137,7 @@ require (
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/invopop/jsonschema v0.12.0 // indirect
-	github.com/ipfs/boxo v0.29.1 // indirect
+	github.com/ipfs/boxo v0.30.0 // indirect
 	github.com/ipfs/go-block-format v0.2.0 // indirect
 	github.com/ipfs/go-cid v0.5.0 // indirect
 	github.com/ipfs/go-datastore v0.8.2 // indirect
