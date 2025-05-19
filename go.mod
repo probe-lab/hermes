@@ -294,3 +294,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/libp2p/go-yamux/v5 => github.com/dennis-tra/go-yamux/v5 v5.0.0-20250519183055-dde4b3083558

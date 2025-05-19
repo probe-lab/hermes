@@ -189,6 +189,8 @@ github.com/deepmap/oapi-codegen v1.8.2 h1:SegyeYGcdi0jLLrpbCMoJxnUUn8GBXHsvr4rbz
 github.com/deepmap/oapi-codegen v1.8.2/go.mod h1:YLgSKSDv/bZQB7N4ws6luhozi3cEdRktEqrX88CvjIw=
 github.com/dennis-tra/go-kinesis v0.0.0-20240326083914-7acf5f8dc24e h1:y6QyYh8YZyRQDdfnQqUgC5tRBmEwUFAjavnybKboCm4=
 github.com/dennis-tra/go-kinesis v0.0.0-20240326083914-7acf5f8dc24e/go.mod h1:5Hm3EOeNP1/lYm9qcFwWgYgjixQilwcZA+hZ05bUz54=
+github.com/dennis-tra/go-yamux/v5 v5.0.0-20250519183055-dde4b3083558 h1:N0mn/xSyVdXgfM493L8j38ukJme3ktY2Hf6L9UnR5vQ=
+github.com/dennis-tra/go-yamux/v5 v5.0.0-20250519183055-dde4b3083558/go.mod h1:tgIQ07ObtRR/I0IWsFOyQIL9/dR5UXgc2s8xKmNZv1o=
 github.com/dgraph-io/badger v1.5.5-0.20190226225317-8115aed38f8f/go.mod h1:VZxzAIRPHRVNRKRo6AXrX9BJegn6il06VMTZVJYCIjQ=
 github.com/dgraph-io/ristretto v0.2.0 h1:XAfl+7cmoUDWW/2Lx8TGZQjjxIQ2Ley9DSf52dru4WE=
 github.com/dgraph-io/ristretto v0.2.0/go.mod h1:8uBHCU/PBV4Ag0CJrP47b9Ofby5dqWNh4FicAdoqFNU=
@@ -484,8 +486,6 @@ github.com/invopop/jsonschema v0.12.0/go.mod h1:ffZ5Km5SWWRAIN6wbDXItl95euhFz2uO
 github.com/ipfs/bbloom v0.0.1/go.mod h1:oqo8CVWsJFMOZqTglBG4wydCE4IQA/G2/SEofB0rjUI=
 github.com/ipfs/bbloom v0.0.4 h1:Gi+8EGJ2y5qiD5FbsbpX/TMNcJw8gSqr7eyjHa4Fhvs=
 github.com/ipfs/bbloom v0.0.4/go.mod h1:cS9YprKXpoZ9lT0n/Mw/a6/aFV6DTjTLYHeA+gyqMG0=
-github.com/ipfs/boxo v0.29.1 h1:z61ZT4YDfTHLjXTsu/+3wvJ8aJlExthDSOCpx6Nh8xc=
-github.com/ipfs/boxo v0.29.1/go.mod h1:MkDJStXiJS9U99cbAijHdcmwNfVn5DKYBmQCOgjY2NU=
 github.com/ipfs/boxo v0.30.0 h1:7afsoxPGGqfoH7Dum/wOTGUB9M5fb8HyKPMlLfBvIEQ=
 github.com/ipfs/boxo v0.30.0/go.mod h1:BPqgGGyHB9rZZcPSzah2Dc9C+5Or3U1aQe7EH1H7370=
 github.com/ipfs/go-bitswap v0.1.0/go.mod h1:FFJEf18E9izuCqUtHxbWEvq+reg7o4CW5wSAE1wsxj0=
@@ -658,8 +658,6 @@ github.com/libp2p/go-libp2p-core v0.0.2/go.mod h1:9dAcntw/n46XycV4RnlBq3BpgrmyUi
 github.com/libp2p/go-libp2p-core v0.0.3/go.mod h1:j+YQMNz9WNSkNezXOsahp9kwZBKBvxLpKD316QWSJXE=
 github.com/libp2p/go-libp2p-crypto v0.1.0/go.mod h1:sPUokVISZiy+nNuTTH/TY+leRSxnFj/2GLjtOTW90hI=
 github.com/libp2p/go-libp2p-discovery v0.1.0/go.mod h1:4F/x+aldVHjHDHuX85x1zWoFTGElt8HnoDzwkFZm29g=
-github.com/libp2p/go-libp2p-kad-dht v0.30.2 h1:K0LJPdXynQ+u3rx6uFlrfNy0i11LE6SOCDzwAAaahys=
-github.com/libp2p/go-libp2p-kad-dht v0.30.2/go.mod h1:UV0mxF4ufh/ht05jNg5mcjOMrjK82uecgANa+GKi4y0=
 github.com/libp2p/go-libp2p-kad-dht v0.33.0 h1:lB6JFgLpsfEKTmcy27sPFulexEZMeN40zRsmIx8aFcw=
 github.com/libp2p/go-libp2p-kad-dht v0.33.0/go.mod h1:CdmNk4VeGJa9EXM9SLNyNVySEvduKvb+5rSC/H4pLAo=
 github.com/libp2p/go-libp2p-kbucket v0.7.0 h1:vYDvRjkyJPeWunQXqcW2Z6E93Ywx7fX0jgzb/dGOKCs=
@@ -713,8 +711,6 @@ github.com/libp2p/go-testutil v0.1.0/go.mod h1:81b2n5HypcVyrCg/MJx4Wgfp/VHojytjV
 github.com/libp2p/go-ws-transport v0.1.0/go.mod h1:rjw1MG1LU9YDC6gzmwObkPd/Sqwhw7yT74kj3raBFuo=
 github.com/libp2p/go-yamux v1.2.2/go.mod h1:FGTiPvoV/3DVdgWpX+tM0OW3tsM+W5bSE3gZwqQTcow=
 github.com/libp2p/go-yamux v1.2.3/go.mod h1:FGTiPvoV/3DVdgWpX+tM0OW3tsM+W5bSE3gZwqQTcow=
-github.com/libp2p/go-yamux/v5 v5.0.0 h1:2djUh96d3Jiac/JpGkKs4TO49YhsfLopAoryfPmf+Po=
-github.com/libp2p/go-yamux/v5 v5.0.0/go.mod h1:en+3cdX51U0ZslwRdRLrvQsdayFt3TSUKvBGErzpWbU=
 github.com/lightstep/lightstep-tracer-common/golang/gogo v0.0.0-20190605223551-bc2310a04743/go.mod h1:qklhhLq1aX+mtWk9cPHPzaBjWImj5ULL6C7HFJtXQMM=
 github.com/lightstep/lightstep-tracer-go v0.18.1/go.mod h1:jlF1pusYV4pidLvZ+XD0UBX0ZE6WURAspgAczcDHrL4=
 github.com/lmittmann/tint v1.0.6 h1:vkkuDAZXc0EFGNzYjWcV0h7eEX+uujH48f/ifSkJWgc=
