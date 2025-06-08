@@ -381,7 +381,13 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 
 	states := map[string]*topicState{}
 
-	for _, pss := range scores { // pss: peer score snapshot
+	for pid, pss := range scores { // pss: peer score snapshot
+
+		// don't measure own scores
+		if pid == h.ID() {
+			continue
+		}
+
 		for topic, tss := range pss.Topics { // tss: topic score snapshot
 
 			// Not sure if the peer score map also includes peers that were
