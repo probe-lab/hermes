@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"math"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/urfave/cli/v2"
 
 	"github.com/probe-lab/hermes/eth"
@@ -23,6 +23,8 @@ func cmdEthChainsAction(c *cli.Context) error {
 		params.MainnetName,
 		params.SepoliaName,
 		params.HoleskyName,
+		params.HoodiName,
+		eth.GnosisName,
 	}
 
 	slog.Info("Supported chains:")
@@ -39,6 +41,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 			config.Beacon.BellatrixForkVersion,
 			config.Beacon.CapellaForkVersion,
 			config.Beacon.DenebForkVersion,
+			config.Beacon.ElectraForkVersion,
 		}
 
 		for _, forkVersion := range forkVersions {

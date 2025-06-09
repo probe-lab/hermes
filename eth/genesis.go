@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
+	"github.com/OffchainLabs/prysm/v6/config/params"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
 )
 
 // list of ForkVersions
@@ -23,8 +24,9 @@ var (
 	BellatrixForkVersion ForkVersion
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
+	ElectraForkVersion   ForkVersion
 
-	currentBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
+	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
 
 // configure global ForkVersion variables
@@ -34,7 +36,9 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	BellatrixForkVersion = ForkVersion(beaconConfig.BellatrixForkVersion)
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
-	currentBeaconConfig = beaconConfig
+	ElectraForkVersion = ForkVersion(beaconConfig.ElectraForkVersion)
+
+	globalBeaconConfig = beaconConfig
 }
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root
@@ -56,6 +60,14 @@ var GenesisConfigs = map[string]*GenesisConfig{
 	params.HoleskyName: {
 		GenesisValidatorRoot: hexToBytes("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
 		GenesisTime:          time.Unix(1695902400, 0),
+	},
+	params.HoodiName: {
+		GenesisValidatorRoot: hexToBytes("212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f"),
+		GenesisTime:          time.Unix(1742213400, 0),
+	},
+	GnosisName: {
+		GenesisValidatorRoot: hexToBytes("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
+		GenesisTime:          time.Unix(1638968400, 0),
 	},
 }
 
@@ -81,10 +93,41 @@ func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconCha
 	case epoch < beaconConfg.DenebForkEpoch:
 		return [4]byte(beaconConfg.CapellaForkVersion), nil
 
-	case epoch >= beaconConfg.DenebForkEpoch:
+	case epoch < beaconConfg.ElectraForkEpoch:
 		return [4]byte(beaconConfg.DenebForkVersion), nil
+
+	case epoch >= beaconConfg.ElectraForkEpoch:
+		return [4]byte(beaconConfg.ElectraForkVersion), nil
 
 	default:
 		return [4]byte{}, fmt.Errorf("not recognized case for epoch %d", epoch)
 	}
+}
+
+func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) {
+	genesisRoot := GenesisConfigs[globalBeaconConfig.ConfigName].GenesisValidatorRoot
+	phase0D, _ := signing.ComputeForkDigest(Phase0ForkVersion[:], genesisRoot)
+	altairD, _ := signing.ComputeForkDigest(AltairForkVersion[:], genesisRoot)
+	bellatrixD, _ := signing.ComputeForkDigest(BellatrixForkVersion[:], genesisRoot)
+	capellaD, _ := signing.ComputeForkDigest(CapellaForkVersion[:], genesisRoot)
+	denebD, _ := signing.ComputeForkDigest(DenebForkVersion[:], genesisRoot)
+	electraD, _ := signing.ComputeForkDigest(ElectraForkVersion[:], genesisRoot)
+	switch forkD {
+	case phase0D:
+		forkV = Phase0ForkVersion
+	case altairD:
+		forkV = AltairForkVersion
+	case bellatrixD:
+		forkV = BellatrixForkVersion
+	case capellaD:
+		forkV = CapellaForkVersion
+	case denebD:
+		forkV = DenebForkVersion
+	case electraD:
+		forkV = ElectraForkVersion
+	default:
+		forkV = ForkVersion{}
+		err = fmt.Errorf("not recognized fork_version for (%s)", hex.EncodeToString([]byte(forkD[:])))
+	}
+	return forkV, err
 }

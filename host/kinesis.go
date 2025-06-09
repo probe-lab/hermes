@@ -31,6 +31,11 @@ func (k *KinesisDataStream) Type() DataStreamType {
 	return DataStreamTypeKinesis
 }
 
+// OutputType returns the output type to be used by this data stream.
+func (k *KinesisDataStream) OutputType() DataStreamOutputType {
+	return DataStreamOutputTypeKinesis
+}
+
 // Start begins the data stream's operation.
 func (k *KinesisDataStream) Start(ctx context.Context) error {
 	dsCtx, dsCancel := context.WithCancel(ctx)
