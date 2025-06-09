@@ -2,6 +2,7 @@ package eth
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
