@@ -24,6 +24,7 @@ var filConfig = &struct {
 	LookupInterval              time.Duration
 	Network                     string
 	DialTimeout                 time.Duration
+	DiscoveryActorEnabled       bool
 }{
 	PrivateKeyStr:               "", // unset means it'll be generated
 	Libp2pHost:                  "127.0.0.1",
@@ -32,6 +33,7 @@ var filConfig = &struct {
 	LookupInterval:              time.Minute,
 	Network:                     "mainnet",
 	DialTimeout:                 5 * time.Second,
+	DiscoveryActorEnabled:       true,
 }
 
 var cmdFil = &cli.Command{
@@ -96,6 +98,13 @@ var cmdFilFlags = []cli.Flag{
 		Value:       filConfig.LookupInterval,
 		Destination: &filConfig.LookupInterval,
 	},
+	&cli.BoolFlag{
+		Name:        "discovery.actor.enabled",
+		EnvVars:     []string{"HERMES_FIL_DISCOVERY_ACTOR_ENABLED"},
+		Usage:       "Enables the discovery actor",
+		Value:       false,
+		Destination: &filConfig.DiscoveryActorEnabled,
+	},
 }
 
 func cmdFilAction(c *cli.Context) error {
@@ -148,6 +157,7 @@ func cmdFilAction(c *cli.Context) error {
 		KinesisStream:               rootConfig.KinesisStream,
 		Tracer:                      otel.GetTracerProvider().Tracer("hermes"),
 		Meter:                       otel.GetMeterProvider().Meter("hermes"),
+		DiscoveryActorEnabled:       filConfig.DiscoveryActorEnabled,
 	}
 
 	n, err := fil.NewNode(cfg)

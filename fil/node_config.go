@@ -35,6 +35,8 @@ type NodeConfig struct {
 	// regenerating the key over and over again.
 	privateKey *crypto.Secp256k1PrivateKey
 
+	DiscoveryActorEnabled bool
+
 	// General timeout when communicating with other network participants
 	DialTimeout time.Duration
 
