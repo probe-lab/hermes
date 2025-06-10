@@ -420,11 +420,18 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 		slog.Debug("  tracked mesh metric for peer", "peerID", pid.String(), "topics", topics)
 	}
 
-	for topic, state := range states {
-		h.meterMeshSize.Record(ctx, int64(state.meshSize), metric.WithAttributes(attribute.String("topic", topic)))
-		h.meterAvgMeshAge.Record(ctx, avg(state.meshTimes), metric.WithAttributes(attribute.String("topic", topic)))
-		h.meterAvgMeshScore.Record(ctx, avg(state.scores), metric.WithAttributes(attribute.String("topic", topic)))
-		h.meterAvgMeshAppScore.Record(ctx, avg(state.appScores), metric.WithAttributes(attribute.String("topic", topic)))
+	for _, topic := range h.ps.GetTopics() {
+		if state, found := states[topic]; found {
+			h.meterMeshSize.Record(ctx, int64(state.meshSize), metric.WithAttributes(attribute.String("topic", topic)))
+			h.meterAvgMeshAge.Record(ctx, avg(state.meshTimes), metric.WithAttributes(attribute.String("topic", topic)))
+			h.meterAvgMeshScore.Record(ctx, avg(state.scores), metric.WithAttributes(attribute.String("topic", topic)))
+			h.meterAvgMeshAppScore.Record(ctx, avg(state.appScores), metric.WithAttributes(attribute.String("topic", topic)))
+		} else {
+			h.meterMeshSize.Record(ctx, 0, metric.WithAttributes(attribute.String("topic", topic)))
+			h.meterAvgMeshAge.Record(ctx, 0, metric.WithAttributes(attribute.String("topic", topic)))
+			h.meterAvgMeshScore.Record(ctx, 0, metric.WithAttributes(attribute.String("topic", topic)))
+			h.meterAvgMeshAppScore.Record(ctx, 0, metric.WithAttributes(attribute.String("topic", topic)))
+		}
 	}
 }
 
