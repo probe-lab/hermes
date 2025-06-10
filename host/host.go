@@ -381,6 +381,7 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 
 	states := map[string]*topicState{}
 
+	slog.Debug("Tracking mesh metrics")
 	for pid, pss := range scores { // pss: peer score snapshot
 
 		// don't measure own scores
@@ -388,6 +389,7 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 			continue
 		}
 
+		topics := make([]string, 0, len(pss.Topics))
 		for topic, tss := range pss.Topics { // tss: topic score snapshot
 
 			// Not sure if the peer score map also includes peers that were
@@ -396,6 +398,9 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 			if tss.TimeInMesh == 0 {
 				continue
 			}
+
+			// track topics for the log message below
+			topics = append(topics, topic)
 
 			if _, ok := states[topic]; !ok {
 				states[topic] = &topicState{
@@ -411,6 +416,8 @@ func (h *Host) UpdatePeerScore(scores map[peer.ID]*pubsub.PeerScoreSnapshot) {
 			states[topic].scores = append(states[topic].scores, pss.Score)
 			states[topic].appScores = append(states[topic].appScores, pss.AppSpecificScore)
 		}
+
+		slog.Debug("  tracked mesh metric for peer", "peerID", pid.String(), "topics", topics)
 	}
 
 	for topic, state := range states {
