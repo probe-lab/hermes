@@ -102,7 +102,7 @@ var cmdFilFlags = []cli.Flag{
 		Name:        "discovery.actor.enabled",
 		EnvVars:     []string{"HERMES_FIL_DISCOVERY_ACTOR_ENABLED"},
 		Usage:       "Enables the discovery actor",
-		Value:       false,
+		Value:       filConfig.DiscoveryActorEnabled,
 		Destination: &filConfig.DiscoveryActorEnabled,
 	},
 }

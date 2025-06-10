@@ -35,8 +35,6 @@ type NodeConfig struct {
 	// regenerating the key over and over again.
 	privateKey *crypto.Secp256k1PrivateKey
 
-	DiscoveryActorEnabled bool
-
 	// General timeout when communicating with other network participants
 	DialTimeout time.Duration
 
@@ -47,6 +45,9 @@ type NodeConfig struct {
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+
+	// Whether to enable the periodic lookups
+	DiscoveryActorEnabled bool
 
 	// Pause between two discovery lookups
 	LookupInterval time.Duration
