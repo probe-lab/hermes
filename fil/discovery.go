@@ -50,7 +50,7 @@ func NewDiscovery(h host.Host, cfg *DiscoveryConfig) (*Discovery, error) {
 }
 
 func (d *Discovery) Serve(ctx context.Context) (err error) {
-	slog.Info("Starting discv5 Discovery Service")
+	slog.Info("Starting discv5 Discovery Service", "interval", d.cfg.Interval)
 	defer slog.Info("Stopped discv5 Discovery Service")
 	defer func() { err = terminateSupervisorTreeOnErr(err) }()
 
