@@ -137,15 +137,21 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
 
-	disc, err := NewDiscovery(h.Host, &DiscoveryConfig{
-		Interval: cfg.LookupInterval,
-		Tracer:   cfg.Tracer,
-		Meter:    cfg.Meter,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("new discovery service: %w", err)
+	var disc *Discovery
+	if cfg.DiscoveryActorEnabled {
+		var err error
+		disc, err = NewDiscovery(h.Host, &DiscoveryConfig{
+			Interval: cfg.LookupInterval,
+			Tracer:   cfg.Tracer,
+			Meter:    cfg.Meter,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("new discovery service: %w", err)
+		}
+		slog.Info("Initialized new discovery service")
+	} else {
+		slog.Info("Discovery actor is disabled")
 	}
-	slog.Info("Initialized new discovery service")
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
@@ -304,8 +310,10 @@ func (n *Node) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to all bootstrappers")
 	}
 
-	// start the discovery service to find peers in the discv5 DHT
-	n.sup.Add(n.disc)
+	if n.disc != nil {
+		slog.Info("Starting discovery actor")
+		n.sup.Add(n.disc)
+	}
 
 	// start all long-running services
 	return n.sup.Serve(ctx)
