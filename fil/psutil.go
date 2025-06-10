@@ -15,7 +15,6 @@ import (
 )
 
 var (
-	ManifestMessageIdFn      = pubsubMsgIdHashDataAndSender
 	GPBFTMessageIdFn         = pubsubMsgIdHashData
 	ChainExchangeMessageIdFn = pubsubMsgIdHashData
 )

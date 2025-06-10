@@ -11,13 +11,11 @@ import (
 
 	f3 "github.com/filecoin-project/go-f3"
 	"github.com/filecoin-project/go-f3/chainexchange"
-	"github.com/filecoin-project/go-f3/manifest"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/ipni/go-libipni/announce/message"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/sirupsen/logrus"
 	"github.com/thejerf/suture/v4"
 
 	"github.com/probe-lab/hermes/host"
@@ -106,8 +104,6 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 	switch {
-	case strings.HasPrefix(topic, "/f3/manifests"):
-		return p.handleF3Manifests
 	case strings.HasPrefix(topic, "/f3/granite"):
 		return p.handleF3Granite
 	case strings.HasPrefix(topic, "/f3/chainexchange"):
@@ -252,40 +248,6 @@ func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error
 	}
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
-		slog.Warn(
-			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
-		)
-	}
-
-	return nil
-}
-
-func (p *PubSub) handleF3Manifests(ctx context.Context, msg *pubsub.Message) error {
-	evt := &host.TraceEvent{
-		Type:      eventTypeHandleMessage,
-		Topic:     msg.GetTopic(),
-		PeerID:    p.host.ID(),
-		Timestamp: time.Now(),
-	}
-
-	var update manifest.ManifestUpdateMessage
-	err := update.Unmarshal(bytes.NewReader(msg.Data))
-	if err != nil {
-		logrus.WithError(err).Error("failed to unmarshal f3 manifest update message")
-		return fmt.Errorf("unmarshal cbor: %w", err)
-	}
-
-	evt.Payload = map[string]any{
-		"PeerID":   msg.ReceivedFrom,
-		"Topic":    msg.GetTopic(),
-		"Seq":      hex.EncodeToString(msg.GetSeqno()),
-		"MsgID":    hex.EncodeToString([]byte(msg.ID)),
-		"MsgSize":  len(msg.Data),
-		"Manifest": update.Manifest,
-		"MsgSeq":   update.MessageSequence,
-	}
-
-	if err = p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn(
 			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
 		)
