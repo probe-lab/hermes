@@ -212,10 +212,6 @@ func topicConfigs() map[string]*fil.TopicConfig {
 	}
 
 	return map[string]*fil.TopicConfig{
-		"/f3/manifests/0.0.2": {
-			ScoreParams: fil.PubsubTopicScoreParams,
-			Options:     []pubsub.TopicOpt{pubsub.WithTopicMessageIdFn(fil.ManifestMessageIdFn)},
-		},
 		"/f3/chainexchange/0.0.1/filecoin": {
 			ScoreParams: fil.PubsubTopicScoreParams,
 			Options:     []pubsub.TopicOpt{pubsub.WithTopicMessageIdFn(fil.ChainExchangeMessageIdFn)},
