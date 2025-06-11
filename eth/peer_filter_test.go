@@ -312,41 +312,6 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 	}
 }
 
-func TestPeerFilter_AgentCache(t *testing.T) {
-	logger := slog.Default()
-	pid1 := test.RandPeerIDFatal(t)
-	pid2 := test.RandPeerIDFatal(t)
-	
-	mockH := &mockHost{
-		agentVersions: map[peer.ID]string{
-			pid1: "prysm/v3.0.0",
-			pid2: "lighthouse/v2.0.0",
-		},
-	}
-	
-	config := FilterConfig{
-		Mode:     FilterModeDenylist,
-		Patterns: []string{"^hermes.*"},
-	}
-	
-	pf, err := NewPeerFilter(mockH, config, logger)
-	require.NoError(t, err)
-	
-	// First call should hit the host
-	agent1 := pf.getAgentVersion(pid1)
-	assert.Equal(t, "prysm/v3.0.0", agent1)
-	
-	// Change the agent in the mock host
-	mockH.agentVersions[pid1] = "changed/v1.0.0"
-	
-	// Second call should hit the cache
-	agent1Cached := pf.getAgentVersion(pid1)
-	assert.Equal(t, "prysm/v3.0.0", agent1Cached, "Should return cached value")
-	
-	// Different peer should hit the host
-	agent2 := pf.getAgentVersion(pid2)
-	assert.Equal(t, "lighthouse/v2.0.0", agent2)
-}
 
 // mockConnMultiaddrs implements network.ConnMultiaddrs for testing
 type mockConnMultiaddrs struct {

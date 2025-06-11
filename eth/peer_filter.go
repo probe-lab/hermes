@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"sync"
-	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -51,17 +48,10 @@ type AgentVersionProvider interface {
 // PeerFilter implements libp2p's ConnectionGater interface to filter peer connections
 // based on agent strings using regex patterns
 type PeerFilter struct {
-	host       AgentVersionProvider
-	mode       FilterMode
-	patterns   []*regexp.Regexp
-	agentCache *lru.Cache[string, cacheEntry]
-	mu         sync.RWMutex
-	log        *slog.Logger
-}
-
-type cacheEntry struct {
-	agent     string
-	timestamp time.Time
+	host     AgentVersionProvider
+	mode     FilterMode
+	patterns []*regexp.Regexp
+	log      *slog.Logger
 }
 
 // NewPeerFilter creates a new peer filter with the given configuration
@@ -75,17 +65,11 @@ func NewPeerFilter(h AgentVersionProvider, config FilterConfig, log *slog.Logger
 		patterns = append(patterns, re)
 	}
 
-	agentCache, err := lru.New[string, cacheEntry](1000)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create agent cache: %w", err)
-	}
-
 	return &PeerFilter{
-		host:       h,
-		mode:       config.Mode,
-		patterns:   patterns,
-		agentCache: agentCache,
-		log:        log.With("component", "peer_filter"),
+		host:     h,
+		mode:     config.Mode,
+		patterns: patterns,
+		log:      log.With("component", "peer_filter"),
 	}, nil
 }
 
@@ -156,31 +140,9 @@ func (pf *PeerFilter) InterceptUpgraded(conn network.Conn) (allow bool, reason c
 	return true, 0
 }
 
-// getAgentVersion retrieves the agent version for a peer, using cache when possible
+// getAgentVersion retrieves the agent version for a peer
 func (pf *PeerFilter) getAgentVersion(p peer.ID) string {
-	// Check cache first
-	pf.mu.RLock()
-	if entry, found := pf.agentCache.Get(p.String()); found {
-		// Cache entries are valid for 5 minutes
-		if time.Since(entry.timestamp) < 5*time.Minute {
-			pf.mu.RUnlock()
-			return entry.agent
-		}
-	}
-	pf.mu.RUnlock()
-
-	// Get agent version from host
-	agent := pf.host.AgentVersion(p)
-
-	// Update cache
-	pf.mu.Lock()
-	pf.agentCache.Add(p.String(), cacheEntry{
-		agent:     agent,
-		timestamp: time.Now(),
-	})
-	pf.mu.Unlock()
-
-	return agent
+	return pf.host.AgentVersion(p)
 }
 
 // checkAgent checks if an agent string passes the filter rules
