@@ -58,6 +58,9 @@ var ethConfig = &struct {
 	SubnetBlobSidecarStart     uint64
 	SubnetBlobSidecarEnd       uint64
 	SubscriptionTopics         []string
+	// Peer filter configuration
+	FilterMode     string
+	FilterPatterns []string
 }{
 	PrivateKeyStr:               "", // unset means it'll be generated
 	Chain:                       params.MainnetName,
@@ -95,6 +98,8 @@ var ethConfig = &struct {
 	SubnetBlobSidecarCount:     0,
 	SubnetBlobSidecarStart:     0,
 	SubnetBlobSidecarEnd:       0,
+	FilterMode:                 "disabled",
+	FilterPatterns:             []string{},
 }
 
 var cmdEth = &cli.Command{
@@ -107,6 +112,7 @@ var cmdEth = &cli.Command{
 		cmdEthIds,
 		cmdEthChains,
 		cmdEthForkDigest,
+		cmdEthFilterTest,
 	},
 }
 
@@ -380,6 +386,22 @@ var cmdEthFlags = []cli.Flag{
 			return nil
 		},
 	},
+	&cli.StringFlag{
+		Name:        "filter.mode",
+		EnvVars:     []string{"HERMES_ETH_FILTER_MODE"},
+		Usage:       "Peer filter mode: disabled, denylist, or allowlist",
+		Value:       ethConfig.FilterMode,
+		Destination: &ethConfig.FilterMode,
+	},
+	&cli.StringSliceFlag{
+		Name:    "filter.patterns",
+		EnvVars: []string{"HERMES_ETH_FILTER_PATTERNS"},
+		Usage:   "Regex patterns for filtering peers",
+		Action: func(c *cli.Context, v []string) error {
+			ethConfig.FilterPatterns = v
+			return nil
+		},
+	},
 }
 
 func cmdEthAction(c *cli.Context) error {
@@ -476,6 +498,10 @@ func cmdEthAction(c *cli.Context) error {
 		SubscriptionTopics:             ethConfig.SubscriptionTopics,
 		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
 		Meter:                          otel.GetMeterProvider().Meter("hermes"),
+		PeerFilter: eth.FilterConfig{
+			Mode:     eth.FilterMode(ethConfig.FilterMode),
+			Patterns: ethConfig.FilterPatterns,
+		},
 	}
 
 	n, err := eth.NewNode(cfg)

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -113,6 +114,9 @@ type NodeConfig struct {
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
+
+	// PeerFilter configuration for filtering peers based on agent strings
+	PeerFilter FilterConfig
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
@@ -233,6 +237,16 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("meter must not be nil")
 	}
 
+	// Set default peer filter configuration if not set
+	if n.PeerFilter.Mode == "" {
+		n.PeerFilter = DefaultFilterConfig()
+	}
+
+	// Validate peer filter configuration
+	if err := n.PeerFilter.Validate(); err != nil {
+		return fmt.Errorf("invalid peer filter config: %w", err)
+	}
+
 	return nil
 }
 
@@ -330,7 +344,27 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		libp2p.ResourceManager(rmgr),
 		libp2p.DisableMetrics(),
 	}
+
 	return opts, nil
+}
+
+// buildLibp2pOptionsWithGater builds libp2p options and returns the deferred gater if filtering is enabled
+func (n *NodeConfig) buildLibp2pOptionsWithGater() ([]libp2p.Option, *deferredGater, error) {
+	opts, err := n.libp2pOptions()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Add ConnectionGater if filtering is enabled
+	var gater *deferredGater
+	if n.PeerFilter.Mode != FilterModeDisabled {
+		// We use a deferred gater that will be replaced after host creation
+		// This is necessary because we need the host to get agent versions
+		gater = newDeferredGater()
+		opts = append(opts, libp2p.ConnectionGater(gater))
+	}
+
+	return opts, gater, nil
 }
 
 func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeValidators uint64) []pubsub.Option {
@@ -536,4 +570,40 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 		}
 	}
 	return topicScores
+}
+
+// FilterConfig defines the configuration for peer filtering based on agent strings
+type FilterConfig struct {
+	Mode     FilterMode `yaml:"mode" default:"disabled"`
+	Patterns []string   `yaml:"patterns"`
+}
+
+// Validate validates the filter configuration
+func (fc *FilterConfig) Validate() error {
+	switch fc.Mode {
+	case FilterModeDisabled, FilterModeDenylist, FilterModeAllowlist:
+		// Valid modes
+	default:
+		return fmt.Errorf("invalid filter mode: %s", fc.Mode)
+	}
+
+	// Validate regex patterns
+	for _, pattern := range fc.Patterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid regex pattern %q: %w", pattern, err)
+		}
+	}
+
+	return nil
+}
+
+// DefaultFilterConfig returns a default filter configuration
+func DefaultFilterConfig() FilterConfig {
+	return FilterConfig{
+		Mode: FilterModeDisabled,
+		Patterns: []string{
+			// Default patterns to prevent self-peering
+			"^hermes.*",
+		},
+	}
 }
