@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -423,18 +424,56 @@ func cmdEthAction(c *cli.Context) error {
 	genesisRoot := config.Genesis.GenesisValidatorRoot
 	genesisTime := config.Genesis.GenesisTime
 
-	// compute fork version and fork digest
-	currentSlot := slots.Since(genesisTime)
-	currentEpoch := slots.ToEpoch(currentSlot)
+	// For devnets, we need to query Prysm for the actual fork version
+	// instead of calculating it from the config
+	var currentForkVersion [4]byte
+	var forkDigest [4]byte
+	
+	if ethConfig.Chain == params.DevnetName {
+		// Create a temporary Prysm client to query the fork version
+		tempPryClient, err := eth.NewPrysmClientWithTLS(ethConfig.PrysmHost, ethConfig.PrysmPortHTTP, ethConfig.PrysmPortGRPC, ethConfig.PrysmUseTLS, ethConfig.DialTimeout, config.Genesis)
+		if err != nil {
+			return fmt.Errorf("create temporary prysm client: %w", err)
+		}
+		
+		ctx, cancel := context.WithTimeout(c.Context, 10*time.Second)
+		defer cancel()
+		
+		nodeFork, err := tempPryClient.GetFork(ctx)
+		if err != nil {
+			return fmt.Errorf("get fork from prysm: %w", err)
+		}
+		
+		copy(currentForkVersion[:], nodeFork.CurrentVersion)
+		
+		forkDigest, err = signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
+		if err != nil {
+			return fmt.Errorf("create fork digest: %w", err)
+		}
+		
+		slog.Info("Using fork version from Prysm for devnet",
+			"fork_version", hex.EncodeToString(currentForkVersion[:]),
+			"fork_digest", hex.EncodeToString(forkDigest[:]))
+	} else {
+		// For known networks, calculate from config
+		currentSlot := slots.Since(genesisTime)
+		currentEpoch := slots.ToEpoch(currentSlot)
 
-	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, config.Beacon)
-	if err != nil {
-		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
-	}
+		var err error
+		currentForkVersion, err = eth.GetCurrentForkVersion(currentEpoch, config.Beacon)
+		if err != nil {
+			return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
+		}
 
-	forkDigest, err := signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
-	if err != nil {
-		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
+		slog.Debug("Computing fork digest",
+			"current_epoch", currentEpoch,
+			"fork_version", hex.EncodeToString(currentForkVersion[:]),
+			"genesis_root", hex.EncodeToString(genesisRoot))
+
+		forkDigest, err = signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
+		if err != nil {
+			return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
+		}
 	}
 
 	// Overriding configuration so that functions like ComputForkDigest take the
