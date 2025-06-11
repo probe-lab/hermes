@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -297,6 +298,22 @@ func (p *PrysmClient) ChainHead(ctx context.Context) (chainHead *eth.ChainHead, 
 	return p.beaconClient.GetChainHead(ctx, &emptypb.Empty{}) //lint:ignore SA1019 I don't see an alternative
 }
 
+func (p *PrysmClient) GetFork(ctx context.Context) (fork *eth.Fork, err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.get_fork")
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	return p.beaconApiClient.GetFork(ctx, apiCli.StateOrBlockId("head"))
+}
+
 func (p *PrysmClient) Identity(ctx context.Context) (addrInfo *peer.AddrInfo, err error) {
 	ctx, span := p.tracer.Start(ctx, "prysm_client.identity")
 	defer func() {
@@ -383,6 +400,13 @@ func (p *PrysmClient) isOnNetwork(ctx context.Context, hermesForkDigest [4]byte)
 	if forkDigest == hermesForkDigest {
 		return true, nil
 	}
+	
+	// Log the mismatch for debugging
+	slog.Debug("Fork digest mismatch", 
+		"hermes_fork_digest", hex.EncodeToString(hermesForkDigest[:]),
+		"prysm_fork_digest", hex.EncodeToString(forkDigest[:]),
+		"prysm_fork_version", hex.EncodeToString(nodeFork.CurrentVersion))
+	
 	return false, nil
 }
 
