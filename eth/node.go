@@ -139,7 +139,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	// initialize libp2p host
-	opts, err := cfg.libp2pOptions()
+	opts, gater, err := cfg.buildLibp2pOptionsWithGater()
 	if err != nil {
 		return nil, fmt.Errorf("build libp2p options: %w", err)
 	}
@@ -149,6 +149,20 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
+
+	// Initialize peer filter if enabled
+	if gater != nil && cfg.PeerFilter.Mode != FilterModeDisabled {
+		peerFilter, err := NewPeerFilter(h, cfg.PeerFilter, slog.Default())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create peer filter: %w", err)
+		}
+
+		// Replace deferred gater with actual peer filter
+		gater.SetActual(peerFilter)
+		slog.Info("Peer filtering enabled",
+			"mode", cfg.PeerFilter.Mode,
+			"patterns", cfg.PeerFilter.Patterns)
+	}
 
 	// initialize ethereum node
 	privKey, err := cfg.ECDSAPrivateKey()
