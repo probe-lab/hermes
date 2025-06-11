@@ -147,11 +147,18 @@ func TestPeerFilter_CheckAgent(t *testing.T) {
 		},
 		// Empty agent tests
 		{
-			name:     "empty agent always allowed",
+			name:     "empty agent allowed in denylist mode",
+			mode:     FilterModeDenylist,
+			patterns: []string{"^hermes.*"},
+			agent:    "",
+			expected: true,
+		},
+		{
+			name:     "empty agent blocked in allowlist mode",
 			mode:     FilterModeAllowlist,
 			patterns: []string{"^prysm.*"},
 			agent:    "",
-			expected: true,
+			expected: false,
 		},
 		// Complex regex patterns
 		{

@@ -186,8 +186,17 @@ func (pf *PeerFilter) getAgentVersion(p peer.ID) string {
 // checkAgent checks if an agent string passes the filter rules
 func (pf *PeerFilter) checkAgent(agent string, direction string, stage string) bool {
 	if agent == "" {
-		// Allow peers without agent strings by default
-		return true
+		// Handle peers without agent strings based on filter mode
+		switch pf.mode {
+		case FilterModeDenylist:
+			// In denylist mode, allow peers without agent strings (can't be denied if no agent)
+			return true
+		case FilterModeAllowlist:
+			// In allowlist mode, block peers without agent strings (must match pattern to be allowed)
+			return false
+		default:
+			return true
+		}
 	}
 
 	matched := false
