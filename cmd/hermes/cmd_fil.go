@@ -71,7 +71,7 @@ var cmdFilFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "libp2p.port",
 		EnvVars:     []string{"HERMES_FIL_LIBP2P_PORT"},
-		Usage:       "On which port should libp2p (disv5) listen",
+		Usage:       "On which port should libp2p listen",
 		Value:       filConfig.Libp2pPort,
 		Destination: &filConfig.Libp2pPort,
 		DefaultText: "random",

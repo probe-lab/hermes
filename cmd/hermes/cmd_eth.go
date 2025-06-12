@@ -158,7 +158,7 @@ var cmdEthFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "devp2p.port",
 		EnvVars:     []string{"HERMES_ETH_DEVP2P_PORT"},
-		Usage:       "On which port should devp2p (disv5) listen",
+		Usage:       "On which port should devp2p (discv5) listen",
 		Value:       ethConfig.Devp2pPort,
 		Destination: &ethConfig.Devp2pPort,
 		DefaultText: "random",
@@ -173,7 +173,7 @@ var cmdEthFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "libp2p.port",
 		EnvVars:     []string{"HERMES_ETH_LIBP2P_PORT"},
-		Usage:       "On which port should libp2p (disv5) listen",
+		Usage:       "On which port should libp2p (discv5) listen",
 		Value:       ethConfig.Libp2pPort,
 		Destination: &ethConfig.Libp2pPort,
 		DefaultText: "random",
