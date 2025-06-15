@@ -257,13 +257,13 @@ func (p *PubSub) handleF3Granite(ctx context.Context, msg *pubsub.Message) error
 }
 
 func (p *PubSub) validateF3ChainExchange(ctx context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
-	var cmsg chainexchange.Message
 	zstd, err := NewZSTD[*chainexchange.Message]()
 	if err != nil {
 		slog.Warn("new zstd cbor decoder for *chainexchange.Message failed: ", tele.LogAttrError(err))
 		return pubsub.ValidationIgnore
 	}
 
+	var cmsg chainexchange.Message
 	if err := zstd.Decode(msg.Data, &cmsg); err != nil {
 		return pubsub.ValidationReject
 	}

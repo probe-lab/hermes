@@ -21,6 +21,7 @@ var filConfig = &struct {
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+	PubSubValidateQueueSize     int
 	LookupInterval              time.Duration
 	Network                     string
 	DialTimeout                 time.Duration
@@ -30,6 +31,7 @@ var filConfig = &struct {
 	Libp2pHost:                  "127.0.0.1",
 	Libp2pPort:                  0,
 	Libp2pPeerscoreSnapshotFreq: 15 * time.Second,
+	PubSubValidateQueueSize:     4096,
 	LookupInterval:              time.Minute,
 	Network:                     "mainnet",
 	DialTimeout:                 5 * time.Second,
@@ -91,6 +93,13 @@ var cmdFilFlags = []cli.Flag{
 		Destination: &filConfig.Libp2pPeerscoreSnapshotFreq,
 		DefaultText: "random",
 	},
+	&cli.IntFlag{
+		Name:        "pubsub.validateQueueSize",
+		EnvVars:     []string{"HERMES_FIL_PUBSUB_VALIDATE_QUEUE_SIZE"},
+		Usage:       "The queue size of the gossipsub validation queue",
+		Value:       filConfig.PubSubValidateQueueSize,
+		Destination: &filConfig.PubSubValidateQueueSize,
+	},
 	&cli.DurationFlag{
 		Name:        "lookup.interval",
 		EnvVars:     []string{"HERMES_FIL_LOOKUP_INTERVAL"},
@@ -149,6 +158,7 @@ func cmdFilAction(c *cli.Context) error {
 		Libp2pPeerscoreSnapshotFreq: filConfig.Libp2pPeerscoreSnapshotFreq,
 		LookupInterval:              filConfig.LookupInterval,
 		TopicConfigs:                topicConfigs(),
+		PubSubValidateQueueSize:     filConfig.PubSubValidateQueueSize,
 		Bootstrappers:               bootstrappers,
 		DataStreamType:              host.DataStreamtypeFromStr(rootConfig.DataStreamType),
 		AWSConfig:                   rootConfig.awsConfig,
