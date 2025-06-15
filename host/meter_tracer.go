@@ -186,7 +186,10 @@ func (m *meterTracer) DeliverMessage(msg *pubsub.Message) {
 
 // RejectMessage .
 func (m *meterTracer) RejectMessage(msg *pubsub.Message, reason string) {
-	m.rejectMsgCounter.Add(context.TODO(), 1, metric.WithAttributes(attribute.String("topic", msg.GetTopic())))
+	m.rejectMsgCounter.Add(context.TODO(), 1,
+		metric.WithAttributes(attribute.String("topic", msg.GetTopic())),
+		metric.WithAttributes(attribute.String("reason", reason)), // there are eleven unique reasons
+	)
 }
 
 // DuplicateMessage .
