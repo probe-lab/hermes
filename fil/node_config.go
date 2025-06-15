@@ -41,6 +41,9 @@ type NodeConfig struct {
 	// Topic configurations to subscribe to
 	TopicConfigs map[string]*TopicConfig
 
+	// The size of the validate queue
+	PubSubValidateQueueSize int
+
 	// The address information of the local libp2p host
 	Libp2pHost                  string
 	Libp2pPort                  int
@@ -223,7 +226,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		}),
 		pubsub.WithPeerExchange(true),
 		pubsub.WithSubscriptionFilter(subFilter),
-		pubsub.WithValidateQueueSize(2048), // default is 32
+		pubsub.WithValidateQueueSize(n.PubSubValidateQueueSize), // default is 32
 		pubsub.WithPeerScore(
 			&pubsub.PeerScoreParams{
 				AppSpecificScore:            func(p peer.ID) float64 { return 0 },
