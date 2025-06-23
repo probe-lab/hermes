@@ -40,33 +40,6 @@ func pubsubMsgIdHashData(m *pubsub_pb.Message) string {
 	return string(hash[:])
 }
 
-// Generate a pubsub ID from the message topic + sender + data.
-func pubsubMsgIdHashDataAndSender(m *pubsub_pb.Message) string {
-	hasher, err := blake2b.New256(nil)
-	if err != nil {
-		panic("failed to construct hasher")
-	}
-
-	topic := []byte(m.GetTopic())
-	if err := binary.Write(hasher, binary.BigEndian, uint32(len(topic))); err != nil {
-		panic(err)
-	}
-	if _, err := hasher.Write(topic); err != nil {
-		panic(err)
-	}
-	if err := binary.Write(hasher, binary.BigEndian, uint32(len(m.From))); err != nil {
-		panic(err)
-	}
-	if _, err := hasher.Write(m.From); err != nil {
-		panic(err)
-	}
-	if _, err := hasher.Write(m.Data); err != nil {
-		panic(err)
-	}
-	hash := hasher.Sum(nil)
-	return string(hash[:])
-}
-
 // Borrowed from lotus
 var PubsubTopicScoreParams = &pubsub.TopicScoreParams{
 	// expected > 400 msgs/second on average.
@@ -74,7 +47,6 @@ var PubsubTopicScoreParams = &pubsub.TopicScoreParams{
 	TopicWeight: 0.1, // max cap is 5, single invalid message is -100
 
 	// 1 tick per second, maxes at 1 hour
-	// XXX
 	TimeInMeshWeight:  0.0002778, // ~1/3600
 	TimeInMeshQuantum: time.Second,
 	TimeInMeshCap:     1,
