@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	ethtypes "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/probe-lab/hermes/host"
 	ssz "github.com/prysmaticlabs/fastssz"
-	ethtypes "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 )
 
 // KinesisOutput is a renderer for Kinesis output.
@@ -66,6 +66,7 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderContributionAndProof(msg, d)
 	case *ethtypes.VoluntaryExit:
 		payload, err = k.renderVoluntaryExit(msg, d)
+	//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 	case *ethtypes.SyncCommitteeMessage:
 		payload, err = k.renderSyncCommitteeMessage(msg, d)
 	case *ethtypes.BLSToExecutionChange:
@@ -364,7 +365,7 @@ func (k *KinesisOutput) renderVoluntaryExit(
 
 func (k *KinesisOutput) renderSyncCommitteeMessage(
 	msg *pubsub.Message,
-	sc *ethtypes.SyncCommitteeMessage,
+	sc *ethtypes.SyncCommitteeMessage, //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 ) (map[string]any, error) {
 	return map[string]any{
 		"PeerID":    msg.ReceivedFrom,

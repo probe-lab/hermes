@@ -20,6 +20,8 @@ network.
   - [Deployment](#deployment)
     - [General](#general)
     - [Ethereum](#ethereum)
+      - [Subnet Configuration](#subnet-configuration)
+      - [Topic Subscription](#topic-subscription)
   - [Telemetry](#telemetry)
     - [Metrics](#metrics)
     - [Tracing](#tracing)
@@ -132,10 +134,11 @@ There are different ways of keeping track of the events that Hermes generates:
 
 > It's important to note that the events **will not** be strictly ordered. They will only follow a lose ordering. The reasons are 1) potential retries of event submissions and 2) [record aggregation](https://docs.aws.amazon.com/streams/latest/dev/kinesis-kpl-concepts.html#kinesis-kpl-concepts-aggretation). Depending on the configured number of submission retries the events should be ordered within each 30s time window.
 - [S3](https://aws.amazon.com/s3/). Hermes will batch the traces, format them into a parquet file, and submit them to the given S3 Bucket. These are the flags that should be provided:
-    - `--data.stream.type="s3"` 
+    - `--data.stream.type="s3"`
     - `--s3.region="us-east-1"` # just an example
     - `--s3.endpoint=""` # only for local testing
     - `--s3.bucket=$YOUR_S3_BUCKET_KEY`
+    - `--s3.tag="hermes"` # preferred bucket key used to reference the traces
     - `--s3.byte.limit=1269760` # 10MB is the default
     - `--s3.flushers=2` # 2 is the default
     - `--s3.flush.interval="2s"` # 2s is the default
@@ -143,10 +146,10 @@ There are different ways of keeping track of the events that Hermes generates:
     - `--aws.secret.key=$YOUR_AWS_SECRET_KEY` # only necessary for private buckets
 
 
-- `Code Callbacks`. Hermes will execute the given callback fucntions whenever an event is traced. 
-    - `--data.stream.type="callback"` 
+- `Code Callbacks`. Hermes will execute the given callback functions whenever an event is traced.
+    - `--data.stream.type="callback"`
 - `Logger`. Hermes will print the JSON formatted traces into `stdout` in a log format (ideal for local testing).
-    - `--data.strea.type="logger"` 
+    - `--data.strea.type="logger"`
 
 _Note: we provide a local s3 setup to use if needed. The configuration of the `localstack s3` instance can be tunned using a copy (`.env`) of the `.env.template` file, which will be read by default when doing `docker compose up s3`. Make sure that the docker container is up running when launching the `hermes` instance._
 
@@ -228,11 +231,32 @@ For each topic that supports subnets, you can use one of these configuration str
    }
    ```
 
-This configuration allows you to set up multiple Hermes instances that monitor different parts of the network, or to focus monitoring on specific subnets of interest.
+#### Topic Subscription
+
+In addition to subnet configuration, Hermes allows you to specify exactly which topics to subscribe to using the `--subscription.topics` flag. This gives you fine-grained control over which message types Hermes will monitor.
+
+By default, Hermes subscribes to all standard topics:
+- Block messages
+- Aggregate and proof messages
+- Attestation messages
+- Attester slashing messages
+- Proposer slashing messages
+- Contribution and proof messages
+- Sync committee messages
+- BLS to execution change messages
+- Blob sidecar messages
+
+To subscribe to only specific topics, use the `--subscription.topics` flag with a comma-separated list:
+
+```shell
+hermes eth --subscription.topics="beacon_attestation,beacon_block"
+```
+
+This configuration allows you to set up multiple Hermes instances that monitor different parts of the network, or to focus monitoring on specific subnets and topics of interest.
 
 To run Hermes for the Ethereum network you would need to point it to the beacon node by providing the
 
-- `--local.trusted.address=true` # when the Prysm node is running in the same machine (localhost) 
+- `--local.trusted.address=true` # when the Prysm node is running in the same machine (localhost)
 - `--prysm.host=1.2.3.4`
 - `--prysm.port.http=3500` # 3500 is the default
 - `--prysm.port.grpc=4000` # 4000 is the default
@@ -281,6 +305,7 @@ OPTIONS:
    --config.yaml.url value                                                        The .yaml URL from which to fetch the beacon chain config, requires 'chain=devnet' [$HERMES_ETH_CONFIG_URL]
    --bootnodes.yaml.url value                                                     The .yaml URL from which to fetch the bootnode ENRs, requires 'chain=devnet' [$HERMES_ETH_BOOTNODES_URL]
    --deposit-contract-block.txt.url value                                         The .txt URL from which to fetch the deposit contract block. Requires 'chain=devnet' [$HERMES_ETH_DEPOSIT_CONTRACT_BLOCK_URL]
+   --subscription.topics value [ --subscription.topics value ]                    Comma-separated list of topics to subscribe to (e.g. beacon_attestation,beacon_block) [$HERMES_ETH_SUBSCRIPTION_TOPICS]
    --subnet.attestation.type value                                                Subnet selection strategy for attestation topics (all, static, random, static_range) (default: "all") [$HERMES_ETH_SUBNET_ATTESTATION_TYPE]
    --subnet.attestation.subnets value [ --subnet.attestation.subnets value ]      Comma-separated list of subnet IDs for attestation when type=static [$HERMES_ETH_SUBNET_ATTESTATION_SUBNETS]
    --subnet.attestation.count value                                               Number of random attestation subnets to select when type=random (default: 0) [$HERMES_ETH_SUBNET_ATTESTATION_COUNT]
@@ -328,7 +353,7 @@ Run Hermes with the `--tracing` flag. To change the address of the trace collect
 Hermes jumps to the web3/blockchain/libp2p ecosystem despite a large variety of tools around it, such as the many existing network crawlers or light clients for most mature networks. Although at first sight it might look like a competitor to those, there was still a large incentive to develop it. Here, we describe the gap that Hermes fills as well as the use-cases that it is suitable for.
 Hermes was designed to behave as a light node in each supported network, where, in addition to being an honest participant in the network and supporting all the protocols and RPC endpoints, it also allows streaming of custom internal events (mostly libp2p-related).
 
-Hermes avoids being based on a custom fork of existing full/light clients, which would come with non-negligible maintenance baggage and would complicate having control of events.    
+Hermes avoids being based on a custom fork of existing full/light clients, which would come with non-negligible maintenance baggage and would complicate having control of events.
 
 Currently available similar tools:
 

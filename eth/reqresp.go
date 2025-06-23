@@ -14,6 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/types"
+	psync "github.com/OffchainLabs/prysm/v6/beacon-chain/sync"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/blocks"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/interfaces"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
+	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/libp2p/go-libp2p/core"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -21,14 +29,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	psync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -69,6 +69,7 @@ type ReqResp struct {
 	// metrics
 	meterRequestCounter metric.Int64Counter
 	latencyHistogram    metric.Float64Histogram
+	goodbyeCounter      metric.Int64Counter
 }
 
 type ContextStreamHandler func(context.Context, network.Stream) (map[string]any, error)
@@ -108,6 +109,14 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new request_latency histogram: %w", err)
+	}
+
+	p.goodbyeCounter, err = cfg.Meter.Int64Counter(
+		"goodbye_messages",
+		metric.WithDescription("Counter for goodbye messages received"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("new goodbye_messages counter: %w", err)
 	}
 
 	return p, nil
@@ -228,7 +237,7 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 		agentVersion := "n.a."
 		if err == nil {
 			if av, ok := rawVal.(string); ok {
-				agentVersion = av
+				agentVersion = normalizeAgentVersion(av)
 			}
 		}
 
@@ -324,6 +333,32 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 	msg, found := types.GoodbyeCodeMessages[req]
 	if found {
 		if _, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), peerstoreKeyIsHandshaked); err == nil {
+			var (
+				agentVersion = "unknown"
+				reason       = "unknown"
+			)
+
+			// Get agent version (client) for the peer.
+			rawVal, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), "AgentVersion")
+			if err == nil {
+				if av, ok := rawVal.(string); ok {
+					agentVersion = normalizeAgentVersion(av)
+				}
+			}
+
+			// This will be one of GoodbyeCodeMessages.
+			if found {
+				reason = msg
+			}
+
+			r.goodbyeCounter.Add(ctx, 1, metric.WithAttributes(
+				[]attribute.KeyValue{
+					attribute.Int64("code", int64(req)),
+					attribute.String("reason", reason),
+					attribute.String("agent", agentVersion),
+				}...,
+			))
+
 			slog.Info("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
 		} else {
 			slog.Debug("Received goodbye message", tele.LogAttrPeerID(stream.Conn().RemotePeer()), "msg", msg)
@@ -1079,4 +1114,31 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
 		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)
 	}
+}
+
+// normalizeAgentVersion extracts the client name from the agent version string
+// to reduce metric cardinality.
+func normalizeAgentVersion(agentVersion string) string {
+	// List of known consensus layer clients
+	knownClients := []string{
+		"prysm", "lighthouse", "nimbus", "lodestar", "grandine", "teku", "erigon", "caplin",
+	}
+
+	// Convert to lowercase for case-insensitive matching.
+	lowerAgent := strings.ToLower(agentVersion)
+
+	// Try to match against known clients.
+	for _, client := range knownClients {
+		if strings.Contains(lowerAgent, client) {
+			return client
+		}
+	}
+
+	// Extract first part before slash if present.
+	parts := strings.Split(lowerAgent, "/")
+	if len(parts) > 0 && parts[0] != "" {
+		return parts[0]
+	}
+
+	return "unknown"
 }

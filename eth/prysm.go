@@ -13,14 +13,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/api/client"
+	apiCli "github.com/OffchainLabs/prysm/v6/api/client/beacon"
+	"github.com/OffchainLabs/prysm/v6/api/server/structs"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
+	"github.com/OffchainLabs/prysm/v6/network/httputil"
+	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/prysm/v5/api/client"
-	apiCli "github.com/prysmaticlabs/prysm/v5/api/client/beacon"
-	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/network/httputil"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -280,6 +280,7 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 	return nil
 }
 
+//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 func (p *PrysmClient) ChainHead(ctx context.Context) (chainHead *eth.ChainHead, err error) {
 	ctx, span := p.tracer.Start(ctx, "prysm_client.chain_head")
 	defer func() {
@@ -309,6 +310,7 @@ func (p *PrysmClient) Identity(ctx context.Context) (addrInfo *peer.AddrInfo, er
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
+	//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 	hostData, err := p.nodeClient.GetHost(ctx, &emptypb.Empty{})
 	if err != nil {
 		return nil, err
@@ -346,6 +348,8 @@ func (p *PrysmClient) getActiveValidatorCount(ctx context.Context) (activeVals u
 		}
 		span.End()
 	}()
+
+	//lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
 	actVals, err := p.beaconClient.ListValidators(ctx, &eth.ListValidatorsRequest{Active: true})
 	if err != nil {
 		return 0, err

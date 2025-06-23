@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/metric/noop"
@@ -76,9 +76,10 @@ func TestNodeConfig_ValidateSubnetConfigs(t *testing.T) {
 func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 	ssz := encoder.SszNetworkEncoder{}
 	tests := []struct {
-		name           string
-		subnetConfigs  map[string]*SubnetConfig
-		wantTopicsFunc func(t *testing.T, topics []string)
+		name               string
+		subnetConfigs      map[string]*SubnetConfig
+		subscriptionTopics []string
+		wantTopicsFunc     func(t *testing.T, topics []string)
 	}{
 		{
 			name: "static subnet config",
@@ -141,12 +142,52 @@ func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 				)
 			},
 		},
+		{
+			name: "custom subscription topics",
+			subscriptionTopics: []string{
+				p2p.GossipBlockMessage,
+				p2p.GossipAttestationMessage,
+			},
+			subnetConfigs: map[string]*SubnetConfig{
+				p2p.GossipAttestationMessage: {
+					Type:    SubnetStatic,
+					Subnets: []uint64{1, 2},
+				},
+			},
+			wantTopicsFunc: func(t *testing.T, topics []string) {
+				// Check that we only have topics for the specified subscription topics
+				blockTopicFormat, err := topicFormatFromBase(p2p.GossipBlockMessage)
+				require.NoError(t, err)
+				blockTopic := fmt.Sprintf(blockTopicFormat, [4]byte{1, 2, 3, 4}) + ssz.ProtocolSuffix()
+
+				attTopicFormat, err := topicFormatFromBase(p2p.GossipAttestationMessage)
+				require.NoError(t, err)
+
+				// Check that block topic is included
+				assert.Contains(t, topics, blockTopic, "Block topic not found in result")
+
+				// Check that attestation subnet topics are included
+				for _, subnet := range []uint64{1, 2} {
+					subnetTopic := formatSubnetTopic(attTopicFormat, subnet, ssz)
+					assert.Contains(t, topics, subnetTopic, "Expected subnet topic not found in result")
+				}
+
+				// Check that we don't have any other base topics
+				// For example, we shouldn't have aggregate and proof messages
+				aggAndProofTopicFormat, err := topicFormatFromBase(p2p.GossipAggregateAndProofMessage)
+				require.NoError(t, err)
+				aggAndProofTopic := fmt.Sprintf(aggAndProofTopicFormat, [4]byte{1, 2, 3, 4}) + ssz.ProtocolSuffix()
+
+				assert.NotContains(t, topics, aggAndProofTopic, "Unexpected topic found in result")
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := setupTestNodeConfig()
 			cfg.SubnetConfigs = tt.subnetConfigs
+			cfg.SubscriptionTopics = tt.subscriptionTopics
 
 			topics := cfg.getDesiredFullTopics(ssz)
 			tt.wantTopicsFunc(t, topics)

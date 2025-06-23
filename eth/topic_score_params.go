@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/probe-lab/hermes/tele"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
 )
 
 // check Prysm implementation as reference: https://github.com/prysmaticlabs/prysm/blob/develop/beacon-chain/p2p/gossip_scoring_params.go#L63
