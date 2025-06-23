@@ -481,7 +481,7 @@ func TestParquetFormating(t *testing.T) {
 						requireSentMsgEvent(t, e)
 
 					case *GossipPeerExchangeEvent:
-						requireBaseEvent(t, EventTypeSentMsg, e.BaseEvent)
+						requireBaseEvent(t, EventTypeGossipPx, e.BaseEvent)
 						direction, err := directionFromRPC(test.rawEvent.Type)
 						require.NoError(t, err)
 						requireBaseRPCEvent(t, direction, false, e.BaseRPCEvent)
