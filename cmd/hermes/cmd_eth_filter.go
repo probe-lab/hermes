@@ -94,3 +94,4 @@ type mockAgentProvider struct {
 func (m *mockAgentProvider) AgentVersion(pid peer.ID) string {
 	return m.agent
 }
+

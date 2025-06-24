@@ -158,10 +158,10 @@ func TestPeerFilter_CheckAgent(t *testing.T) {
 				Mode:     tt.mode,
 				Patterns: tt.patterns,
 			}
-			
+
 			pf, err := NewPeerFilter(mockH, config, logger)
 			require.NoError(t, err)
-			
+
 			result := pf.CheckAgent(tt.agent)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -171,7 +171,7 @@ func TestPeerFilter_CheckAgent(t *testing.T) {
 func TestPeerFilter_InterceptPeerDial(t *testing.T) {
 	logger := slog.Default()
 	pid := test.RandPeerIDFatal(t)
-	
+
 	tests := []struct {
 		name     string
 		mode     FilterMode
@@ -209,15 +209,15 @@ func TestPeerFilter_InterceptPeerDial(t *testing.T) {
 					pid: tt.agent,
 				},
 			}
-			
+
 			config := FilterConfig{
 				Mode:     tt.mode,
 				Patterns: tt.patterns,
 			}
-			
+
 			pf, err := NewPeerFilter(mockH, config, logger)
 			require.NoError(t, err)
-			
+
 			result := pf.InterceptPeerDial(pid)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -237,7 +237,7 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 	logger := slog.Default()
 	pid := test.RandPeerIDFatal(t)
 	maddr, _ := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/1234")
-	
+
 	tests := []struct {
 		name      string
 		mode      FilterMode
@@ -287,22 +287,23 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 					pid: tt.agent,
 				},
 			}
-			
+
 			config := FilterConfig{
 				Mode:     tt.mode,
 				Patterns: tt.patterns,
 			}
-			
+
 			pf, err := NewPeerFilter(mockH, config, logger)
 			require.NoError(t, err)
-			
+
 			connMultiaddrs := &mockConnMultiaddrs{
 				local:  maddr,
 				remote: maddr,
 			}
-			
+
 			result := pf.InterceptSecured(tt.direction, pid, connMultiaddrs)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
+

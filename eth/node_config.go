@@ -236,7 +236,6 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("meter must not be nil")
 	}
 
-
 	return nil
 }
 
@@ -552,4 +551,3 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	}
 	return topicScores
 }
-
