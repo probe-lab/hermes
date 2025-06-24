@@ -151,8 +151,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
 
 	// Initialize peer filter if enabled
-	if gater != nil && cfg.PeerFilter.Mode != FilterModeDisabled {
-		peerFilter, err := NewPeerFilter(h, cfg.PeerFilter, slog.Default())
+	if gater != nil && cfg.PeerFilter.Mode != host.FilterModeDisabled {
+		peerFilter, err := host.NewPeerFilter(h, cfg.PeerFilter, slog.Default())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create peer filter: %w", err)
 		}

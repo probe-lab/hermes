@@ -7,7 +7,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/urfave/cli/v2"
 
-	"github.com/probe-lab/hermes/eth"
+	"github.com/probe-lab/hermes/host"
 )
 
 var cmdEthFilterTest = &cli.Command{
@@ -39,19 +39,19 @@ Examples:
 		}
 
 		agentString := c.Args().Get(0)
-		mode := eth.FilterMode(c.String("filter.mode"))
+		mode := host.FilterMode(c.String("filter.mode"))
 		patterns := c.StringSlice("filter.patterns")
 
 		// Validate mode
 		switch mode {
-		case eth.FilterModeDisabled, eth.FilterModeDenylist, eth.FilterModeAllowlist:
+		case host.FilterModeDisabled, host.FilterModeDenylist, host.FilterModeAllowlist:
 			// Valid modes
 		default:
 			return fmt.Errorf("invalid filter mode: %s", mode)
 		}
 
 		// Create filter config
-		config := eth.FilterConfig{
+		config := host.FilterConfig{
 			Mode:     mode,
 			Patterns: patterns,
 		}
@@ -65,7 +65,7 @@ Examples:
 		mockProvider := &mockAgentProvider{agent: agentString}
 
 		// Create peer filter
-		filter, err := eth.NewPeerFilter(mockProvider, config, slog.Default())
+		filter, err := host.NewPeerFilter(mockProvider, config, slog.Default())
 		if err != nil {
 			return fmt.Errorf("failed to create peer filter: %w", err)
 		}
@@ -86,7 +86,7 @@ Examples:
 	},
 }
 
-// mockAgentProvider implements eth.AgentVersionProvider for testing
+// mockAgentProvider implements host.AgentVersionProvider for testing
 type mockAgentProvider struct {
 	agent string
 }

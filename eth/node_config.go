@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"math"
 	"net"
-	"regexp"
 	"strings"
 	"time"
 
@@ -116,7 +115,7 @@ type NodeConfig struct {
 	Meter  metric.Meter
 
 	// PeerFilter configuration for filtering peers based on agent strings
-	PeerFilter FilterConfig
+	PeerFilter host.FilterConfig
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
@@ -357,7 +356,7 @@ func (n *NodeConfig) buildLibp2pOptionsWithGater() ([]libp2p.Option, *deferredGa
 
 	// Add ConnectionGater if filtering is enabled
 	var gater *deferredGater
-	if n.PeerFilter.Mode != FilterModeDisabled {
+	if n.PeerFilter.Mode != host.FilterModeDisabled {
 		// We use a deferred gater that will be replaced after host creation
 		// This is necessary because we need the host to get agent versions
 		gater = newDeferredGater()
@@ -572,35 +571,10 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	return topicScores
 }
 
-// FilterConfig defines the configuration for peer filtering based on agent strings
-type FilterConfig struct {
-	Mode     FilterMode `yaml:"mode" default:"disabled"`
-	Patterns []string   `yaml:"patterns"`
-}
-
-// Validate validates the filter configuration
-func (fc *FilterConfig) Validate() error {
-	switch fc.Mode {
-	case FilterModeDisabled, FilterModeDenylist, FilterModeAllowlist:
-		// Valid modes
-	default:
-		return fmt.Errorf("invalid filter mode: %s", fc.Mode)
-	}
-
-	// Validate regex patterns
-	for _, pattern := range fc.Patterns {
-		if _, err := regexp.Compile(pattern); err != nil {
-			return fmt.Errorf("invalid regex pattern %q: %w", pattern, err)
-		}
-	}
-
-	return nil
-}
-
 // DefaultFilterConfig returns a default filter configuration
-func DefaultFilterConfig() FilterConfig {
-	return FilterConfig{
-		Mode: FilterModeDisabled,
+func DefaultFilterConfig() host.FilterConfig {
+	return host.FilterConfig{
+		Mode: host.FilterModeDisabled,
 		Patterns: []string{
 			// Default patterns to prevent self-peering
 			"^hermes.*",

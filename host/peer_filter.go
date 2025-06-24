@@ -1,4 +1,4 @@
-package eth
+package host
 
 import (
 	"fmt"
@@ -38,6 +38,31 @@ var (
 
 func init() {
 	prometheus.MustRegister(filteredConnectionsTotal)
+}
+
+// FilterConfig holds configuration for peer filtering
+type FilterConfig struct {
+	Mode     FilterMode `yaml:"mode" default:"disabled"`
+	Patterns []string   `yaml:"patterns"`
+}
+
+// Validate validates the filter configuration
+func (fc *FilterConfig) Validate() error {
+	switch fc.Mode {
+	case FilterModeDisabled, FilterModeDenylist, FilterModeAllowlist:
+		// Valid modes
+	default:
+		return fmt.Errorf("invalid filter mode: %s", fc.Mode)
+	}
+
+	// Validate patterns can be compiled
+	for _, pattern := range fc.Patterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid filter pattern %q: %w", pattern, err)
+		}
+	}
+
+	return nil
 }
 
 // AgentVersionProvider is an interface for getting agent versions

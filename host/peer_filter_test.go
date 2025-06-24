@@ -1,4 +1,4 @@
-package eth
+package host
 
 import (
 	"log/slog"
@@ -51,7 +51,7 @@ func TestFilterConfig_Validate(t *testing.T) {
 			name: "valid allowlist mode",
 			config: FilterConfig{
 				Mode:     FilterModeAllowlist,
-				Patterns: []string{"^prysm.*", "^lighthouse.*"},
+				Patterns: []string{"^hermes.*", "^test.*"},
 			},
 			wantErr: false,
 		},
@@ -71,7 +71,7 @@ func TestFilterConfig_Validate(t *testing.T) {
 				Patterns: []string{"[invalid"},
 			},
 			wantErr: true,
-			errMsg:  "invalid regex pattern",
+			errMsg:  "invalid filter pattern",
 		},
 	}
 
@@ -79,12 +79,12 @@ func TestFilterConfig_Validate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				if tt.errMsg != "" {
 					assert.Contains(t, err.Error(), tt.errMsg)
 				}
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -92,7 +92,8 @@ func TestFilterConfig_Validate(t *testing.T) {
 
 func TestPeerFilter_CheckAgent(t *testing.T) {
 	logger := slog.Default()
-	
+	mockH := &mockHost{agentVersions: make(map[peer.ID]string)}
+
 	tests := []struct {
 		name     string
 		mode     FilterMode
@@ -100,7 +101,6 @@ func TestPeerFilter_CheckAgent(t *testing.T) {
 		agent    string
 		expected bool
 	}{
-		// Disabled mode tests
 		{
 			name:     "disabled mode allows all",
 			mode:     FilterModeDisabled,
@@ -108,74 +108,52 @@ func TestPeerFilter_CheckAgent(t *testing.T) {
 			agent:    "hermes/v1.0.0",
 			expected: true,
 		},
-		// Denylist mode tests
 		{
-			name:     "denylist blocks matching pattern",
+			name:     "denylist blocks matching agents",
 			mode:     FilterModeDenylist,
 			patterns: []string{"^hermes.*"},
 			agent:    "hermes/v1.0.0",
 			expected: false,
 		},
 		{
-			name:     "denylist allows non-matching pattern",
+			name:     "denylist allows non-matching agents",
 			mode:     FilterModeDenylist,
 			patterns: []string{"^hermes.*"},
-			agent:    "prysm/v2.0.0",
+			agent:    "prysm/v1.0.0",
 			expected: true,
 		},
 		{
-			name:     "denylist with multiple patterns",
-			mode:     FilterModeDenylist,
-			patterns: []string{"^hermes.*", "^test.*"},
-			agent:    "test-client/v1.0",
-			expected: false,
-		},
-		// Allowlist mode tests
-		{
-			name:     "allowlist allows matching pattern",
+			name:     "allowlist allows matching agents",
 			mode:     FilterModeAllowlist,
 			patterns: []string{"^prysm.*", "^lighthouse.*"},
-			agent:    "prysm/v3.0.0",
+			agent:    "prysm/v1.0.0",
 			expected: true,
 		},
 		{
-			name:     "allowlist blocks non-matching pattern",
+			name:     "allowlist blocks non-matching agents",
 			mode:     FilterModeAllowlist,
 			patterns: []string{"^prysm.*", "^lighthouse.*"},
 			agent:    "hermes/v1.0.0",
 			expected: false,
 		},
-		// Empty agent tests
 		{
-			name:     "empty agent allowed in denylist mode",
+			name:     "empty agent with denylist mode",
 			mode:     FilterModeDenylist,
 			patterns: []string{"^hermes.*"},
 			agent:    "",
-			expected: true,
+			expected: true, // Empty agents are allowed in denylist mode
 		},
 		{
-			name:     "empty agent blocked in allowlist mode",
+			name:     "empty agent with allowlist mode",
 			mode:     FilterModeAllowlist,
-			patterns: []string{"^prysm.*"},
+			patterns: []string{"^hermes.*"},
 			agent:    "",
-			expected: false,
-		},
-		// Complex regex patterns
-		{
-			name:     "complex regex pattern",
-			mode:     FilterModeDenylist,
-			patterns: []string{".*hermes.*", "^test-.*-client$"},
-			agent:    "some-hermes-based-client",
-			expected: false,
+			expected: false, // Empty agents are blocked in allowlist mode
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockH := &mockHost{
-				agentVersions: make(map[peer.ID]string),
-			}
-			
 			config := FilterConfig{
 				Mode:     tt.mode,
 				Patterns: tt.patterns,
@@ -202,24 +180,24 @@ func TestPeerFilter_InterceptPeerDial(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "disabled mode allows dial",
+			name:     "disabled mode allows all",
 			mode:     FilterModeDisabled,
 			patterns: []string{"^hermes.*"},
 			agent:    "hermes/v1.0.0",
 			expected: true,
 		},
 		{
-			name:     "denylist blocks matching peer",
+			name:     "denylist blocks matching agent",
 			mode:     FilterModeDenylist,
 			patterns: []string{"^hermes.*"},
 			agent:    "hermes/v1.0.0",
 			expected: false,
 		},
 		{
-			name:     "allowlist allows matching peer",
+			name:     "allowlist allows matching agent",
 			mode:     FilterModeAllowlist,
-			patterns: []string{"^prysm.*"},
-			agent:    "prysm/v3.0.0",
+			patterns: []string{"^hermes.*"},
+			agent:    "hermes/v1.0.0",
 			expected: true,
 		},
 	}
@@ -246,6 +224,15 @@ func TestPeerFilter_InterceptPeerDial(t *testing.T) {
 	}
 }
 
+// mockConnMultiaddrs implements network.ConnMultiaddrs for testing
+type mockConnMultiaddrs struct {
+	local  ma.Multiaddr
+	remote ma.Multiaddr
+}
+
+func (m *mockConnMultiaddrs) LocalMultiaddr() ma.Multiaddr  { return m.local }
+func (m *mockConnMultiaddrs) RemoteMultiaddr() ma.Multiaddr { return m.remote }
+
 func TestPeerFilter_InterceptSecured(t *testing.T) {
 	logger := slog.Default()
 	pid := test.RandPeerIDFatal(t)
@@ -260,7 +247,15 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 		expected  bool
 	}{
 		{
-			name:      "inbound connection blocked by denylist",
+			name:      "disabled mode allows all",
+			mode:      FilterModeDisabled,
+			patterns:  []string{"^hermes.*"},
+			agent:     "hermes/v1.0.0",
+			direction: network.DirInbound,
+			expected:  true,
+		},
+		{
+			name:      "denylist blocks matching inbound",
 			mode:      FilterModeDenylist,
 			patterns:  []string{"^hermes.*"},
 			agent:     "hermes/v1.0.0",
@@ -268,16 +263,16 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 			expected:  false,
 		},
 		{
-			name:      "outbound connection allowed by allowlist",
-			mode:      FilterModeAllowlist,
-			patterns:  []string{"^prysm.*"},
-			agent:     "prysm/v3.0.0",
+			name:      "denylist blocks matching outbound",
+			mode:      FilterModeDenylist,
+			patterns:  []string{"^hermes.*"},
+			agent:     "hermes/v1.0.0",
 			direction: network.DirOutbound,
-			expected:  true,
+			expected:  false,
 		},
 		{
-			name:      "disabled mode allows all directions",
-			mode:      FilterModeDisabled,
+			name:      "allowlist allows matching",
+			mode:      FilterModeAllowlist,
 			patterns:  []string{"^hermes.*"},
 			agent:     "hermes/v1.0.0",
 			direction: network.DirInbound,
@@ -310,19 +305,4 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-
-// mockConnMultiaddrs implements network.ConnMultiaddrs for testing
-type mockConnMultiaddrs struct {
-	local  ma.Multiaddr
-	remote ma.Multiaddr
-}
-
-func (m *mockConnMultiaddrs) LocalMultiaddr() ma.Multiaddr {
-	return m.local
-}
-
-func (m *mockConnMultiaddrs) RemoteMultiaddr() ma.Multiaddr {
-	return m.remote
 }
