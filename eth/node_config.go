@@ -114,8 +114,8 @@ type NodeConfig struct {
 	Tracer trace.Tracer
 	Meter  metric.Meter
 
-	// PeerFilter configuration for filtering peers based on agent strings
-	PeerFilter host.FilterConfig
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
@@ -236,15 +236,6 @@ func (n *NodeConfig) Validate() error {
 		return fmt.Errorf("meter must not be nil")
 	}
 
-	// Set default peer filter configuration if not set
-	if n.PeerFilter.Mode == "" {
-		n.PeerFilter = DefaultFilterConfig()
-	}
-
-	// Validate peer filter configuration
-	if err := n.PeerFilter.Validate(); err != nil {
-		return fmt.Errorf("invalid peer filter config: %w", err)
-	}
 
 	return nil
 }
@@ -347,23 +338,14 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 	return opts, nil
 }
 
-// buildLibp2pOptionsWithGater builds libp2p options and returns the deferred gater if filtering is enabled
-func (n *NodeConfig) buildLibp2pOptionsWithGater() ([]libp2p.Option, *deferredGater, error) {
+// buildLibp2pOptions builds libp2p options for the node
+func (n *NodeConfig) buildLibp2pOptions() ([]libp2p.Option, error) {
 	opts, err := n.libp2pOptions()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// Add ConnectionGater if filtering is enabled
-	var gater *deferredGater
-	if n.PeerFilter.Mode != host.FilterModeDisabled {
-		// We use a deferred gater that will be replaced after host creation
-		// This is necessary because we need the host to get agent versions
-		gater = newDeferredGater()
-		opts = append(opts, libp2p.ConnectionGater(gater))
-	}
-
-	return opts, gater, nil
+	return opts, nil
 }
 
 func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeValidators uint64) []pubsub.Option {
@@ -571,13 +553,3 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	return topicScores
 }
 
-// DefaultFilterConfig returns a default filter configuration
-func DefaultFilterConfig() host.FilterConfig {
-	return host.FilterConfig{
-		Mode: host.FilterModeDisabled,
-		Patterns: []string{
-			// Default patterns to prevent self-peering
-			"^hermes.*",
-		},
-	}
-}

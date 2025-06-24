@@ -1,9 +1,9 @@
-package eth
+package host
 
 import (
 	"sync"
 
-	"github.com/libp2p/go-libp2p/core/connmgr"
+	connmgr "github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -22,11 +22,6 @@ func newDeferredGater() *deferredGater {
 	return &deferredGater{}
 }
 
-// NewDeferredGater creates a new deferred connection gater (exported for testing)
-func NewDeferredGater() *deferredGater {
-	return newDeferredGater()
-}
-
 // SetActual sets the actual connection gater to delegate to
 func (dg *deferredGater) SetActual(gater connmgr.ConnectionGater) {
 	dg.mu.Lock()
@@ -38,48 +33,48 @@ func (dg *deferredGater) SetActual(gater connmgr.ConnectionGater) {
 func (dg *deferredGater) InterceptPeerDial(p peer.ID) bool {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	if dg.actual == nil {
-		return true // Allow by default if no actual gater is set
+	if dg.actual != nil {
+		return dg.actual.InterceptPeerDial(p)
 	}
-	return dg.actual.InterceptPeerDial(p)
+	return true // Allow by default if no actual gater is set
 }
 
 // InterceptAddrDial implements ConnectionGater
 func (dg *deferredGater) InterceptAddrDial(p peer.ID, addr ma.Multiaddr) bool {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	if dg.actual == nil {
-		return true
+	if dg.actual != nil {
+		return dg.actual.InterceptAddrDial(p, addr)
 	}
-	return dg.actual.InterceptAddrDial(p, addr)
+	return true
 }
 
 // InterceptAccept implements ConnectionGater
 func (dg *deferredGater) InterceptAccept(conn network.ConnMultiaddrs) bool {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	if dg.actual == nil {
-		return true
+	if dg.actual != nil {
+		return dg.actual.InterceptAccept(conn)
 	}
-	return dg.actual.InterceptAccept(conn)
+	return true
 }
 
 // InterceptSecured implements ConnectionGater
 func (dg *deferredGater) InterceptSecured(direction network.Direction, p peer.ID, conn network.ConnMultiaddrs) bool {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	if dg.actual == nil {
-		return true
+	if dg.actual != nil {
+		return dg.actual.InterceptSecured(direction, p, conn)
 	}
-	return dg.actual.InterceptSecured(direction, p, conn)
+	return true
 }
 
 // InterceptUpgraded implements ConnectionGater
 func (dg *deferredGater) InterceptUpgraded(conn network.Conn) (bool, control.DisconnectReason) {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	if dg.actual == nil {
-		return true, 0
+	if dg.actual != nil {
+		return dg.actual.InterceptUpgraded(conn)
 	}
-	return dg.actual.InterceptUpgraded(conn)
+	return true, 0
 }

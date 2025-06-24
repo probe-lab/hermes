@@ -498,7 +498,7 @@ func cmdEthAction(c *cli.Context) error {
 		SubscriptionTopics:             ethConfig.SubscriptionTopics,
 		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
 		Meter:                          otel.GetMeterProvider().Meter("hermes"),
-		PeerFilter: host.FilterConfig{
+		PeerFilter: &host.FilterConfig{
 			Mode:     host.FilterMode(ethConfig.FilterMode),
 			Patterns: ethConfig.FilterPatterns,
 		},
