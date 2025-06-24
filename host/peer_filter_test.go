@@ -306,4 +306,3 @@ func TestPeerFilter_InterceptSecured(t *testing.T) {
 		})
 	}
 }
-

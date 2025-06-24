@@ -215,4 +215,3 @@ func (pf *PeerFilter) checkAgent(agent string, direction string, stage string) b
 func (pf *PeerFilter) CheckAgent(agent string) bool {
 	return pf.checkAgent(agent, "test", "test")
 }
-

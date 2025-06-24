@@ -78,4 +78,3 @@ func (dg *deferredGater) InterceptUpgraded(conn network.Conn) (bool, control.Dis
 	}
 	return true, 0
 }
-
