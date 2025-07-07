@@ -113,6 +113,9 @@ type NodeConfig struct {
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
+
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
@@ -330,6 +333,17 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		libp2p.ResourceManager(rmgr),
 		libp2p.DisableMetrics(),
 	}
+
+	return opts, nil
+}
+
+// buildLibp2pOptions builds libp2p options for the node
+func (n *NodeConfig) buildLibp2pOptions() ([]libp2p.Option, error) {
+	opts, err := n.libp2pOptions()
+	if err != nil {
+		return nil, err
+	}
+
 	return opts, nil
 }
 
