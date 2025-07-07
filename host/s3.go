@@ -442,6 +442,13 @@ func (s3ds *S3DataStream) startS3Flusher(
 					continue
 				}
 
+			case EventTypeGossipPx:
+				totBytes, buf, err = EventsToBytes[GossipPeerExchangeEvent](eventT.Events, parquetOpts...)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
 			case EventTypeSentMsg:
 				totBytes, buf, err = EventsToBytes[GossipSentMsgEvent](eventT.Events, parquetOpts...)
 				if err != nil {
@@ -508,12 +515,12 @@ func (s3ds *S3DataStream) startS3Flusher(
 				int64(totBytes/(1024*1024)),
 				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
 			)
-			slog.Info("submitted file to s3",
+			slog.Debug("submitted file to s3",
 				"MB", float32(totBytes)/(1024.0*1024.0),
 				"s3key", eventT.S3Key,
-				"formating-time", formatT,
-				"upload-time", uploadT,
-				"total-time", totalT,
+				"formating-time", formatT.String(),
+				"upload-time", uploadT.String(),
+				"total-time", totalT.String(),
 			)
 
 		case <-ctx.Done():

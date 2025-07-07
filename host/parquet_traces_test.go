@@ -209,6 +209,14 @@ func TestParquetFormating(t *testing.T) {
 								},
 							},
 						},
+						Prune: []RpcControlPrune{
+							{
+								TopicID: testTopic,
+								PeerIDs: []peer.ID{
+									dummyRemoteID,
+								},
+							},
+						},
 					},
 					Messages: []RpcMetaMsg{
 						{
@@ -222,6 +230,7 @@ func TestParquetFormating(t *testing.T) {
 				EventTypeIhave:      &GossipIhaveEvent{},
 				EventTypeIwant:      &GossipIwantEvent{},
 				EventTypeIdontwant:  &GossipIdontwantEvent{},
+				EventTypeGossipPx:   &GossipPeerExchangeEvent{},
 				EventTypeControlRPC: &SendRecvRPCEvent{},
 			},
 		},
@@ -255,6 +264,14 @@ func TestParquetFormating(t *testing.T) {
 								},
 							},
 						},
+						Prune: []RpcControlPrune{
+							{
+								TopicID: testTopic,
+								PeerIDs: []peer.ID{
+									dummyRemoteID,
+								},
+							},
+						},
 					},
 					Messages: []RpcMetaMsg{
 						{
@@ -268,6 +285,7 @@ func TestParquetFormating(t *testing.T) {
 				EventTypeIhave:      &GossipIhaveEvent{},
 				EventTypeIwant:      &GossipIwantEvent{},
 				EventTypeIdontwant:  &GossipIdontwantEvent{},
+				EventTypeGossipPx:   &GossipPeerExchangeEvent{},
 				EventTypeSentMsg:    &GossipSentMsgEvent{},
 				EventTypeControlRPC: &SendRecvRPCEvent{},
 			},
@@ -302,6 +320,14 @@ func TestParquetFormating(t *testing.T) {
 								},
 							},
 						},
+						Prune: []RpcControlPrune{
+							{
+								TopicID: testTopic,
+								PeerIDs: []peer.ID{
+									dummyRemoteID,
+								},
+							},
+						},
 					},
 					Messages: []RpcMetaMsg{
 						{
@@ -315,6 +341,7 @@ func TestParquetFormating(t *testing.T) {
 				EventTypeIhave:      &GossipIhaveEvent{},
 				EventTypeIwant:      &GossipIwantEvent{},
 				EventTypeIdontwant:  &GossipIdontwantEvent{},
+				EventTypeGossipPx:   &GossipPeerExchangeEvent{},
 				EventTypeControlRPC: &SendRecvRPCEvent{},
 			},
 		},
@@ -453,6 +480,13 @@ func TestParquetFormating(t *testing.T) {
 						requireBaseRPCEvent(t, direction, false, e.BaseRPCEvent)
 						requireSentMsgEvent(t, e)
 
+					case *GossipPeerExchangeEvent:
+						requireBaseEvent(t, EventTypeGossipPx, e.BaseEvent)
+						direction, err := directionFromRPC(test.rawEvent.Type)
+						require.NoError(t, err)
+						requireBaseRPCEvent(t, direction, false, e.BaseRPCEvent)
+						requirePeerExEvent(t, e)
+
 					case *GossipMsgArrivalEvent:
 						requireBaseEvent(t, EventTypeMsgArrivals, e.BaseEvent)
 						switch test.rawEvent.Type {
@@ -566,6 +600,15 @@ func requireIdontwantEvent(t *testing.T, event *GossipIdontwantEvent) {
 	// TODO: hardcoded so far
 	require.Equal(t, len(event.MsgIDs), event.Msgs)
 	require.Equal(t, event.Msgs, 1)
+}
+
+func requirePeerExEvent(t *testing.T, event *GossipPeerExchangeEvent) {
+	require.Equal(t, event.RemotePeerID, dummyRemoteID.String())
+	// TODO: hardcoded so far
+	for _, p := range event.PxPeers {
+		require.Equal(t, p, dummyRemoteID.String())
+	}
+	require.Equal(t, event.Topic, testTopic)
 }
 
 func requireSentMsgEvent(t *testing.T, event *GossipSentMsgEvent) {

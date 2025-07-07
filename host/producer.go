@@ -32,6 +32,8 @@ func (ds DataStreamType) String() string {
 		return "callback"
 	case DataStreamTypeS3:
 		return "s3"
+	case DataStreamTypeNoop:
+		return "noop"
 	default:
 		return "logger"
 	}
@@ -42,6 +44,7 @@ const (
 	DataStreamTypeCallback
 	DataStreamTypeLogger
 	DataStreamTypeS3
+	DataStreamTypeNoop
 )
 
 func DataStreamtypeFromStr(str string) DataStreamType {
@@ -54,6 +57,8 @@ func DataStreamtypeFromStr(str string) DataStreamType {
 		return DataStreamTypeCallback
 	case "s3":
 		return DataStreamTypeS3
+	case "noop":
+		return DataStreamTypeNoop
 	default:
 		return DataStreamTypeLogger
 	}
