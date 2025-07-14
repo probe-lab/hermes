@@ -118,7 +118,7 @@ var rootFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "log.level",
 		EnvVars:     []string{"HERMES_LOG_LEVEL"},
-		Usage:       "Sets an explicity logging level: debug, info, warn, error. Takes precedence over the verbose flag.",
+		Usage:       "Sets an explicitly logging level: debug, info, warn, error. Takes precedence over the verbose flag.",
 		Destination: &rootConfig.LogLevel,
 		Value:       rootConfig.LogLevel,
 		Category:    flagCategoryLogging,
