@@ -100,6 +100,7 @@ var app = &cli.App{
 	Commands: []*cli.Command{
 		cmdEth,
 		cmdFil,
+		cmdOp,
 		cmdBenchmark,
 	},
 	After: rootAfter,
