@@ -6,31 +6,38 @@
 [![Build status](https://img.shields.io/github/actions/workflow/status/probe-lab/hermes/go-test.yml?branch=main)](https://github.com/probe-lab/hermes/actions)
 [![GoDoc](https://pkg.go.dev/badge/github.com/probe-lab/hermes)](https://pkg.go.dev/github.com/probe-lab/hermes)
 
-Hermes is a GossipSub listener and tracer. It subscribes to all relevant pubsub topics
-and traces all protocol interactions. As of `2024-05-21`, Hermes supports the Ethereum
-network.
+Hermes is a GossipSub listener and tracer. It subscribes to all relevant pubsub topics of the respective network
+and traces all protocol interactions like grafts, prunes, and any RPCs.
+As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
 
 ## Table of Contents
 
-- [Hermes](#hermes)
-  - [Table of Contents](#table-of-contents)
-  - [Installation](#installation)
-  - [Developing](#developing)
-    - [CLI Arguments](#cli-arguments)
-  - [Deployment](#deployment)
-    - [General](#general)
-    - [Ethereum](#ethereum)
-      - [Subnet Configuration](#subnet-configuration)
-      - [Topic Subscription](#topic-subscription)
-  - [Telemetry](#telemetry)
-    - [Metrics](#metrics)
-    - [Tracing](#tracing)
-  - [Differences with other tools](#differences-with-other-tools)
-  - [Maintainers](#maintainers)
-  - [Contributing](#contributing)
-  - [License](#license)
+
+<!-- TOC -->
+* [Hermes](#hermes)
+  * [Table of Contents](#table-of-contents)
+  * [Installation](#installation)
+  * [Developing](#developing)
+    * [CLI Arguments](#cli-arguments)
+  * [Deployment](#deployment)
+    * [General](#general)
+    * [Ethereum](#ethereum)
+      * [Subnet Configuration](#subnet-configuration)
+    * [Filecoin](#filecoin)
+      * [Topic Subscription](#topic-subscription)
+  * [Telemetry](#telemetry)
+    * [Metrics](#metrics)
+    * [Tracing](#tracing)
+  * [Differences with other tools](#differences-with-other-tools)
+    * [Armiarma Crawler from MigaLabs vs Hermes from ProbeLab](#armiarma-crawler-from-migalabs-vs-hermes-from-probelab)
+  * [Maintainers](#maintainers)
+  * [Contributing](#contributing)
+  * [License](#license)
+<!-- TOC -->
 
 ## Installation
+
+### From Source
 
 ```sh
 go install github.com/probe-lab/hermes@latest
@@ -42,12 +49,15 @@ Check out the repository:
 
 ```shell
 git clone git@github.com:probe-lab/hermes.git
+cd hermes
 ```
 
-Start Hermes by running
+Start Hermes by running:
 
 ```shell
-go run ./cmd/hermes # requires Go >=1.23
+go run ./cmd/hermes # Show help
+go run ./cmd/hermes eth --help # Ethereum-specific options
+go run ./cmd/hermes fil --help # Filecoin-specific options
 ```
 
 <details>
@@ -62,6 +72,7 @@ USAGE:
 
 COMMANDS:
    eth, ethereum  Listen to gossipsub topics of the Ethereum network
+   fil, filecoin  Listen to gossipsub topics of the Filecoin network
    benchmark      performs the given set of benchmarks for the hermes internals
    help, h        Shows a list of commands or help for one command
 
@@ -72,7 +83,7 @@ GLOBAL OPTIONS:
 
    --aws.key.id value         Access key ID of the AWS account for the s3 bucket [$HERMES_AWS_ACCESS_KEY_ID]
    --aws.secret.key value     Secret key of the AWS account for the S3 bucket [$HERMES_AWS_SECRET_KEY]
-   --data.stream.type value   Format where the traces will be submitted: logger, kinesis, or callback. (default: "logger") [$HERMES_DATA_STREAM_TYPE]
+   --data.stream.type value   Format where the traces will be submitted: logger, kinesis, noop, s3 or callback. (default: "logger") [$HERMES_DATA_STREAM_TYPE]
    --kinesis.region value     The region of the AWS Kinesis Data Stream [$HERMES_KINESIS_REGION]
    --kinesis.stream value     The name of the AWS Kinesis Data Stream [$HERMES_KINESIS_DATA_STREAM]
    --s3.bucket value          Name of the S3 bucket that will be used as reference to submit the traces (default: "hermes") [$HERMES_S3_BUCKET]
@@ -81,11 +92,12 @@ GLOBAL OPTIONS:
    --s3.flush.interval value  Minimum time interval at which the batched traces will be dump in S3 (default: 2s) [$HERMES_S3_FLUSH_INTERVAL]
    --s3.flushers value        Number of flushers that will be spawned to dump traces into S3 (default: 2) [$HERMES_S3_FLUSHERS]
    --s3.region value          The name of the region where the s3 bucket will be stored [$HERMES_S3_REGION]
+   --s3.tag value             Tag within the S3 bucket that will be used as reference to submit the traces [$HERMES_S3_TAG]
 
    Logging Configuration:
 
    --log.format value  Sets the format to output the log statements in: text, json, hlog, tint (default: "hlog") [$HERMES_LOG_FORMAT]
-   --log.level value   Sets an explicity logging level: debug, info, warn, error. Takes precedence over the verbose flag. (default: "info") [$HERMES_LOG_LEVEL]
+   --log.level value   Sets an explicitly logging level: debug, info, warn, error. Takes precedence over the verbose flag. (default: "info") [$HERMES_LOG_LEVEL]
    --log.nocolor       Whether to prevent the logger from outputting colored log statements (default: false) [$HERMES_LOG_NO_COLOR]
    --log.source        Compute the source code position of a log statement and add a SourceKey attribute to the output. Only text and json formats. (default: false) [$HERMES_LOG_SOURCE]
    --verbose, -v       Set logging level more verbose to include debug level logs (default: false) [$HERMES_VERBOSE]
@@ -98,6 +110,7 @@ GLOBAL OPTIONS:
    --tracing             Whether to emit trace data (default: false) [$HERMES_TRACING_ENABLED]
    --tracing.addr value  Where to publish the traces to. (default: "localhost") [$HERMES_TRACING_ADDR]
    --tracing.port value  On which port does the traces collector listen (default: 4317) [$HERMES_TRACING_PORT]
+
 ```
 
 </details>
@@ -105,7 +118,7 @@ GLOBAL OPTIONS:
 ### CLI Arguments
 
 We use dot notation to namespace command line arguments instead of hyphens because [the CLI library](https://github.com/urfave/cli) allows
-to configuration parameters from a file which will then resolve the command line parameters. For example,
+configuring parameters from a file which will then resolve the command line parameters. For example,
 the CLI flag `--log.format` could be read from a yaml file that looks like this:
 
 ```yaml
@@ -118,9 +131,10 @@ _However_, Hermes currently doesn't support loading CLI arguments from a file ¯
 ## Deployment
 
 Depending on the network you want to trace Hermes requires auxiliary infrastructure.
-As of `2024-03-27`, Hermes supports these networks:
+As of `2025-07-11`, Hermes supports these networks:
 
 - [Ethereum](#ethereum)
+- [Filecoin](#filecoin)
 
 ### General
 
@@ -131,8 +145,7 @@ There are different ways of keeping track of the events that Hermes generates:
         - `--kinesis.region=us-east-1` # just an example
         - `--kinesis.stream=$YOUR_DATA_STREAM_NAME`
     - If the name is set, Hermes will start pumping events to that stream.
-
-> It's important to note that the events **will not** be strictly ordered. They will only follow a lose ordering. The reasons are 1) potential retries of event submissions and 2) [record aggregation](https://docs.aws.amazon.com/streams/latest/dev/kinesis-kpl-concepts.html#kinesis-kpl-concepts-aggretation). Depending on the configured number of submission retries the events should be ordered within each 30s time window.
+      > It's important to note that the events **will not** be strictly ordered. They will only follow a lose ordering. The reasons are 1) potential retries of event submissions and 2) [record aggregation](https://docs.aws.amazon.com/streams/latest/dev/kinesis-kpl-concepts.html#kinesis-kpl-concepts-aggretation). Depending on the configured number of submission retries the events should be ordered within each 30s time window.
 - [S3](https://aws.amazon.com/s3/). Hermes will batch the traces, format them into a parquet file, and submit them to the given S3 Bucket. These are the flags that should be provided:
     - `--data.stream.type="s3"`
     - `--s3.region="us-east-1"` # just an example
@@ -145,11 +158,12 @@ There are different ways of keeping track of the events that Hermes generates:
     - `--aws.key.id=$YOUR_AWS_KEY_ID` # only necessary for private buckets
     - `--aws.secret.key=$YOUR_AWS_SECRET_KEY` # only necessary for private buckets
 
-
 - `Code Callbacks`. Hermes will execute the given callback functions whenever an event is traced.
     - `--data.stream.type="callback"`
 - `Logger`. Hermes will print the JSON formatted traces into `stdout` in a log format (ideal for local testing).
-    - `--data.strea.type="logger"`
+    - `--data.stream.type="logger"`
+- `Noop`. Hermes will discard all traces. We use this for debugging other parts of the stack where the actual events aren't relevant but would otherwise pollute the logs.
+    - `--data.stream.type="noop"`
 
 _Note: we provide a local s3 setup to use if needed. The configuration of the `localstack s3` instance can be tunned using a copy (`.env`) of the `.env.template` file, which will be read by default when doing `docker compose up s3`. Make sure that the docker container is up running when launching the `hermes` instance._
 
@@ -326,6 +340,33 @@ OPTIONS:
 
 </details>
 
+### Filecoin
+
+To run Hermes in the Filecoin network, no auxiliary infrastructure is needed. 
+Just run:
+
+```shell
+go run ./cmd/hermes fil
+```
+
+This will instruct Hermes to bootstrap into the Filecoin network using the
+canonical bootstrap peers. By default, it subscribes to the following hard-coded (!)
+topics:
+
+```text
+/f3/chainexchange/0.0.1/filecoin
+/f3/granite/0.0.3/filecoin
+/fil/blocks/testnetnet
+/fil/msgs/testnetnet
+/indexer/ingest/mainnet
+/drand/pubsub/v0.0.0/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971
+/drand/pubsub/v0.0.0/80c8b872c714f4c00fdd3daa465d5514049f457f01f85a4caf68cdcd394ba039
+/drand/pubsub/v0.0.0/8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce
+```
+
+On top of that, Hermes will periodically do a DHT lookup for arbitrary keys to
+make itself known to the network but also to learn and discover new peers which
+could be added to the mesh.
 
 ## Telemetry
 
@@ -368,7 +409,6 @@ On the other hand, although Hermes also relies on a continuously running discv5 
 
 - [Dennis Trautwein](https://github.com/dennis-tra)
 - [Mikel Cortes](https://github.com/cortze)
-- [Guillaume Michel](https://github.com/guillaumemichel)
 
 ## Contributing
 
