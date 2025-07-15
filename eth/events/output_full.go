@@ -1,9 +1,10 @@
-package eth
+package events
 
 import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
 	ethtypes "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/probe-lab/hermes/host"
@@ -102,23 +103,23 @@ type TraceEventAttesterSlashing struct {
 
 // FullOutput is a renderer for full output.
 type FullOutput struct {
-	cfg *PubSubConfig
+	encoder encoder.NetworkEncoding
 }
 
 var _ host.DataStreamRenderer = (*FullOutput)(nil)
 
 // NewFullOutput creates a new instance of FullOutput.
-func NewFullOutput(cfg *PubSubConfig) host.DataStreamRenderer {
-	return &FullOutput{cfg: cfg}
+func NewFullOutput(enc encoder.NetworkEncoding) host.DataStreamRenderer {
+	return &FullOutput{encoder: enc}
 }
 
 // RenderPayload renders message into the destination.
 func (t *FullOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, dst ssz.Unmarshaler) (*host.TraceEvent, error) {
-	if t.cfg.Encoder == nil {
+	if t.encoder == nil {
 		return nil, fmt.Errorf("no network encoding provided to raw output renderer")
 	}
 
-	if err := t.cfg.Encoder.DecodeGossip(msg.Data, dst); err != nil {
+	if err := t.encoder.DecodeGossip(msg.Data, dst); err != nil {
 		return nil, fmt.Errorf("decode gossip message: %w", err)
 	}
 

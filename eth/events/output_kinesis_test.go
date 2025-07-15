@@ -1,10 +1,11 @@
-package eth
+package events
 
 import (
 	"crypto/rand"
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
 	v1 "github.com/OffchainLabs/prysm/v6/proto/engine/v1"
 	ethtypes "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -18,10 +19,9 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 	var (
 		topic    = "test-topic"
 		renderer = &KinesisOutput{
-			cfg: &PubSubConfig{
-				GenesisTime:    time.Unix(0, 0),
-				SecondsPerSlot: time.Duration(12) * time.Second,
-			},
+			encoder:        &encoder.SszNetworkEncoder{},
+			genesisTime:    time.Unix(0, 0),
+			secondsPerSlot: time.Duration(12) * time.Second,
 		}
 		baseMsg = &pubsub.Message{
 			Message: &pb.Message{
@@ -301,7 +301,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
-				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+				require.Equal(t, renderer.genesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.secondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.SignedBeaconBlockAltair:
 				root, err := typedResult.GetBlock().HashTreeRoot()
 				if err != nil {
@@ -311,7 +311,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
-				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+				require.Equal(t, renderer.genesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.secondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.SignedBeaconBlockBellatrix:
 				root, err := typedResult.GetBlock().HashTreeRoot()
 				if err != nil {
@@ -321,7 +321,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
-				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+				require.Equal(t, renderer.genesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.secondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.SignedBeaconBlockCapella:
 				root, err := typedResult.GetBlock().HashTreeRoot()
 				if err != nil {
@@ -331,7 +331,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
-				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+				require.Equal(t, renderer.genesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.secondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.SignedBeaconBlockDeneb:
 				root, err := typedResult.GetBlock().HashTreeRoot()
 				if err != nil {
@@ -341,7 +341,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
-				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+				require.Equal(t, renderer.genesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.secondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.SignedBeaconBlockElectra:
 				root, err := typedResult.GetBlock().HashTreeRoot()
 				if err != nil {
@@ -351,7 +351,7 @@ func TestKinesisOutputRenderMethods(t *testing.T) {
 				require.Equal(t, typedResult.GetBlock().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetBlock().GetProposerIndex(), result["ValIdx"])
 				require.Equal(t, root, result["Root"])
-				require.Equal(t, renderer.cfg.GenesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.cfg.SecondsPerSlot), result["TimeInSlot"])
+				require.Equal(t, renderer.genesisTime.Add(time.Duration(typedResult.GetBlock().GetSlot())*renderer.secondsPerSlot), result["TimeInSlot"])
 			case *ethtypes.Attestation:
 				require.Equal(t, typedResult.GetData().GetSlot(), result["Slot"])
 				require.Equal(t, typedResult.GetData().GetCommitteeIndex(), result["CommIdx"])

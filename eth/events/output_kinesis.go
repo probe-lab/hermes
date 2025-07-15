@@ -1,10 +1,11 @@
-package eth
+package events
 
 import (
 	"encoding/hex"
 	"fmt"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
 	ethtypes "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -14,23 +15,25 @@ import (
 
 // KinesisOutput is a renderer for Kinesis output.
 type KinesisOutput struct {
-	cfg *PubSubConfig
+	encoder        encoder.NetworkEncoding
+	genesisTime    time.Time
+	secondsPerSlot time.Duration
 }
 
 var _ host.DataStreamRenderer = (*KinesisOutput)(nil)
 
 // NewKinesisOutput creates a new instance of KinesisOutput.
-func NewKinesisOutput(cfg *PubSubConfig) host.DataStreamRenderer {
-	return &KinesisOutput{cfg: cfg}
+func NewKinesisOutput(enc encoder.NetworkEncoding, genesisTime time.Time, secondsPerSlot time.Duration) host.DataStreamRenderer {
+	return &KinesisOutput{encoder: enc, genesisTime: genesisTime, secondsPerSlot: secondsPerSlot}
 }
 
 // RenderPayload renders message into the destination.
 func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, dst ssz.Unmarshaler) (*host.TraceEvent, error) {
-	if k.cfg.Encoder == nil {
+	if k.encoder == nil {
 		return nil, fmt.Errorf("no network encoding provided to kinenis output renderer")
 	}
 
-	if err := k.cfg.Encoder.DecodeGossip(msg.Data, dst); err != nil {
+	if err := k.encoder.DecodeGossip(msg.Data, dst); err != nil {
 		return nil, fmt.Errorf("decode gossip message: %w", err)
 	}
 
@@ -108,7 +111,7 @@ func (k *KinesisOutput) renderPhase0Block(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
 	}, nil
 }
 
@@ -130,7 +133,7 @@ func (k *KinesisOutput) renderAltairBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
 	}, nil
 }
 
@@ -152,7 +155,7 @@ func (k *KinesisOutput) renderBellatrixBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
 	}, nil
 }
 
@@ -174,7 +177,7 @@ func (k *KinesisOutput) renderCapellaBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
 	}, nil
 }
 
@@ -196,7 +199,7 @@ func (k *KinesisOutput) renderDenebBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
 	}, nil
 }
 
@@ -218,7 +221,7 @@ func (k *KinesisOutput) renderElectraBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
 	}, nil
 }
 

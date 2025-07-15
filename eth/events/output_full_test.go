@@ -1,4 +1,4 @@
-package eth
+package events
 
 import (
 	"encoding/hex"
