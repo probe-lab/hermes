@@ -245,7 +245,6 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		pubsub.WithMessageIdFn(MsgID),
 		pubsub.WithNoAuthor(),
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithPeerExchange(true),
 		pubsub.WithValidateQueueSize(maxValidateQueue),
 		pubsub.WithPeerOutboundQueueSize(maxOutboundQueue),
 		pubsub.WithValidateThrottle(globalValidateThrottle),
