@@ -7,8 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/golang/snappy"
-	"github.com/probe-lab/hermes/op/p2p"
 	"log/slog"
 	"math"
 	"sync"
@@ -17,16 +15,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/probe-lab/hermes/host"
+	"github.com/probe-lab/hermes/op/p2p"
 )
 
 const (
@@ -60,7 +60,7 @@ type NodeConfig struct {
 	PrivateKeyStr string
 
 	ChainID       int
-	Bootstrappers []peer.AddrInfo
+	Bootstrappers []*enode.Node
 
 	// The parsed private key as an unexported field. This is used to cache the
 	// parsing result, so that [PrivateKey] can be called multiple times without
@@ -69,6 +69,10 @@ type NodeConfig struct {
 
 	// General timeout when communicating with other network participants
 	DialTimeout time.Duration
+
+	// The address information of the local ethereuem [enode.Node].
+	Devp2pHost string
+	Devp2pPort int
 
 	// The address information of the local libp2p host
 	Libp2pHost                  string

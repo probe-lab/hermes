@@ -4,20 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/libp2p/go-libp2p/core/event"
 	"log/slog"
-	"sync"
-	"sync/atomic"
-	"time"
+	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/probe-lab/hermes/host"
+	"github.com/probe-lab/hermes/tele"
 	"github.com/thejerf/suture/v4"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-
-	"github.com/probe-lab/hermes/host"
-	"github.com/probe-lab/hermes/tele"
 )
 
 // Node is the main entry point to listening to the Ethereum GossipSub mesh.
@@ -33,6 +30,9 @@ type Node struct {
 
 	// The PubSub service that implements various gossipsub topics
 	pubSub *PubSub
+
+	// The discovery service, periodically querying the discv5 DHT network
+	disc *Discovery
 
 	// The suture supervisor that is the root of the service tree
 	sup *suture.Supervisor
@@ -128,24 +128,40 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 	slog.Info("Initialized new libp2p Host", tele.LogAttrPeerID(h.ID()), "maddrs", h.Addrs())
 
-	sub, err := h.EventBus().Subscribe([]any{new(event.EvtPeerIdentificationCompleted), new(event.EvtPeerIdentificationFailed)})
+	privKey, err := cfg.ECDSAPrivateKey()
 	if err != nil {
-		return nil, fmt.Errorf("new peer identification completed event subscription: %w", err)
+		return nil, fmt.Errorf("private key: %w", err)
 	}
 
-	go func() {
-		for evt := range sub.Out() {
-			switch tevt := evt.(type) {
-			case event.EvtPeerIdentificationFailed:
-				fmt.Println("ID COMPLETED:", tevt)
-			case event.EvtPeerIdentificationCompleted:
-				fmt.Println(tevt)
-			default:
-				panic("asasdfsdf")
+	devp2pTCPport := cfg.Libp2pPort
+	if devp2pTCPport == 0 {
+		for _, addr := range h.Addrs() {
+			tcpPortStr, err := addr.ValueForProtocol(ma.P_TCP)
+			if err != nil {
+				continue
 			}
-
+			v, err := strconv.ParseUint(tcpPortStr, 10, 16)
+			if err != nil {
+				continue
+			}
+			devp2pTCPport = int(v)
+			break
 		}
-	}()
+	}
+
+	disc, err := NewDiscovery(privKey, &DiscoveryConfig{
+		ChainID: uint64(cfg.ChainID),
+		Addr:    cfg.Devp2pHost,
+		UDPPort: cfg.Devp2pPort,
+		TCPPort: devp2pTCPport,
+		Seeds:   cfg.Bootstrappers,
+		Tracer:  cfg.Tracer,
+		Meter:   cfg.Meter,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new discovery service: %w", err)
+	}
+	slog.Info("Initialized new devp2p Node", "enr", disc.node.Node().String())
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
@@ -164,6 +180,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		host:   h,
 		ds:     ds,
 		pubSub: pubSub,
+		disc:   disc,
 		sup:    suture.NewSimple("fil"),
 	}
 
@@ -201,8 +218,8 @@ func (n *Node) Start(ctx context.Context) error {
 		return fmt.Errorf("init gossip sub: %w", err)
 	}
 
-	// register the node itself as the notifiee for network connection events
-	n.host.Network().Notify(n)
+	// start the discovery service to find peers in the discv5 DHT
+	n.sup.Add(n.disc)
 
 	// start the pubsub subscriptions and handlers
 	n.sup.Add(n.pubSub)
@@ -210,26 +227,15 @@ func (n *Node) Start(ctx context.Context) error {
 	// start the hermes host to trace gossipsub messages
 	n.sup.Add(n.host)
 
-	// connect to bootstrappers
-	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer timeoutCancel()
-
-	var wg sync.WaitGroup
-	var errCounter atomic.Int32
-	for _, p := range n.cfg.Bootstrappers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := n.host.Connect(timeoutCtx, p); err != nil {
-				slog.Warn("Failed to connect to bootstrapper", tele.LogAttrError(err), "peer", p)
-				errCounter.Add(1)
-			}
-		}()
-	}
-	wg.Wait()
-
-	if errCounter.Load() == int32(len(n.cfg.Bootstrappers)) {
-		return fmt.Errorf("failed to connect to all bootstrappers")
+	// start the peer dialers, that consume the discovered peers from
+	// the discovery service up until MaxPeers.
+	for i := 0; i < 3; i++ { // TODO: parametrize
+		pd := &PeerDialer{
+			host:     n.host,
+			peerChan: n.disc.out,
+			maxPeers: 30, // TODO: parametrize
+		}
+		n.sup.Add(pd)
 	}
 
 	// start all long-running services

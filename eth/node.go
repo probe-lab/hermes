@@ -482,12 +482,12 @@ func (n *Node) Start(ctx context.Context) error {
 	// start the peer dialers, that consume the discovered peers from
 	// the discovery service up until MaxPeers.
 	for i := 0; i < n.cfg.DialConcurrency; i++ {
-		cs := &PeerDialer{
+		pd := &PeerDialer{
 			host:     n.host,
 			peerChan: n.disc.out,
 			maxPeers: n.cfg.MaxPeers,
 		}
-		n.sup.Add(cs)
+		n.sup.Add(pd)
 	}
 
 	// start public listen address watcher to keep our ENR up to date
