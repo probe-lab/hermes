@@ -16,12 +16,14 @@ import (
 	ssz "github.com/prysmaticlabs/fastssz"
 	"github.com/thejerf/suture/v4"
 
+	"github.com/probe-lab/hermes/eth/events"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
 
 const eventTypeHandleMessage = "HANDLE_MESSAGE"
 
+// PubSubConfig holds the configuration for pubsub event processing
 type PubSubConfig struct {
 	Topics         []string
 	ForkVersion    ForkVersion
@@ -67,10 +69,10 @@ func NewPubSub(h *host.Host, cfg *PubSubConfig) (*PubSub, error) {
 
 	switch cfg.DataStream.OutputType() {
 	case host.DataStreamOutputTypeFull:
-		dsr = NewFullOutput(cfg)
+		dsr = events.NewFullOutput(cfg.Encoder)
 	// TODO: If wanted, add a new S3ParquetOutput
 	default:
-		dsr = NewKinesisOutput(cfg)
+		dsr = events.NewKinesisOutput(cfg.Encoder, cfg.GenesisTime, cfg.SecondsPerSlot)
 	}
 
 	return &PubSub{
@@ -185,7 +187,7 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 	case ElectraForkVersion:
 		block = &ethtypes.SignedBeaconBlockElectra{}
 	default:
-		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %s", p.cfg.ForkVersion.String())
+		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %x", p.cfg.ForkVersion)
 	}
 
 	evt, err = p.dsr.RenderPayload(evt, msg, block)
