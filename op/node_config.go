@@ -60,6 +60,7 @@ type NodeConfig struct {
 	PrivateKeyStr string
 
 	ChainID       int
+	BlockTopics   []string
 	Bootstrappers []*enode.Node
 
 	// The parsed private key as an unexported field. This is used to cache the
@@ -252,7 +253,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		pubsub.WithPeerExchange(false),
 		pubsub.WithSubscriptionFilter(subFilter),
 		pubsub.WithPeerScore(
-			p2p.LightPeerScoreParams(2),
+			p2p.LightPeerScoreParams(n.BlockTopics, 2),
 			p2p.NewPeerScoreThresholds(),
 		),
 	}

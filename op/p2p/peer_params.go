@@ -1,7 +1,6 @@
 package p2p
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -22,15 +21,14 @@ func ScoreDecay(duration time.Duration, slot time.Duration) float64 {
 // See [PeerScoreParams] for detailed documentation.
 //
 // [PeerScoreParams]: https://pkg.go.dev/github.com/libp2p/go-libp2p-pubsub@v0.8.1#PeerScoreParams
-func LightPeerScoreParams(blockTime uint64) *pubsub.PeerScoreParams {
+func LightPeerScoreParams(blockTopics []string, blockTime uint64) *pubsub.PeerScoreParams {
 	slot := time.Duration(blockTime) * time.Second
 	if slot == 0 {
 		slot = 2 * time.Second
 	}
 
 	topicParams := make(map[string]*pubsub.TopicScoreParams, 4)
-	for version := 0; version < 4; version++ {
-		topicName := fmt.Sprintf("/optimism/%d/%d/blocks", 130, version)
+	for _, topicName := range blockTopics {
 		topicParams[topicName] = &pubsub.TopicScoreParams{
 			TopicWeight:                    0.1,
 			TimeInMeshWeight:               0.00027, // ~1/3600

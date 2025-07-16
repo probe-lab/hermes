@@ -145,9 +145,15 @@ func cmdOpAction(c *cli.Context) error {
 		bootstrappers[i] = bootnode
 	}
 
+	blockTopics := make([]string, 4)
+	for version := 0; version < 4; version++ {
+		blockTopics[version] = fmt.Sprintf("/optimism/%d/%d/blocks", opConfig.ChainID, version)
+	}
+
 	cfg := &op.NodeConfig{
 		PrivateKeyStr:               opConfig.PrivateKeyStr,
 		ChainID:                     opConfig.ChainID,
+		BlockTopics:                 blockTopics,
 		DialTimeout:                 opConfig.DialTimeout,
 		Devp2pHost:                  opConfig.Devp2pHost,
 		Devp2pPort:                  opConfig.Devp2pPort,

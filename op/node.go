@@ -174,8 +174,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the pubsub topic handlers
 	pubSubConfig := &PubSubConfig{
-		ChainID:    cfg.ChainID,
-		DataStream: ds,
+		ChainID:     cfg.ChainID,
+		BlockTopics: cfg.BlockTopics,
+		DataStream:  ds,
 	}
 
 	pubSub, err := NewPubSub(h, pubSubConfig)

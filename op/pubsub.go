@@ -21,11 +21,16 @@ import (
 const eventTypeHandleMessage = "HANDLE_MESSAGE"
 
 type PubSubConfig struct {
-	ChainID    int
-	DataStream host.DataStream
+	ChainID     int
+	BlockTopics []string
+	DataStream  host.DataStream
 }
 
 func (p PubSubConfig) Validate() error {
+	if p.ChainID <= 0 {
+		return fmt.Errorf("chainID unset or negative: %d", p.ChainID)
+	}
+
 	return nil
 }
 
@@ -53,9 +58,7 @@ func (p *PubSub) Serve(ctx context.Context) error {
 
 	supervisor := suture.NewSimple("pubsub")
 
-	for version := 0; version < 4; version++ {
-		topicName := fmt.Sprintf("/optimism/%d/%d/blocks", p.cfg.ChainID, version)
-
+	for version, topicName := range p.cfg.BlockTopics {
 		topic, err := p.gs.Join(topicName)
 		if err != nil {
 			return fmt.Errorf("join pubsub topic %s: %w", topicName, err)
