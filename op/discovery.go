@@ -147,21 +147,6 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 	}
 	defer listener.Close()
 
-	//rec := enr.Record{}
-	/////ip4/57.129.36.163/tcp/9222/p2p/16Uiu2HAm5NThaQmNwCziMNj5CX2mduWDRa85hfmawaGTEYbddSsx
-	//
-	//rec.Set(enr.IP(net.ParseIP("172.16.58.3").String()))
-	//rec.Set(enr.UDP(9222))
-	//
-	//n, err := enode.New(enode.ValidSchemes, &rec)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//en, err := listener.RequestENR(n)
-	//if err != nil {
-	//	panic(err)
-	//}
-
 	iterator := enode.Filter(listener.RandomNodes(), func(node *enode.Node) bool {
 		var dat OpStackENRData
 		if err := node.Load(&dat); err != nil {

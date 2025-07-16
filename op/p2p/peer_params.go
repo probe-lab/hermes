@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -26,6 +27,23 @@ func LightPeerScoreParams(blockTime uint64) *pubsub.PeerScoreParams {
 	if slot == 0 {
 		slot = 2 * time.Second
 	}
+
+	topicParams := make(map[string]*pubsub.TopicScoreParams, 4)
+	for version := 0; version < 4; version++ {
+		topicName := fmt.Sprintf("/optimism/%d/%d/blocks", 130, version)
+		topicParams[topicName] = &pubsub.TopicScoreParams{
+			TopicWeight:                    0.1,
+			TimeInMeshWeight:               0.00027, // ~1/3600
+			TimeInMeshQuantum:              time.Second,
+			TimeInMeshCap:                  1,
+			FirstMessageDeliveriesWeight:   5, // max value is 500
+			FirstMessageDeliveriesDecay:    pubsub.ScoreParameterDecay(time.Hour),
+			FirstMessageDeliveriesCap:      100,
+			InvalidMessageDeliveriesWeight: -1000,
+			InvalidMessageDeliveriesDecay:  pubsub.ScoreParameterDecay(time.Hour),
+		}
+	}
+
 	// We initialize an "epoch" as 6 blocks suggesting 6 blocks,
 	// each taking ~ 2 seconds, is 12 seconds
 	epoch := 6 * slot
@@ -37,7 +55,7 @@ func LightPeerScoreParams(blockTime uint64) *pubsub.PeerScoreParams {
 		// from older topics to newer ones over time and we don't
 		// want to penalize peers for not participating in the old topics.
 		// Therefore the Topics map is nil:
-		Topics: nil,
+		Topics: topicParams,
 		AppSpecificScore: func(p peer.ID) float64 {
 			return 0
 		},

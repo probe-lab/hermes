@@ -114,6 +114,7 @@ func (p *PubSub) handleBlock(blockVersion p2p.BlockVersion) host.TopicHandler {
 		}
 
 		envelope.ExecutionPayload.Transactions = []p2p.Data{}
+		envelope.ExecutionPayload.LogsBloom = [256]byte{}
 
 		evt.Payload = map[string]any{
 			"PeerID":                msg.ReceivedFrom,
