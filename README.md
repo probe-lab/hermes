@@ -6,12 +6,12 @@
 [![Build status](https://img.shields.io/github/actions/workflow/status/probe-lab/hermes/go-test.yml?branch=main)](https://github.com/probe-lab/hermes/actions)
 [![GoDoc](https://pkg.go.dev/badge/github.com/probe-lab/hermes)](https://pkg.go.dev/github.com/probe-lab/hermes)
 
-Hermes is a GossipSub listener and tracer. It subscribes to all relevant pubsub topics of the respective network
-and traces all protocol interactions like grafts, prunes, and any RPCs.
+Hermes is light Libp2p networking node that serves as a GossipSub listener and trace for multiple networks.
+It discovers and connects with network participats subscribing to all relevant pubsub topics of the respective
+network and traces all protocol interactions like grafts, prunes, and any RPCs.
 As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
 
 ## Table of Contents
-
 
 <!-- TOC -->
 * [Hermes](#hermes)
@@ -27,6 +27,7 @@ As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
       * [Topic Subscription](#topic-subscription)
     * [Filecoin](#filecoin)
       * [Hermes vs Filecoin Lite Nodes](#hermes-vs-filecoin-lite-nodes)
+  * [Importing Hermes](#importing-hermes)
   * [Telemetry](#telemetry)
     * [Metrics](#metrics)
     * [Tracing](#tracing)
@@ -199,12 +200,12 @@ cfg.SubnetConfigs = map[string]*eth.SubnetConfig{
         Type: eth.SubnetStatic,
         Subnets: []uint64{0, 1, 5, 44},
     },
-    
+
     // Subscribe to all sync committee subnets (this is the default if no config provided)
     p2p.GossipSyncCommitteeMessage: {
         Type: eth.SubnetAll,
     },
-    
+
     // Subscribe to a random set of blob sidecar subnets
     p2p.GossipBlobSidecarMessage: {
         Type: eth.SubnetRandom,
@@ -344,7 +345,7 @@ OPTIONS:
 
 ### Filecoin
 
-To run Hermes in the Filecoin network, no auxiliary infrastructure is needed. 
+To run Hermes in the Filecoin network, no auxiliary infrastructure is needed.
 Just run:
 
 ```shell
@@ -378,6 +379,10 @@ A Lotus lite node cannot connect to the GossipSub protocol and relies on a remot
 Hermes, on the other hand, is a network monitoring instrument to analyze GossipSub performance.
 It behaves like a light node in the network by connecting to other nodes and advertising its presence through a periodic DHT lookup.
 Hermes subscribes to all available GossipSub topics, allowing it to comprehensively receive and trace all of the activity in the network.
+
+## Importing Hermes
+Hermes is something more than a single GossipSub litener and tracer. Due to it's simplicity and application layer abstraction, it
+
 
 ## Telemetry
 
