@@ -26,6 +26,7 @@ As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
       * [Subnet Configuration](#subnet-configuration)
       * [Topic Subscription](#topic-subscription)
     * [Filecoin](#filecoin)
+      * [Hermes vs Filecoin Lite Nodes](#hermes-vs-filecoin-lite-nodes)
   * [Telemetry](#telemetry)
     * [Metrics](#metrics)
     * [Tracing](#tracing)
@@ -368,6 +369,15 @@ topics:
 On top of that, Hermes will periodically do a DHT lookup for arbitrary keys to
 make itself known to the network but also to learn and discover new peers which
 could be added to the mesh.
+
+#### Hermes vs Filecoin Lite Nodes
+Existing Filecoin lite nodes, such as the Lotus lite node option, are primarily used for interacting with the network.
+It is a resource efficient interface for end users to create wallets and keys, sign messages and submit transactions.
+A Lotus lite node cannot connect to the GossipSub protocol and relies on a remote full node to get blockchain data.
+
+Hermes, on the other hand, is a network monitoring instrument to analyze GossipSub performance.
+It behaves like a light node in the network by connecting to other nodes and advertising its presence through a periodic DHT lookup.
+Hermes subscribes to all available GossipSub topics, allowing it to comprehensively receive and trace all of the activity in the network.
 
 ## Telemetry
 
