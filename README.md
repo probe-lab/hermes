@@ -381,8 +381,16 @@ It behaves like a light node in the network by connecting to other nodes and adv
 Hermes subscribes to all available GossipSub topics, allowing it to comprehensively receive and trace all of the activity in the network.
 
 ## Importing Hermes
-Hermes is something more than a single GossipSub litener and tracer. Due to it's simplicity and application layer abstraction, it
+Hermes is more than just a simple GossipSub listener and tracer.
+Its simplicity, lightweight deployment requirements, and abstraction from the application-layer logic,
+makes it a suitable library for interacting with any of the supported networks—without needing to fork existing clients.
 
+The modular design, covering the peer discovery, libp2p host, or the GossipSub listener, makes it a strong foundation for interacting with networks, allowing for more than just monitoring P2P performance.
+Because of that, Hermes can be leveraged as a general-purpose networking interface, extending its use cases beyond traditional network metrics.
+
+Below is a list of projects and studies that have relied on Hermes as a networking interface:
+- [xatu](https://github.com/ethpandaops/xatu)
+- [net-probe](https://ethresear.ch/t/bandwidth-availability-in-ethereum-regional-differences-and-network-impacts/21138)
 
 ## Telemetry
 
