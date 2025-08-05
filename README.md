@@ -6,7 +6,7 @@
 [![Build status](https://img.shields.io/github/actions/workflow/status/probe-lab/hermes/go-test.yml?branch=main)](https://github.com/probe-lab/hermes/actions)
 [![GoDoc](https://pkg.go.dev/badge/github.com/probe-lab/hermes)](https://pkg.go.dev/github.com/probe-lab/hermes)
 
-Hermes is light Libp2p networking node that serves as a GossipSub listener and trace for multiple networks.
+Hermes is light libp2p networking node that serves as a GossipSub listener and tracer for multiple networks.
 It discovers and connects with network participats subscribing to all relevant pubsub topics of the respective
 network and traces all protocol interactions like grafts, prunes, and any RPCs.
 As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
