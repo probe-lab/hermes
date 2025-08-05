@@ -6,12 +6,12 @@
 [![Build status](https://img.shields.io/github/actions/workflow/status/probe-lab/hermes/go-test.yml?branch=main)](https://github.com/probe-lab/hermes/actions)
 [![GoDoc](https://pkg.go.dev/badge/github.com/probe-lab/hermes)](https://pkg.go.dev/github.com/probe-lab/hermes)
 
-Hermes is a GossipSub listener and tracer. It subscribes to all relevant pubsub topics of the respective network
-and traces all protocol interactions like grafts, prunes, and any RPCs.
+Hermes is light libp2p networking node that serves as a GossipSub listener and tracer for multiple networks.
+It discovers and connects with network participats subscribing to all relevant pubsub topics of the respective
+network and traces all protocol interactions like grafts, prunes, and any RPCs.
 As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
 
 ## Table of Contents
-
 
 <!-- TOC -->
 * [Hermes](#hermes)
@@ -26,6 +26,8 @@ As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
       * [Subnet Configuration](#subnet-configuration)
       * [Topic Subscription](#topic-subscription)
     * [Filecoin](#filecoin)
+      * [Hermes vs Filecoin Lite Nodes](#hermes-vs-filecoin-lite-nodes)
+  * [Importing Hermes](#importing-hermes)
   * [Telemetry](#telemetry)
     * [Metrics](#metrics)
     * [Tracing](#tracing)
@@ -198,12 +200,12 @@ cfg.SubnetConfigs = map[string]*eth.SubnetConfig{
         Type: eth.SubnetStatic,
         Subnets: []uint64{0, 1, 5, 44},
     },
-    
+
     // Subscribe to all sync committee subnets (this is the default if no config provided)
     p2p.GossipSyncCommitteeMessage: {
         Type: eth.SubnetAll,
     },
-    
+
     // Subscribe to a random set of blob sidecar subnets
     p2p.GossipBlobSidecarMessage: {
         Type: eth.SubnetRandom,
@@ -343,7 +345,7 @@ OPTIONS:
 
 ### Filecoin
 
-To run Hermes in the Filecoin network, no auxiliary infrastructure is needed. 
+To run Hermes in the Filecoin network, no auxiliary infrastructure is needed.
 Just run:
 
 ```shell
@@ -368,6 +370,27 @@ topics:
 On top of that, Hermes will periodically do a DHT lookup for arbitrary keys to
 make itself known to the network but also to learn and discover new peers which
 could be added to the mesh.
+
+#### Hermes vs Filecoin Lite Nodes
+Existing Filecoin lite nodes, such as the Lotus lite node option, are primarily used for interacting with the network.
+It is a resource efficient interface for end users to create wallets and keys, sign messages and submit transactions.
+A Lotus lite node cannot connect to the GossipSub protocol and relies on a remote full node to get blockchain data.
+
+Hermes, on the other hand, is a network monitoring instrument to analyze GossipSub performance.
+It behaves like a light node in the network by connecting to other nodes and advertising its presence through a periodic DHT lookup.
+Hermes subscribes to all available GossipSub topics, allowing it to comprehensively receive and trace all of the activity in the network.
+
+## Importing Hermes
+Hermes is more than just a simple GossipSub listener and tracer.
+Its simplicity, lightweight deployment requirements, and abstraction from the application-layer logic,
+makes it a suitable library for interacting with any of the supported networks—without needing to fork existing clients.
+
+The modular design, covering the peer discovery, libp2p host, or the GossipSub listener, makes it a strong foundation for interacting with networks, allowing for more than just monitoring P2P performance.
+Because of that, Hermes can be leveraged as a general-purpose networking interface, extending its use cases beyond traditional network metrics.
+
+Below is a list of projects and studies that have relied on Hermes as a networking interface:
+- [xatu](https://github.com/ethpandaops/xatu)
+- [net-probe](https://ethresear.ch/t/bandwidth-availability-in-ethereum-regional-differences-and-network-impacts/21138)
 
 ## Telemetry
 
