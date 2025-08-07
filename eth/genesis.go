@@ -25,6 +25,7 @@ var (
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
 	ElectraForkVersion   ForkVersion
+	FuluForkVersion      ForkVersion
 
 	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
@@ -37,6 +38,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
 	ElectraForkVersion = ForkVersion(beaconConfig.ElectraForkVersion)
+	FuluForkVersion = ForkVersion(beaconConfig.FuluForkVersion)
 
 	globalBeaconConfig = beaconConfig
 }
@@ -99,6 +101,9 @@ func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconCha
 	case epoch >= beaconConfg.ElectraForkEpoch:
 		return [4]byte(beaconConfg.ElectraForkVersion), nil
 
+	case epoch >= beaconConfg.FuluForkEpoch:
+		return [4]byte(beaconConfg.FuluForkVersion), nil
+
 	default:
 		return [4]byte{}, fmt.Errorf("not recognized case for epoch %d", epoch)
 	}
@@ -112,6 +117,7 @@ func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) 
 	capellaD, _ := signing.ComputeForkDigest(CapellaForkVersion[:], genesisRoot)
 	denebD, _ := signing.ComputeForkDigest(DenebForkVersion[:], genesisRoot)
 	electraD, _ := signing.ComputeForkDigest(ElectraForkVersion[:], genesisRoot)
+	fuluD, _ := signing.ComputeForkDigest(FuluForkVersion[:], genesisRoot)
 	switch forkD {
 	case phase0D:
 		forkV = Phase0ForkVersion
@@ -125,6 +131,8 @@ func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) 
 		forkV = DenebForkVersion
 	case electraD:
 		forkV = ElectraForkVersion
+	case fuluD:
+		forkV = FuluForkVersion
 	default:
 		forkV = ForkVersion{}
 		err = fmt.Errorf("not recognized fork_version for (%s)", hex.EncodeToString([]byte(forkD[:])))

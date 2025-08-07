@@ -62,6 +62,7 @@ func DeriveKnownNetworkConfig(ctx context.Context, network string) (*NetworkConf
 				CapellaForkVersion:   []byte{0x03, 0x00, 0x00, 0x64},
 				DenebForkVersion:     []byte{0x04, 0x00, 0x00, 0x64},
 				ElectraForkVersion:   []byte{0x05, 0x00, 0x00, 0x64},
+				FuluForkVersion:      []byte{0x06, 0x00, 0x00, 0x64},
 				ForkVersionSchedule: map[[4]byte]primitives.Epoch{
 					{0x00, 0x00, 0x00, 0x64}: primitives.Epoch(0),
 					{0x01, 0x00, 0x00, 0x64}: primitives.Epoch(512),
@@ -77,6 +78,7 @@ func DeriveKnownNetworkConfig(ctx context.Context, network string) (*NetworkConf
 					{0x03, 0x00, 0x00, 0x64}: "capella",
 					{0x04, 0x00, 0x00, 0x64}: "deneb",
 					{0x05, 0x00, 0x00, 0x64}: "electra",
+					{0x06, 0x00, 0x00, 0x64}: "fulu",
 				},
 			},
 			Network: &params.NetworkConfig{
