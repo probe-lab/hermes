@@ -485,7 +485,7 @@ func (k *KinesisOutput) renderDataColumnSidecar(
 		"Seq":        hex.EncodeToString(msg.GetSeqno()),
 		"Slot":       sidecar.GetSignedBlockHeader().GetHeader().GetSlot(),
 		"ValIdx":     sidecar.GetSignedBlockHeader().GetHeader().GetProposerIndex(),
-		"index":      sidecar.GetIndex(),
+		"Index":      sidecar.GetIndex(),
 		"StateRoot":  hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetStateRoot()),
 		"BodyRoot":   hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetBodyRoot()),
 		"ParentRoot": hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetParentRoot()),
