@@ -526,3 +526,38 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 
 	return nil
 }
+
+func (p *PubSub) handleDataColumnSidecar(ctx context.Context, msg *pubsub.Message) error {
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("handleDataColumnSidecar(): nil message or topic")
+	}
+
+	var (
+		err error
+		evt = &host.TraceEvent{
+			Type:      eventTypeHandleMessage,
+			Topic:     msg.GetTopic(),
+			PeerID:    p.host.ID(),
+			Timestamp: time.Now(),
+		}
+	)
+
+	sidecar := ethtypes.DataColumnSidecar{}
+
+	evt, err = p.dsr.RenderPayload(evt, msg, &sidecar)
+	if err != nil {
+		slog.Warn(
+			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+
+		return nil
+	}
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn(
+			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+		)
+	}
+
+	return nil
+}

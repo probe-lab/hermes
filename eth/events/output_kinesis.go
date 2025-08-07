@@ -448,3 +448,22 @@ func (k *KinesisOutput) renderAttesterSlashing(
 		"Att2_indices": as.GetAttestation_2().GetAttestingIndices(),
 	}, nil
 }
+
+func (k *KinesisOutput) renderDataColumnSidecar(
+	msg *pubsub.Message,
+	sidecar *ethtypes.DataColumnSidecar,
+) (map[string]any, error) {
+	return map[string]any{
+		"PeerID":     msg.ReceivedFrom,
+		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":    len(msg.Data),
+		"Topic":      msg.GetTopic(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
+		"Slot":       sidecar.GetSignedBlockHeader().GetHeader().GetSlot(),
+		"ValIdx":     sidecar.GetSignedBlockHeader().GetHeader().GetProposerIndex(),
+		"index":      sidecar.GetIndex(),
+		"StateRoot":  hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetStateRoot()),
+		"BodyRoot":   hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetBodyRoot()),
+		"ParentRoot": hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetParentRoot()),
+	}, nil
+}
