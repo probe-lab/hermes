@@ -41,6 +41,11 @@ type TraceEventElectraBlock struct {
 	Block *ethtypes.SignedBeaconBlockElectra
 }
 
+type TraceEventFuluBlock struct {
+	host.TraceEventPayloadMetaData
+	Block *ethtypes.SignedBeaconBlockFulu
+}
+
 type TraceEventAttestation struct {
 	host.TraceEventPayloadMetaData
 	Attestation *ethtypes.Attestation
@@ -146,6 +151,8 @@ func (t *FullOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, ds
 		payload, err = t.renderDenebBlock(msg, d)
 	case *ethtypes.SignedBeaconBlockElectra:
 		payload, err = t.renderElectraBlock(msg, d)
+	case *ethtypes.SignedBeaconBlockFulu:
+		payload, err = t.renderFuluBlock(msg, d)
 	case *ethtypes.Attestation:
 		payload, err = t.renderAttestation(msg, d)
 	case *ethtypes.AttestationElectra:
@@ -270,6 +277,22 @@ func (t *FullOutput) renderElectraBlock(
 	block *ethtypes.SignedBeaconBlockElectra,
 ) (*TraceEventElectraBlock, error) {
 	return &TraceEventElectraBlock{
+		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{
+			PeerID:  msg.ReceivedFrom.String(),
+			Topic:   msg.GetTopic(),
+			Seq:     msg.GetSeqno(),
+			MsgID:   hex.EncodeToString([]byte(msg.ID)),
+			MsgSize: len(msg.Data),
+		},
+		Block: block,
+	}, nil
+}
+
+func (t *FullOutput) renderFuluBlock(
+	msg *pubsub.Message,
+	block *ethtypes.SignedBeaconBlockFulu,
+) (*TraceEventFuluBlock, error) {
+	return &TraceEventFuluBlock{
 		TraceEventPayloadMetaData: host.TraceEventPayloadMetaData{
 			PeerID:  msg.ReceivedFrom.String(),
 			Topic:   msg.GetTopic(),
