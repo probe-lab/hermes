@@ -55,6 +55,8 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderDenebBlock(msg, d)
 	case *ethtypes.SignedBeaconBlockElectra:
 		payload, err = k.renderElectraBlock(msg, d)
+	case *ethtypes.SignedBeaconBlockFulu:
+		payload, err = k.renderFuluBlock(msg, d)
 	case *ethtypes.Attestation:
 		payload, err = k.renderAttestation(msg, d)
 	case *ethtypes.AttestationElectra:
@@ -206,6 +208,28 @@ func (k *KinesisOutput) renderDenebBlock(
 func (k *KinesisOutput) renderElectraBlock(
 	msg *pubsub.Message,
 	block *ethtypes.SignedBeaconBlockElectra,
+) (map[string]any, error) {
+	root, err := block.GetBlock().HashTreeRoot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine block hash tree root: %w", err)
+	}
+
+	return map[string]any{
+		"PeerID":     msg.ReceivedFrom,
+		"Topic":      msg.GetTopic(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":    len(msg.Data),
+		"Slot":       block.GetBlock().GetSlot(),
+		"Root":       root,
+		"ValIdx":     block.GetBlock().GetProposerIndex(),
+		"TimeInSlot": k.genesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.secondsPerSlot),
+	}, nil
+}
+
+func (k *KinesisOutput) renderFuluBlock(
+	msg *pubsub.Message,
+	block *ethtypes.SignedBeaconBlockFulu,
 ) (map[string]any, error) {
 	root, err := block.GetBlock().HashTreeRoot()
 	if err != nil {
