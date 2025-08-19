@@ -28,7 +28,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/prysmaticlabs/go-bitfield"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -43,6 +42,9 @@ type ReqRespConfig struct {
 	ForkDigest [4]byte
 	Encoder    encoder.NetworkEncoding
 	DataStream hermeshost.DataStream
+
+	AttestationSubnetConfig *SubnetConfig
+	SyncSubnetConfig        *SubnetConfig
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
@@ -81,8 +83,8 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 
 	md := &pb.MetaDataV1{
 		SeqNumber: 0,
-		Attnets:   bitfield.NewBitvector64(),
-		Syncnets:  bitfield.Bitvector4{byte(0x00)},
+		Attnets:   BitArrayFromAttestationSubnets(cfg.AttestationSubnetConfig.Subnets),
+		Syncnets:  BitArrayFromSyncSubnets(cfg.SyncSubnetConfig.Subnets),
 	}
 
 	// fake to support all attnets

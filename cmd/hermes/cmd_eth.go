@@ -437,11 +437,6 @@ func cmdEthAction(c *cli.Context) error {
 		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
 	}
 
-	// Overriding configuration so that functions like ComputForkDigest take the
-	// correct input data from the global configuration.
-	params.OverrideBeaconConfig(config.Beacon)
-	params.OverrideBeaconNetworkConfig(config.Network)
-
 	cfg := &eth.NodeConfig{
 		GenesisConfig:               config.Genesis,
 		NetworkConfig:               config.Network,
@@ -488,7 +483,12 @@ func cmdEthAction(c *cli.Context) error {
 
 // createSubnetConfigs creates subnet configurations based on the command line flags.
 func createSubnetConfigs() map[string]*eth.SubnetConfig {
-	subnetConfigs := make(map[string]*eth.SubnetConfig)
+	// ensure that we don't subscribe to any of the topics by default
+	subnetConfigs := map[string]*eth.SubnetConfig{
+		p2p.GossipAttestationMessage:   {Subnets: make([]uint64, 0)},
+		p2p.GossipSyncCommitteeMessage: {Subnets: make([]uint64, 0)},
+		p2p.GossipBlobSidecarMessage:   {Subnets: make([]uint64, 0)},
+	}
 
 	// Configure attestation subnets if specified
 	if configureAttestationSubnet() {

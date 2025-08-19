@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
 	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
@@ -161,13 +162,15 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	disc, err := NewDiscovery(privKey, &DiscoveryConfig{
-		GenesisConfig: cfg.GenesisConfig,
-		NetworkConfig: cfg.NetworkConfig,
-		Addr:          cfg.Devp2pHost,
-		UDPPort:       cfg.Devp2pPort,
-		TCPPort:       cfg.Libp2pPort,
-		Tracer:        cfg.Tracer,
-		Meter:         cfg.Meter,
+		GenesisConfig:           cfg.GenesisConfig,
+		NetworkConfig:           cfg.NetworkConfig,
+		AttestationSubnetConfig: cfg.SubnetConfigs[p2p.GossipAttestationMessage],
+		SyncSubnetConfig:        cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage],
+		Addr:                    cfg.Devp2pHost,
+		UDPPort:                 cfg.Devp2pPort,
+		TCPPort:                 cfg.Libp2pPort,
+		Tracer:                  cfg.Tracer,
+		Meter:                   cfg.Meter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("new discovery service: %w", err)
@@ -176,13 +179,15 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 
 	// initialize the request-response protocol handlers
 	reqRespCfg := &ReqRespConfig{
-		ForkDigest:   cfg.ForkDigest,
-		Encoder:      cfg.RPCEncoder,
-		DataStream:   ds,
-		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
-		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
-		Tracer:       cfg.Tracer,
-		Meter:        cfg.Meter,
+		ForkDigest:              cfg.ForkDigest,
+		Encoder:                 cfg.RPCEncoder,
+		AttestationSubnetConfig: cfg.SubnetConfigs[p2p.GossipAttestationMessage],
+		SyncSubnetConfig:        cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage],
+		DataStream:              ds,
+		ReadTimeout:             cfg.BeaconConfig.TtfbTimeoutDuration(),
+		WriteTimeout:            cfg.BeaconConfig.RespTimeoutDuration(),
+		Tracer:                  cfg.Tracer,
+		Meter:                   cfg.Meter,
 	}
 
 	reqResp, err := NewReqResp(h, reqRespCfg)
