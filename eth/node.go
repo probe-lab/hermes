@@ -161,11 +161,20 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("extract ecdsa private key: %w", err)
 	}
 
+	attConfig, ok := cfg.SubnetConfigs[p2p.GossipAttestationMessage]
+	if !ok {
+		attConfig = new(SubnetConfig)
+	}
+	syncConfig, ok := cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage]
+	if !ok {
+		syncConfig = new(SubnetConfig)
+	}
+
 	disc, err := NewDiscovery(privKey, &DiscoveryConfig{
 		GenesisConfig:           cfg.GenesisConfig,
 		NetworkConfig:           cfg.NetworkConfig,
-		AttestationSubnetConfig: cfg.SubnetConfigs[p2p.GossipAttestationMessage],
-		SyncSubnetConfig:        cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage],
+		AttestationSubnetConfig: attConfig,
+		SyncSubnetConfig:        syncConfig,
 		Addr:                    cfg.Devp2pHost,
 		UDPPort:                 cfg.Devp2pPort,
 		TCPPort:                 cfg.Libp2pPort,
@@ -181,8 +190,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	reqRespCfg := &ReqRespConfig{
 		ForkDigest:              cfg.ForkDigest,
 		Encoder:                 cfg.RPCEncoder,
-		AttestationSubnetConfig: cfg.SubnetConfigs[p2p.GossipAttestationMessage],
-		SyncSubnetConfig:        cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage],
+		AttestationSubnetConfig: attConfig,
+		SyncSubnetConfig:        syncConfig,
 		DataStream:              ds,
 		ReadTimeout:             cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout:            cfg.BeaconConfig.RespTimeoutDuration(),

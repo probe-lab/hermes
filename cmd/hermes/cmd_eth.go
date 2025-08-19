@@ -484,11 +484,7 @@ func cmdEthAction(c *cli.Context) error {
 // createSubnetConfigs creates subnet configurations based on the command line flags.
 func createSubnetConfigs() map[string]*eth.SubnetConfig {
 	// ensure that we don't subscribe to any of the topics by default
-	subnetConfigs := map[string]*eth.SubnetConfig{
-		p2p.GossipAttestationMessage:   {Subnets: make([]uint64, 0)},
-		p2p.GossipSyncCommitteeMessage: {Subnets: make([]uint64, 0)},
-		p2p.GossipBlobSidecarMessage:   {Subnets: make([]uint64, 0)},
-	}
+	subnetConfigs := make(map[string]*eth.SubnetConfig)
 
 	// Configure attestation subnets if specified
 	if configureAttestationSubnet() {
