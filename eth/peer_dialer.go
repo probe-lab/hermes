@@ -62,6 +62,7 @@ func (p *PeerDialer) Serve(ctx context.Context) error {
 		pConnect := p.host.Network().Connectedness(newPeer.AddrInfo.ID)
 		switch pConnect {
 		case network.NotConnected, network.CanConnect:
+			// TODO: Good to have:
 			// filter to only peers that support attestation networks that we want
 			// - if we are not subscribed to subnets, connect any node
 
