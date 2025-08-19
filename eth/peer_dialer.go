@@ -11,23 +11,14 @@ import (
 	"github.com/probe-lab/hermes/host"
 )
 
-type peeringOptions struct {
-	// simple flag to check if we need to filter out the peers that we will connect
-	filter bool
-
-	attestnets uint64
-	syncnets   uint64
-}
-
 // PeerDialer is a suture service that reads peers from the peerChan (which
 // is filled by the [Discovery] service until that peerChan channel is closed.
 // When PeerDialer sees a new peer, it does a few sanity checks and tries
 // to establish a connection.
 type PeerDialer struct {
-	peeringOpts peeringOptions
-	host        *host.Host
-	peerChan    <-chan *DiscoveredPeer
-	maxPeers    int
+	host     *host.Host
+	peerChan <-chan *DiscoveredPeer
+	maxPeers int
 }
 
 var _ suture.Service = (*PeerDialer)(nil)
