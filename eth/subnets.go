@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/prysmaticlabs/go-bitfield"
 )
 
 // SubnetSelectionType defines how subnets are selected for any topic
@@ -192,4 +193,22 @@ func getSubnetRange(start, end uint64) []uint64 {
 	}
 
 	return subnets
+}
+
+// BitArrayFromAttestationSubnets returns the bitVector representation of the subscribed attestation subnets
+func BitArrayFromAttestationSubnets(subnets []uint64) bitfield.Bitvector64 {
+	bitV := bitfield.NewBitvector64()
+	for _, subnet := range subnets {
+		bitV.SetBitAt(subnet, true)
+	}
+	return bitV
+}
+
+// BitArrayFromSyncSubnets returns the bitVector representation of the subscribed sync subnets
+func BitArrayFromSyncSubnets(subnets []uint64) bitfield.Bitvector4 {
+	bitV := bitfield.NewBitvector4()
+	for _, subnet := range subnets {
+		bitV.SetBitAt(subnet, true)
+	}
+	return bitV
 }
