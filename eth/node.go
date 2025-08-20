@@ -162,12 +162,16 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 
 	attConfig, ok := cfg.SubnetConfigs[p2p.GossipAttestationMessage]
-	if !ok {
-		attConfig = new(SubnetConfig)
+	if ok {
+		attConfig.Subnets = GetSubscribedSubnets(attConfig, globalBeaconConfig.AttestationSubnetCount)
 	}
 	syncConfig, ok := cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage]
-	if !ok {
-		syncConfig = new(SubnetConfig)
+	if ok {
+		syncConfig.Subnets = GetSubscribedSubnets(attConfig, globalBeaconConfig.SyncCommitteeSubnetCount)
+	}
+	blobConfig, ok := cfg.SubnetConfigs[p2p.GossipSyncCommitteeMessage]
+	if ok {
+		blobConfig.Subnets = GetSubscribedSubnets(attConfig, globalBeaconConfig.BlobsidecarSubnetCountElectra)
 	}
 
 	disc, err := NewDiscovery(privKey, &DiscoveryConfig{

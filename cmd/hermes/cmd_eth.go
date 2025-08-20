@@ -575,7 +575,6 @@ func createAttestationSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetAttestationStart
 		config.End = ethConfig.SubnetAttestationEnd
 	}
-
 	return config
 }
 
@@ -602,7 +601,6 @@ func createSyncCommitteeSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetSyncCommitteeStart
 		config.End = ethConfig.SubnetSyncCommitteeEnd
 	}
-
 	return config
 }
 
@@ -629,7 +627,6 @@ func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetBlobSidecarStart
 		config.End = ethConfig.SubnetBlobSidecarEnd
 	}
-
 	return config
 }
 

@@ -50,7 +50,7 @@ func HasSubnets(topic string) (subnets uint64, hasSubnets bool) {
 		return globalBeaconConfig.SyncCommitteeSubnetCount, true
 
 	case p2p.GossipBlobSidecarMessage:
-		return globalBeaconConfig.BlobsidecarSubnetCount, true
+		return globalBeaconConfig.BlobsidecarSubnetCountElectra, true
 
 	default:
 		return uint64(0), false
@@ -102,7 +102,7 @@ func (s *SubnetConfig) Validate(topic string, subnetCount uint64) error {
 	return nil
 }
 
-// GetSubscribedSubnets returns the subnet IDs to subscribe to for a given topic.
+// GetSubscribedSubnets computes, stores and returns the subnet IDs to subscribe to for a given topic.
 // It handles the selection logic based on the subnet configuration.
 //
 // The function implements the following selection strategies:
@@ -117,17 +117,22 @@ func GetSubscribedSubnets(config *SubnetConfig, totalSubnets uint64) []uint64 {
 		// If no config, subscribe to all subnets by default.
 		return getAllSubnets(totalSubnets)
 	}
+	if len(config.Subnets) > 0 {
+		// if the subnets are alread pre-computed, just return them
+		return config.Subnets
+	}
 
 	switch config.Type {
 	case SubnetStatic:
-		return config.Subnets
+		// pass
 	case SubnetRandom:
-		return getRandomSubnets(totalSubnets, config.Count)
+		config.Subnets = getRandomSubnets(totalSubnets, config.Count)
 	case SubnetStaticRange:
-		return getSubnetRange(config.Start, config.End)
+		config.Subnets = getSubnetRange(config.Start, config.End)
 	default: // SubnetAll or unrecognized type.
-		return getAllSubnets(totalSubnets)
+		config.Subnets = getAllSubnets(totalSubnets)
 	}
+	return config.Subnets
 }
 
 // getRandomSubnets creates a slice of random subnet IDs.

@@ -87,10 +87,10 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 		Syncnets:  BitArrayFromSyncSubnets(cfg.SyncSubnetConfig.Subnets),
 	}
 
-	// fake to support all attnets
-	for i := uint64(0); i < md.Attnets.Len(); i++ {
-		md.Attnets.SetBitAt(i, true)
-	}
+	slog.Info("Composed local MetaData",
+		"attnets", md.Attnets,
+		"syncnets", md.Syncnets,
+	)
 
 	p := &ReqResp{
 		host:      h,
@@ -483,6 +483,10 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 	}
 
+	slog.Info(
+		"metadata response",
+		"attnets", metaData.Attnets,
+	)
 	return traceData, stream.Close()
 }
 
@@ -504,7 +508,11 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 		"Syncnets":  hex.EncodeToString(metaData.Syncnets.Bytes()),
 	}
-
+	slog.Info(
+		"metadata response",
+		"attnets", metaData.Attnets,
+		"synccommittees", metaData.Syncnets,
+	)
 	return traceData, stream.Close()
 }
 
