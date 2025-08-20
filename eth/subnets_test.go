@@ -19,19 +19,19 @@ func TestHasSubnets(t *testing.T) {
 		{
 			name:          "attestation topic",
 			topic:         p2p.GossipAttestationMessage,
-			wantSubnets:   globalBeaconConfig.AttestationSubnetCount,
+			wantSubnets:   GlobalBeaconConfig.AttestationSubnetCount,
 			wantHasSubnet: true,
 		},
 		{
 			name:          "sync committee topic",
 			topic:         p2p.GossipSyncCommitteeMessage,
-			wantSubnets:   globalBeaconConfig.SyncCommitteeSubnetCount,
+			wantSubnets:   GlobalBeaconConfig.SyncCommitteeSubnetCount,
 			wantHasSubnet: true,
 		},
 		{
 			name:          "blob sidecar topic",
 			topic:         p2p.GossipBlobSidecarMessage,
-			wantSubnets:   globalBeaconConfig.BlobsidecarSubnetCountElectra,
+			wantSubnets:   GlobalBeaconConfig.BlobsidecarSubnetCountElectra,
 			wantHasSubnet: true,
 		},
 		{
@@ -59,7 +59,7 @@ func TestHasSubnets(t *testing.T) {
 
 func TestSubnetConfig_Validate(t *testing.T) {
 	// Setup global beacon config for tests.
-	globalBeaconConfig = defaultTestBeaconConfig()
+	GlobalBeaconConfig = defaultTestBeaconConfig()
 	const totalSubnets = 64
 
 	tests := []struct {
@@ -181,7 +181,7 @@ func TestSubnetConfig_Validate(t *testing.T) {
 
 func TestGetSubscribedSubnets(t *testing.T) {
 	// Setup global beacon config for tests.
-	globalBeaconConfig = defaultTestBeaconConfig()
+	GlobalBeaconConfig = defaultTestBeaconConfig()
 
 	const totalSubnets = 64
 
@@ -270,7 +270,7 @@ func TestGetSubscribedSubnets(t *testing.T) {
 
 func TestGetRandomSubnets(t *testing.T) {
 	// Setup global beacon config for tests.
-	globalBeaconConfig = defaultTestBeaconConfig()
+	GlobalBeaconConfig = defaultTestBeaconConfig()
 
 	tests := []struct {
 		name         string

@@ -575,6 +575,7 @@ func createAttestationSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetAttestationStart
 		config.End = ethConfig.SubnetAttestationEnd
 	}
+	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.AttestationSubnetCount)
 	return config
 }
 
@@ -601,6 +602,7 @@ func createSyncCommitteeSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetSyncCommitteeStart
 		config.End = ethConfig.SubnetSyncCommitteeEnd
 	}
+	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.SyncCommitteeSubnetCount)
 	return config
 }
 
@@ -627,6 +629,7 @@ func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetBlobSidecarStart
 		config.End = ethConfig.SubnetBlobSidecarEnd
 	}
+	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.BlobsidecarSubnetCountElectra)
 	return config
 }
 
