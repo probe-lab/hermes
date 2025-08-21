@@ -28,7 +28,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/prysmaticlabs/go-bitfield"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -43,6 +42,9 @@ type ReqRespConfig struct {
 	ForkDigest [4]byte
 	Encoder    encoder.NetworkEncoding
 	DataStream hermeshost.DataStream
+
+	AttestationSubnetConfig *SubnetConfig
+	SyncSubnetConfig        *SubnetConfig
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
@@ -81,14 +83,14 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 
 	md := &pb.MetaDataV1{
 		SeqNumber: 0,
-		Attnets:   bitfield.NewBitvector64(),
-		Syncnets:  bitfield.Bitvector4{byte(0x00)},
+		Attnets:   BitArrayFromAttestationSubnets(cfg.AttestationSubnetConfig.Subnets),
+		Syncnets:  BitArrayFromSyncSubnets(cfg.SyncSubnetConfig.Subnets),
 	}
 
-	// fake to support all attnets
-	for i := uint64(0); i < md.Attnets.Len(); i++ {
-		md.Attnets.SetBitAt(i, true)
-	}
+	slog.Info("Composed local MetaData",
+		"attnets", md.Attnets,
+		"syncnets", md.Syncnets,
+	)
 
 	p := &ReqResp{
 		host:      h,
@@ -481,6 +483,10 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 	}
 
+	slog.Info(
+		"metadata response",
+		"attnets", metaData.Attnets,
+	)
 	return traceData, stream.Close()
 }
 
@@ -502,7 +508,11 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 		"Syncnets":  hex.EncodeToString(metaData.Syncnets.Bytes()),
 	}
-
+	slog.Info(
+		"metadata response",
+		"attnets", metaData.Attnets,
+		"synccommittees", metaData.Syncnets,
+	)
 	return traceData, stream.Close()
 }
 

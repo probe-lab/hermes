@@ -31,7 +31,7 @@ func TestSubnetIntegration(t *testing.T) {
 		// Count attestation subnet topics
 		attSubnetCount := 0
 		for _, topic := range topics {
-			for subnet := uint64(0); subnet < globalBeaconConfig.AttestationSubnetCount; subnet++ {
+			for subnet := uint64(0); subnet < GlobalBeaconConfig.AttestationSubnetCount; subnet++ {
 				if topic == formatSubnetTopic(attTopicFormat, subnet, ssz) {
 					attSubnetCount++
 					break
@@ -40,7 +40,7 @@ func TestSubnetIntegration(t *testing.T) {
 		}
 
 		// Should have all attestation subnets by default
-		assert.Equal(t, int(globalBeaconConfig.AttestationSubnetCount), attSubnetCount)
+		assert.Equal(t, int(GlobalBeaconConfig.AttestationSubnetCount), attSubnetCount)
 	})
 
 	// Test with specific subnet configs
@@ -88,7 +88,7 @@ func TestSubnetIntegration(t *testing.T) {
 		// Count sync committee topics
 		syncSubnetCount := 0
 		for _, topic := range topics {
-			for subnet := uint64(0); subnet < globalBeaconConfig.SyncCommitteeSubnetCount; subnet++ {
+			for subnet := uint64(0); subnet < GlobalBeaconConfig.SyncCommitteeSubnetCount; subnet++ {
 				if topic == formatSubnetTopic(syncTopicFormat, subnet, ssz) {
 					syncSubnetCount++
 					break

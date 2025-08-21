@@ -10,9 +10,6 @@ import (
 )
 
 func TestHasSubnets(t *testing.T) {
-	// Setup global beacon config for tests.
-	globalBeaconConfig = defaultTestBeaconConfig()
-
 	tests := []struct {
 		name          string
 		topic         string
@@ -22,19 +19,19 @@ func TestHasSubnets(t *testing.T) {
 		{
 			name:          "attestation topic",
 			topic:         p2p.GossipAttestationMessage,
-			wantSubnets:   globalBeaconConfig.AttestationSubnetCount,
+			wantSubnets:   GlobalBeaconConfig.AttestationSubnetCount,
 			wantHasSubnet: true,
 		},
 		{
 			name:          "sync committee topic",
 			topic:         p2p.GossipSyncCommitteeMessage,
-			wantSubnets:   globalBeaconConfig.SyncCommitteeSubnetCount,
+			wantSubnets:   GlobalBeaconConfig.SyncCommitteeSubnetCount,
 			wantHasSubnet: true,
 		},
 		{
 			name:          "blob sidecar topic",
 			topic:         p2p.GossipBlobSidecarMessage,
-			wantSubnets:   globalBeaconConfig.BlobsidecarSubnetCount,
+			wantSubnets:   GlobalBeaconConfig.BlobsidecarSubnetCountElectra,
 			wantHasSubnet: true,
 		},
 		{
@@ -54,13 +51,15 @@ func TestHasSubnets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			subnets, hasSubnets := HasSubnets(tt.topic)
-			assert.Equal(t, tt.wantSubnets, subnets)
 			assert.Equal(t, tt.wantHasSubnet, hasSubnets)
+			assert.Equal(t, tt.wantSubnets, subnets)
 		})
 	}
 }
 
 func TestSubnetConfig_Validate(t *testing.T) {
+	// Setup global beacon config for tests.
+	GlobalBeaconConfig = defaultTestBeaconConfig()
 	const totalSubnets = 64
 
 	tests := []struct {
@@ -181,6 +180,9 @@ func TestSubnetConfig_Validate(t *testing.T) {
 }
 
 func TestGetSubscribedSubnets(t *testing.T) {
+	// Setup global beacon config for tests.
+	GlobalBeaconConfig = defaultTestBeaconConfig()
+
 	const totalSubnets = 64
 
 	tests := []struct {
@@ -267,6 +269,9 @@ func TestGetSubscribedSubnets(t *testing.T) {
 }
 
 func TestGetRandomSubnets(t *testing.T) {
+	// Setup global beacon config for tests.
+	GlobalBeaconConfig = defaultTestBeaconConfig()
+
 	tests := []struct {
 		name         string
 		totalSubnets uint64
@@ -391,8 +396,9 @@ func TestGetSubnetRange(t *testing.T) {
 // Helper function to create a default test beacon config
 func defaultTestBeaconConfig() *params.BeaconChainConfig {
 	return &params.BeaconChainConfig{
-		AttestationSubnetCount:   64,
-		SyncCommitteeSubnetCount: 4,
-		BlobsidecarSubnetCount:   6,
+		AttestationSubnetCount:        64,
+		SyncCommitteeSubnetCount:      4,
+		BlobsidecarSubnetCount:        6,
+		BlobsidecarSubnetCountElectra: 9,
 	}
 }

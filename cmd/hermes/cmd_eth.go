@@ -437,11 +437,6 @@ func cmdEthAction(c *cli.Context) error {
 		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
 	}
 
-	// Overriding configuration so that functions like ComputForkDigest take the
-	// correct input data from the global configuration.
-	params.OverrideBeaconConfig(config.Beacon)
-	params.OverrideBeaconNetworkConfig(config.Network)
-
 	cfg := &eth.NodeConfig{
 		GenesisConfig:               config.Genesis,
 		NetworkConfig:               config.Network,
@@ -488,6 +483,7 @@ func cmdEthAction(c *cli.Context) error {
 
 // createSubnetConfigs creates subnet configurations based on the command line flags.
 func createSubnetConfigs() map[string]*eth.SubnetConfig {
+	// ensure that we don't subscribe to any of the topics by default
 	subnetConfigs := make(map[string]*eth.SubnetConfig)
 
 	// Configure attestation subnets if specified
@@ -579,7 +575,7 @@ func createAttestationSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetAttestationStart
 		config.End = ethConfig.SubnetAttestationEnd
 	}
-
+	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.AttestationSubnetCount)
 	return config
 }
 
@@ -606,7 +602,7 @@ func createSyncCommitteeSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetSyncCommitteeStart
 		config.End = ethConfig.SubnetSyncCommitteeEnd
 	}
-
+	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.SyncCommitteeSubnetCount)
 	return config
 }
 
@@ -633,7 +629,7 @@ func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
 		config.Start = ethConfig.SubnetBlobSidecarStart
 		config.End = ethConfig.SubnetBlobSidecarEnd
 	}
-
+	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.BlobsidecarSubnetCountElectra)
 	return config
 }
 

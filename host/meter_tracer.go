@@ -226,10 +226,45 @@ func (m *meterTracer) setMetricFromRPC(act action, subCtr metric.Int64Counter, p
 
 	subCtr.Add(ctx, int64(len(rpc.Subscriptions)))
 	if rpc.Control != nil {
-		ctrlCtr.Add(ctx, int64(len(rpc.Control.Graft)), metric.WithAttributes(attribute.String("control_message", "graft")))
-		ctrlCtr.Add(ctx, int64(len(rpc.Control.Prune)), metric.WithAttributes(attribute.String("control_message", "prune")))
-		ctrlCtr.Add(ctx, int64(len(rpc.Control.Ihave)), metric.WithAttributes(attribute.String("control_message", "ihave")))
-		ctrlCtr.Add(ctx, int64(len(rpc.Control.Iwant)), metric.WithAttributes(attribute.String("control_message", "iwant")))
+		for _, g := range rpc.Control.Graft {
+			ctrlCtr.Add(
+				ctx, int64(1),
+				metric.WithAttributes(
+					attribute.String("control_message", "graft"),
+					attribute.String("topic", g.GetTopicID()),
+				),
+			)
+		}
+		for _, p := range rpc.Control.Prune {
+			ctrlCtr.Add(
+				ctx, int64(1),
+				metric.WithAttributes(
+					attribute.String("control_message", "prune"),
+					attribute.String("topic", p.GetTopicID()),
+				),
+			)
+		}
+		for _, ihave := range rpc.Control.Ihave {
+			ctrlCtr.Add(
+				ctx, int64(len(ihave.GetMessageIDs())),
+				metric.WithAttributes(
+					attribute.String("control_message", "ihave"),
+					attribute.String("topic", ihave.GetTopicID()),
+				),
+			)
+		}
+		for _, iwant := range rpc.Control.Iwant {
+			ctrlCtr.Add(
+				ctx, int64(len(iwant.GetMessageIDs())),
+				metric.WithAttributes(attribute.String("control_message", "iwant")),
+			)
+		}
+		for _, idontwant := range rpc.Control.Idontwant {
+			ctrlCtr.Add(
+				ctx, int64(len(idontwant.GetMessageIDs())),
+				metric.WithAttributes(attribute.String("control_message", "idontwant")),
+			)
+		}
 	}
 	for _, msg := range rpc.Publish {
 		// For incoming messages from pubsub, we do not record metrics for them as these values
