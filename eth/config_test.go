@@ -173,7 +173,7 @@ func TestTopicGenerationWithMixedConfig(t *testing.T) {
 	// Should have exactly the configured attestation subnets
 	hasAttSubnet := make(map[uint64]bool)
 	for _, topic := range topics {
-		for subnet := uint64(0); subnet < globalBeaconConfig.AttestationSubnetCount; subnet++ {
+		for subnet := uint64(0); subnet < GlobalBeaconConfig.AttestationSubnetCount; subnet++ {
 			expectedTopic := formatSubnetTopic(attTopicFormat, subnet, *encoder)
 			if topic == expectedTopic {
 				hasAttSubnet[subnet] = true
@@ -194,7 +194,7 @@ func TestTopicGenerationWithMixedConfig(t *testing.T) {
 
 	syncSubnetCount := 0
 	for _, topic := range topics {
-		for subnet := uint64(0); subnet < globalBeaconConfig.SyncCommitteeSubnetCount; subnet++ {
+		for subnet := uint64(0); subnet < GlobalBeaconConfig.SyncCommitteeSubnetCount; subnet++ {
 			expectedTopic := formatSubnetTopic(syncTopicFormat, subnet, *encoder)
 			if topic == expectedTopic {
 				syncSubnetCount++
@@ -203,6 +203,6 @@ func TestTopicGenerationWithMixedConfig(t *testing.T) {
 	}
 
 	// Should have all sync committee subnets
-	assert.Equal(t, int(globalBeaconConfig.SyncCommitteeSubnetCount), syncSubnetCount,
+	assert.Equal(t, int(GlobalBeaconConfig.SyncCommitteeSubnetCount), syncSubnetCount,
 		"Should have all sync committee subnets by default")
 }

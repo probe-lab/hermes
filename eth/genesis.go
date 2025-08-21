@@ -26,7 +26,7 @@ var (
 	DenebForkVersion     ForkVersion
 	ElectraForkVersion   ForkVersion
 
-	globalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
+	GlobalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
 
 // configure global ForkVersion variables
@@ -38,7 +38,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
 	ElectraForkVersion = ForkVersion(beaconConfig.ElectraForkVersion)
 
-	globalBeaconConfig = beaconConfig
+	GlobalBeaconConfig = beaconConfig
 }
 
 // GenesisConfig represents the Genesis configuration with the Merkle Root
@@ -105,7 +105,7 @@ func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconCha
 }
 
 func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) {
-	genesisRoot := GenesisConfigs[globalBeaconConfig.ConfigName].GenesisValidatorRoot
+	genesisRoot := GenesisConfigs[GlobalBeaconConfig.ConfigName].GenesisValidatorRoot
 	phase0D, _ := signing.ComputeForkDigest(Phase0ForkVersion[:], genesisRoot)
 	altairD, _ := signing.ComputeForkDigest(AltairForkVersion[:], genesisRoot)
 	bellatrixD, _ := signing.ComputeForkDigest(BellatrixForkVersion[:], genesisRoot)

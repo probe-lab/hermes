@@ -9,7 +9,6 @@ import (
 	"github.com/OffchainLabs/prysm/v6/time/slots"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/prysmaticlabs/go-bitfield"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -17,11 +16,15 @@ import (
 type DiscoveryConfig struct {
 	GenesisConfig *GenesisConfig
 	NetworkConfig *params.NetworkConfig
-	Addr          string
-	UDPPort       int
-	TCPPort       int
-	Tracer        trace.Tracer
-	Meter         metric.Meter
+
+	Addr    string
+	UDPPort int
+	TCPPort int
+	Tracer  trace.Tracer
+	Meter   metric.Meter
+
+	AttestationSubnetConfig *SubnetConfig
+	SyncSubnetConfig        *SubnetConfig
 }
 
 // enrEth2Entry generates an Ethereum 2.0 entry for the Ethereum Node Record
@@ -61,15 +64,12 @@ func (d *DiscoveryConfig) enrEth2Entry() (enr.Entry, error) {
 }
 
 func (d *DiscoveryConfig) enrAttnetsEntry() enr.Entry {
-	bitV := bitfield.NewBitvector64()
-	for i := uint64(0); i < bitV.Len(); i++ {
-		bitV.SetBitAt(i, true)
-	}
+	bitV := BitArrayFromAttestationSubnets(d.AttestationSubnetConfig.Subnets)
 	return enr.WithEntry(d.NetworkConfig.AttSubnetKey, bitV.Bytes())
 }
 
 func (d *DiscoveryConfig) enrSyncnetsEntry() enr.Entry {
-	bitV := bitfield.Bitvector4{byte(0x00)}
+	bitV := BitArrayFromSyncSubnets(d.SyncSubnetConfig.Subnets)
 	return enr.WithEntry(d.NetworkConfig.SyncCommsSubnetKey, bitV.Bytes())
 }
 

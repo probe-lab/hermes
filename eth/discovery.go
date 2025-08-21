@@ -31,7 +31,7 @@ type Discovery struct {
 	cfg  *DiscoveryConfig
 	pk   *ecdsa.PrivateKey
 	node *enode.LocalNode
-	out  chan peer.AddrInfo
+	out  chan *DiscoveredPeer
 
 	// Metrics
 	MeterDiscoveredPeers metric.Int64Counter
@@ -77,7 +77,7 @@ func NewDiscovery(privKey *ecdsa.PrivateKey, cfg *DiscoveryConfig) (*Discovery, 
 		cfg:  cfg,
 		pk:   privKey,
 		node: localNode,
-		out:  make(chan peer.AddrInfo),
+		out:  make(chan *DiscoveredPeer),
 	}
 
 	d.MeterDiscoveredPeers, err = cfg.Meter.Int64Counter("discovered_peers", metric.WithDescription("Total number of discovered peers"))
@@ -207,7 +207,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 		d.MeterDiscoveredPeers.Add(ctx, 1)
 
 		select {
-		case d.out <- pi.AddrInfo:
+		case d.out <- pi:
 		case <-ctx.Done():
 			return nil
 		}

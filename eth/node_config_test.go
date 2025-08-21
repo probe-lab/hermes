@@ -123,12 +123,12 @@ func TestNodeConfig_GetDesiredFullTopics(t *testing.T) {
 				attTopicFormat, err := topicFormatFromBase(p2p.GossipAttestationMessage)
 				require.NoError(t, err)
 
-				totalAttSubnets := int(globalBeaconConfig.AttestationSubnetCount)
+				totalAttSubnets := int(GlobalBeaconConfig.AttestationSubnetCount)
 				attSubnetTopicCount := 0
 
 				// Count how many attestation subnet topics we have.
 				for _, topic := range topics {
-					for subnet := uint64(0); subnet < globalBeaconConfig.AttestationSubnetCount; subnet++ {
+					for subnet := uint64(0); subnet < GlobalBeaconConfig.AttestationSubnetCount; subnet++ {
 						if topic == formatSubnetTopic(attTopicFormat, subnet, ssz) {
 							attSubnetTopicCount++
 							break
@@ -200,7 +200,7 @@ func formatSubnetTopic(base string, subnet uint64, encoder encoder.NetworkEncodi
 }
 
 func setupTestNodeConfig() *NodeConfig {
-	globalBeaconConfig = defaultTestBeaconConfig()
+	GlobalBeaconConfig = defaultTestBeaconConfig()
 
 	return &NodeConfig{
 		GenesisConfig: &GenesisConfig{
@@ -208,7 +208,7 @@ func setupTestNodeConfig() *NodeConfig {
 			GenesisValidatorRoot: []byte{1, 2, 3},
 		},
 		NetworkConfig:   &params.NetworkConfig{},
-		BeaconConfig:    globalBeaconConfig,
+		BeaconConfig:    GlobalBeaconConfig,
 		ForkDigest:      [4]byte{1, 2, 3, 4},
 		DialTimeout:     60 * time.Second,
 		Devp2pHost:      "127.0.0.1",
