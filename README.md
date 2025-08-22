@@ -9,7 +9,7 @@
 Hermes is light libp2p networking node that serves as a GossipSub listener and tracer for multiple networks.
 It discovers and connects with network participats subscribing to all relevant pubsub topics of the respective
 network and traces all protocol interactions like grafts, prunes, and any RPCs.
-As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
+As of `2025-08-22`, Hermes supports the Ethereum, Filecoin, and OPStack-based networks.
 
 ## Table of Contents
 
@@ -27,6 +27,7 @@ As of `2025-07-11`, Hermes supports the Ethereum and Filecoin networks.
       * [Topic Subscription](#topic-subscription)
     * [Filecoin](#filecoin)
       * [Hermes vs Filecoin Lite Nodes](#hermes-vs-filecoin-lite-nodes)
+    * [Optimism](#optimism)
   * [Importing Hermes](#importing-hermes)
   * [Telemetry](#telemetry)
     * [Metrics](#metrics)
@@ -61,6 +62,7 @@ Start Hermes by running:
 go run ./cmd/hermes # Show help
 go run ./cmd/hermes eth --help # Ethereum-specific options
 go run ./cmd/hermes fil --help # Filecoin-specific options
+go run ./cmd/hermes op --help # OPStack-specific options
 ```
 
 <details>
@@ -76,6 +78,7 @@ USAGE:
 COMMANDS:
    eth, ethereum  Listen to gossipsub topics of the Ethereum network
    fil, filecoin  Listen to gossipsub topics of the Filecoin network
+   op, optimism   Listen to gossipsub topics of any OPStack-based network
    benchmark      performs the given set of benchmarks for the hermes internals
    help, h        Shows a list of commands or help for one command
 
@@ -134,10 +137,11 @@ _However_, Hermes currently doesn't support loading CLI arguments from a file ¯
 ## Deployment
 
 Depending on the network you want to trace Hermes requires auxiliary infrastructure.
-As of `2025-07-11`, Hermes supports these networks:
+As of `2025-08-22`, Hermes supports these networks:
 
 - [Ethereum](#ethereum)
 - [Filecoin](#filecoin)
+- [OPStack](#opstack)
 
 ### General
 
@@ -379,6 +383,52 @@ A Lotus lite node cannot connect to the GossipSub protocol and relies on a remot
 Hermes, on the other hand, is a network monitoring instrument to analyze GossipSub performance.
 It behaves like a light node in the network by connecting to other nodes and advertising its presence through a periodic DHT lookup.
 Hermes subscribes to all available GossipSub topics, allowing it to comprehensively receive and trace all of the activity in the network.
+
+### OPStack
+
+To run Hermes in an OPStack-based network, no auxiliary infrastructure is needed.
+Just run:
+
+```shell
+go run ./cmd/hermes op
+```
+
+This will instruct Hermes to bootstrap into the Optimism network using the
+canonical bootstrap peers. Check out the help page via `hermes op --help` for
+configuration options of the libp2p host or devp2p local node (e.g., listen addrs/ports).
+
+If you want to connect to a different OPStack network, like Base, run:
+
+```shell
+go run ./cmd/hermes op --chain.id 8453
+```
+
+You can use https://chainlist.org/ to find the corresponding chain ID for the network
+you want to trace. The default is chain ID `10` which corresponds to the Optimism
+network.
+
+<details>
+<summary>Hermes' Optimism Help Page</summary>
+
+```text
+NAME:
+   hermes op - Listen to gossipsub topics of any OPStack-based network
+
+USAGE:
+   hermes op [command options]
+
+OPTIONS:
+   --key value, -k value                            The private key for the hermes libp2p/ethereum node in hex format. [$HERMES_OP_KEY]
+   --dial.timeout value                             The request timeout when contacting other network participants (default: 5s) [$HERMES_OP_DIAL_TIMEOUT]
+   --libp2p.host value                              Which network interface should libp2p bind to. (default: "127.0.0.1") [$HERMES_OP_LIBP2P_HOST]
+   --libp2p.port value                              On which port should libp2p listen (default: random) [$HERMES_OP_LIBP2P_PORT]
+   --chain.id value                                 Which network hermes should connect to (default: 10) [$HERMES_OP_CHAIN_ID]
+   --libp2p.peerscore.snapshot.frequency value      Frequency at which GossipSub peerscores will be accessed (in seconds) (default: random) [$HERMES_OP_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY]
+   --bootstrappers value [ --bootstrappers value ]  List of bootstrappers to connect to (default: eth mainnet) [$HERMES_OP_BOOTSTRAPPERS]
+   --help, -h                                       show help
+```
+
+</details>
 
 ## Importing Hermes
 Hermes is more than just a simple GossipSub listener and tracer.
