@@ -33,20 +33,13 @@ const (
 	// maxGossipSize limits the total size of gossip RPC containers as well as decompressed individual messages.
 	maxGossipSize = 10 * (1 << 20)
 	// minGossipSize is used to make sure that there is at least some data to validate the signature against.
-	minGossipSize          = 66
 	maxOutboundQueue       = 256
 	maxValidateQueue       = 256
 	globalValidateThrottle = 512
 	gossipHeartbeat        = 500 * time.Millisecond
 	// seenMessagesTTL limits the duration that message IDs are remembered for gossip deduplication purposes
 	// 130 * gossipHeartbeat
-	seenMessagesTTL  = 130 * gossipHeartbeat
-	DefaultMeshD     = 8  // topic stable mesh target count
-	DefaultMeshDlo   = 6  // topic stable mesh low watermark
-	DefaultMeshDhi   = 12 // topic stable mesh high watermark
-	DefaultMeshDlazy = 6  // gossip target
-	// peerScoreInspectFrequency is the frequency at which peer scores are inspected
-	peerScoreInspectFrequency = 15 * time.Second
+	seenMessagesTTL = 130 * gossipHeartbeat
 )
 
 // Message domains, the msg id function uncompresses to keep data monomorphic,
