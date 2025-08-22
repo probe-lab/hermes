@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/probe-lab/hermes/tele"
 	"log/slog"
 	"time"
 
@@ -105,7 +107,7 @@ func cmdOpAction(c *cli.Context) error {
 	defer slog.Info("Stopped Hermes for Optimism.")
 
 	// Print hermes configuration for debugging purposes
-	printFilConfig()
+	printOpConfig()
 
 	bootstrapperCfg := opConfig.Bootstrappers.Value()
 	if len(bootstrapperCfg) == 0 {
@@ -176,4 +178,20 @@ func cmdOpAction(c *cli.Context) error {
 	}
 
 	return n.Start(c.Context)
+}
+
+func printOpConfig() {
+	cfgCopy := *opConfig
+	if cfgCopy.PrivateKeyStr != "" {
+		cfgCopy.PrivateKeyStr = "***"
+	}
+
+	dat, err := json.Marshal(cfgCopy)
+	if err != nil {
+		slog.Warn("Failed marshalling eth config struct", tele.LogAttrError(err))
+		return
+	}
+
+	slog.Info("Config:")
+	slog.Info(string(dat))
 }
