@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"math"
 
-	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
 	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/urfave/cli/v2"
 
@@ -35,6 +34,10 @@ func cmdEthChainsAction(c *cli.Context) error {
 		}
 		slog.Info(chain)
 
+		// Override params config for this network to get correct fork digests.
+		params.OverrideBeaconConfig(config.Beacon)
+		params.OverrideBeaconNetworkConfig(config.Network)
+
 		forkVersions := [][]byte{
 			config.Beacon.GenesisForkVersion,
 			config.Beacon.AltairForkVersion,
@@ -42,6 +45,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 			config.Beacon.CapellaForkVersion,
 			config.Beacon.DenebForkVersion,
 			config.Beacon.ElectraForkVersion,
+			config.Beacon.FuluForkVersion,
 		}
 
 		for _, forkVersion := range forkVersions {
@@ -59,10 +63,7 @@ func cmdEthChainsAction(c *cli.Context) error {
 				continue
 			}
 
-			digest, err := signing.ComputeForkDigest(forkVersion, config.Genesis.GenesisValidatorRoot)
-			if err != nil {
-				return err
-			}
+			digest := params.ForkDigest(epoch)
 
 			slog.Info(fmt.Sprintf("- %s: 0x%x (epoch %d)", forkName, digest, epoch))
 		}
