@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
 	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
 )
@@ -25,6 +24,7 @@ var (
 	CapellaForkVersion   ForkVersion
 	DenebForkVersion     ForkVersion
 	ElectraForkVersion   ForkVersion
+	FuluForkVersion      ForkVersion
 
 	GlobalBeaconConfig = params.MainnetConfig() // init with Mainnet (we would override if needed)
 )
@@ -37,6 +37,7 @@ func initNetworkForkVersions(beaconConfig *params.BeaconChainConfig) {
 	CapellaForkVersion = ForkVersion(beaconConfig.CapellaForkVersion)
 	DenebForkVersion = ForkVersion(beaconConfig.DenebForkVersion)
 	ElectraForkVersion = ForkVersion(beaconConfig.ElectraForkVersion)
+	FuluForkVersion = ForkVersion(beaconConfig.FuluForkVersion)
 
 	GlobalBeaconConfig = beaconConfig
 }
@@ -96,38 +97,27 @@ func GetCurrentForkVersion(epoch primitives.Epoch, beaconConfg *params.BeaconCha
 	case epoch < beaconConfg.ElectraForkEpoch:
 		return [4]byte(beaconConfg.DenebForkVersion), nil
 
-	case epoch >= beaconConfg.ElectraForkEpoch:
+	case epoch < beaconConfg.FuluForkEpoch:
 		return [4]byte(beaconConfg.ElectraForkVersion), nil
+
+	case epoch >= beaconConfg.FuluForkEpoch:
+		return [4]byte(beaconConfg.FuluForkVersion), nil
 
 	default:
 		return [4]byte{}, fmt.Errorf("not recognized case for epoch %d", epoch)
 	}
 }
 
+// GetForkVersionFromForkDigest returns the fork version for a given fork digest.
+// This function is BPO-aware as it uses params.ForkDataFromDigest which handles
+// the network schedule including BPO phases for Fulu+.
 func GetForkVersionFromForkDigest(forkD [4]byte) (forkV ForkVersion, err error) {
-	genesisRoot := GenesisConfigs[GlobalBeaconConfig.ConfigName].GenesisValidatorRoot
-	phase0D, _ := signing.ComputeForkDigest(Phase0ForkVersion[:], genesisRoot)
-	altairD, _ := signing.ComputeForkDigest(AltairForkVersion[:], genesisRoot)
-	bellatrixD, _ := signing.ComputeForkDigest(BellatrixForkVersion[:], genesisRoot)
-	capellaD, _ := signing.ComputeForkDigest(CapellaForkVersion[:], genesisRoot)
-	denebD, _ := signing.ComputeForkDigest(DenebForkVersion[:], genesisRoot)
-	electraD, _ := signing.ComputeForkDigest(ElectraForkVersion[:], genesisRoot)
-	switch forkD {
-	case phase0D:
-		forkV = Phase0ForkVersion
-	case altairD:
-		forkV = AltairForkVersion
-	case bellatrixD:
-		forkV = BellatrixForkVersion
-	case capellaD:
-		forkV = CapellaForkVersion
-	case denebD:
-		forkV = DenebForkVersion
-	case electraD:
-		forkV = ElectraForkVersion
-	default:
-		forkV = ForkVersion{}
-		err = fmt.Errorf("not recognized fork_version for (%s)", hex.EncodeToString([]byte(forkD[:])))
+	// Use params.ForkDataFromDigest which is BPO-aware and handles all fork digests
+	// including those modified by BPO schedule in Fulu+
+	version, _, err := params.ForkDataFromDigest(forkD)
+	if err != nil {
+		return ForkVersion{}, fmt.Errorf("fork digest %s not found in network schedule", hex.EncodeToString(forkD[:]))
 	}
-	return forkV, err
+
+	return version, nil
 }

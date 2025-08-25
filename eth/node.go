@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v6/config/params"
 	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	"github.com/OffchainLabs/prysm/v6/time/slots"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -195,6 +197,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		DataStream:              ds,
 		ReadTimeout:             cfg.BeaconConfig.TtfbTimeoutDuration(),
 		WriteTimeout:            cfg.BeaconConfig.RespTimeoutDuration(),
+		BeaconConfig:            cfg.BeaconConfig,
+		GenesisConfig:           cfg.GenesisConfig,
 		Tracer:                  cfg.Tracer,
 		Meter:                   cfg.Meter,
 	}
@@ -204,7 +208,34 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new p2p server: %w", err)
 	}
 
-	// initialize the pubsub topic handlers
+	// initialize the custom Prysm client to communicate with its API
+	pryClient, err := NewPrysmClientWithTLS(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.PrysmUseTLS, cfg.DialTimeout, cfg.GenesisConfig)
+	if err != nil {
+		return nil, fmt.Errorf("new prysm client: %w", err)
+	}
+
+	// Fetch and set the BlobSchedule from Prysm for correct BPO fork digest calculation.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := pryClient.FetchAndSetBlobSchedule(ctx); err != nil {
+		// Continue even if this fails, as the network might not have BPO enabled.
+		slog.Warn("Failed to fetch BlobSchedule from Prysm", tele.LogAttrError(err))
+	}
+
+	// Recalculate fork digest after loading BlobSchedule.
+	currentSlot := slots.CurrentSlot(cfg.GenesisConfig.GenesisTime)
+	currentEpoch := slots.ToEpoch(currentSlot)
+	cfg.ForkDigest = params.ForkDigest(currentEpoch)
+
+	// check if Prysm is valid
+	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
+	if err != nil {
+		return nil, fmt.Errorf("prysm client: %w", err)
+	}
+	if !onNetwork {
+		return nil, fmt.Errorf("prysm client not in correct fork_digest")
+	}
+
 	pubSubConfig := &PubSubConfig{
 		Topics:         cfg.getDesiredFullTopics(cfg.GossipSubMessageEncoder),
 		ForkVersion:    cfg.ForkVersion,
@@ -217,22 +248,6 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	pubSub, err := NewPubSub(h, pubSubConfig)
 	if err != nil {
 		return nil, fmt.Errorf("new PubSub service: %w", err)
-	}
-
-	// initialize the custom Prysm client to communicate with its API
-	pryClient, err := NewPrysmClientWithTLS(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.PrysmUseTLS, cfg.DialTimeout, cfg.GenesisConfig)
-	if err != nil {
-		return nil, fmt.Errorf("new prysm client: %w", err)
-	}
-	// check if Prysm is valid
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
-	if err != nil {
-		return nil, fmt.Errorf("prysm client: %w", err)
-	}
-	if !onNetwork {
-		return nil, fmt.Errorf("prysm client not in correct fork_digest")
 	}
 
 	// finally, initialize hermes node
@@ -397,14 +412,34 @@ func (n *Node) Start(ctx context.Context) error {
 		return fmt.Errorf("get finalized finality checkpoints: %w", err)
 	}
 
-	status := &eth.Status{
-		ForkDigest:     n.cfg.ForkDigest[:],
-		FinalizedRoot:  chainHead.FinalizedBlockRoot,
-		FinalizedEpoch: chainHead.FinalizedEpoch,
-		HeadRoot:       chainHead.HeadBlockRoot,
-		HeadSlot:       chainHead.HeadSlot,
+	// Determine which status version to use based on the fork
+	currentSlot := slots.CurrentSlot(n.cfg.GenesisConfig.GenesisTime)
+	currentEpoch := slots.ToEpoch(currentSlot)
+
+	// Use StatusV2 for Fulu fork and later, StatusV1 for earlier forks
+	if n.cfg.BeaconConfig.FuluForkEpoch != params.BeaconConfig().FarFutureEpoch &&
+		currentEpoch >= n.cfg.BeaconConfig.FuluForkEpoch {
+		// Fulu or later - use StatusV2
+		status := &eth.StatusV2{
+			ForkDigest:            n.cfg.ForkDigest[:],
+			FinalizedRoot:         chainHead.FinalizedBlockRoot,
+			FinalizedEpoch:        chainHead.FinalizedEpoch,
+			HeadRoot:              chainHead.HeadBlockRoot,
+			HeadSlot:              chainHead.HeadSlot,
+			EarliestAvailableSlot: 0, // TODO: Get actual earliest slot from beacon node
+		}
+		n.reqResp.SetStatusV2(status)
+	} else {
+		// Pre-Fulu - use StatusV1
+		status := &eth.Status{
+			ForkDigest:     n.cfg.ForkDigest[:],
+			FinalizedRoot:  chainHead.FinalizedBlockRoot,
+			FinalizedEpoch: chainHead.FinalizedEpoch,
+			HeadRoot:       chainHead.HeadBlockRoot,
+			HeadSlot:       chainHead.HeadSlot,
+		}
+		n.reqResp.SetStatusV1(status)
 	}
-	n.reqResp.SetStatus(status)
 
 	// Set stream handlers on our libp2p host
 	if err := n.reqResp.RegisterHandlers(ctx); err != nil {

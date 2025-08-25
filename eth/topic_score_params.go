@@ -67,7 +67,9 @@ func topicToScoreParamsMapper(topic string, activeValidators uint64) *pubsub.Top
 	case strings.Contains(topic, p2p.GossipBlsToExecutionChangeMessage):
 		return defaultBlsToExecutionChangeTopicParams()
 
-	case strings.Contains(topic, p2p.GossipBlobSidecarMessage):
+	case strings.Contains(topic, p2p.GossipBlobSidecarMessage),
+		strings.Contains(topic, p2p.GossipDataColumnSidecarMessage):
+		// Using the same scoring as blocks for blob and data column sidecars (following prysm's approach).
 		return defaultBlockTopicParams()
 
 	default:
