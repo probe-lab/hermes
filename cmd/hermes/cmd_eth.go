@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
 	"github.com/OffchainLabs/prysm/v6/config/params"
@@ -415,16 +414,15 @@ func cmdEthAction(c *cli.Context) error {
 		config = c
 	}
 
-	// Overriding configuration so that functions like ComputForkDigest take the
-	// correct input data from the global configuration.
+	// Overriding configuration so that params.ForkDigest and other functions
+	// use the correct network configuration.
 	params.OverrideBeaconConfig(config.Beacon)
 	params.OverrideBeaconNetworkConfig(config.Network)
 
-	genesisRoot := config.Genesis.GenesisValidatorRoot
 	genesisTime := config.Genesis.GenesisTime
 
 	// compute fork version and fork digest
-	currentSlot := slots.Since(genesisTime)
+	currentSlot := slots.CurrentSlot(genesisTime)
 	currentEpoch := slots.ToEpoch(currentSlot)
 
 	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, config.Beacon)
@@ -432,10 +430,7 @@ func cmdEthAction(c *cli.Context) error {
 		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
 	}
 
-	forkDigest, err := signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
-	if err != nil {
-		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
-	}
+	forkDigest := params.ForkDigest(currentEpoch)
 
 	cfg := &eth.NodeConfig{
 		GenesisConfig:               config.Genesis,

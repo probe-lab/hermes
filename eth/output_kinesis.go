@@ -52,6 +52,8 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderDenebBlock(msg, d)
 	case *ethtypes.SignedBeaconBlockElectra:
 		payload, err = k.renderElectraBlock(msg, d)
+	case *ethtypes.SignedBeaconBlockFulu:
+		payload, err = k.renderFuluBlock(msg, d)
 	case *ethtypes.Attestation:
 		payload, err = k.renderAttestation(msg, d)
 	case *ethtypes.AttestationElectra:
@@ -73,6 +75,8 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		payload, err = k.renderBLSToExecutionChange(msg, d)
 	case *ethtypes.BlobSidecar:
 		payload, err = k.renderBlobSidecar(msg, d)
+	case *ethtypes.DataColumnSidecar:
+		payload, err = k.renderDataColumnSidecar(msg, d)
 	case *ethtypes.ProposerSlashing:
 		payload, err = k.renderProposerSlashing(msg, d)
 	case *ethtypes.AttesterSlashing:
@@ -203,6 +207,28 @@ func (k *KinesisOutput) renderDenebBlock(
 func (k *KinesisOutput) renderElectraBlock(
 	msg *pubsub.Message,
 	block *ethtypes.SignedBeaconBlockElectra,
+) (map[string]any, error) {
+	root, err := block.GetBlock().HashTreeRoot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine block hash tree root: %w", err)
+	}
+
+	return map[string]any{
+		"PeerID":     msg.ReceivedFrom,
+		"Topic":      msg.GetTopic(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
+		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":    len(msg.Data),
+		"Slot":       block.GetBlock().GetSlot(),
+		"Root":       root,
+		"ValIdx":     block.GetBlock().GetProposerIndex(),
+		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+	}, nil
+}
+
+func (k *KinesisOutput) renderFuluBlock(
+	msg *pubsub.Message,
+	block *ethtypes.SignedBeaconBlockFulu,
 ) (map[string]any, error) {
 	root, err := block.GetBlock().HashTreeRoot()
 	if err != nil {
@@ -443,5 +469,24 @@ func (k *KinesisOutput) renderAttesterSlashing(
 		"Seq":          hex.EncodeToString(msg.GetSeqno()),
 		"Att1_indices": as.GetAttestation_1().GetAttestingIndices(),
 		"Att2_indices": as.GetAttestation_2().GetAttestingIndices(),
+	}, nil
+}
+
+func (k *KinesisOutput) renderDataColumnSidecar(
+	msg *pubsub.Message,
+	sidecar *ethtypes.DataColumnSidecar,
+) (map[string]any, error) {
+	return map[string]any{
+		"PeerID":     msg.ReceivedFrom,
+		"MsgID":      hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize":    len(msg.Data),
+		"Topic":      msg.GetTopic(),
+		"Seq":        hex.EncodeToString(msg.GetSeqno()),
+		"Slot":       sidecar.GetSignedBlockHeader().GetHeader().GetSlot(),
+		"ValIdx":     sidecar.GetSignedBlockHeader().GetHeader().GetProposerIndex(),
+		"Index":      sidecar.GetIndex(),
+		"StateRoot":  hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetStateRoot()),
+		"BodyRoot":   hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetBodyRoot()),
+		"ParentRoot": hexutil.Encode(sidecar.GetSignedBlockHeader().GetHeader().GetParentRoot()),
 	}, nil
 }
