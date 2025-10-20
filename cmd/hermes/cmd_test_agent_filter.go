@@ -10,15 +10,15 @@ import (
 	"github.com/probe-lab/hermes/host"
 )
 
-var cmdEthFilterTest = &cli.Command{
-	Name:      "test-filter",
+var cmdTestAgentFilter = &cli.Command{
+	Name:      "filter-agent",
 	Usage:     "Test if an agent string would be filtered",
 	ArgsUsage: "<agent-string>",
 	Description: `Tests whether a given agent string would be allowed or blocked by the peer filter.
-	
+
 Examples:
-  hermes eth test-filter "prysm/v3.0.0"
-  hermes eth test-filter "hermes/v1.0.0" --filter.mode=denylist --filter.patterns="^hermes.*"`,
+  hermes test-filter "prysm/v3.0.0"
+  hermes test-filter "hermes/v1.0.0" --filter.mode=denylist --filter.patterns="^hermes.*"`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "filter.mode",

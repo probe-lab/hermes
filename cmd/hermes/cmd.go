@@ -101,6 +101,7 @@ var app = &cli.App{
 		cmdEth,
 		cmdFil,
 		cmdOp,
+		cmdTestAgentFilter,
 		cmdBenchmark,
 	},
 	After: rootAfter,

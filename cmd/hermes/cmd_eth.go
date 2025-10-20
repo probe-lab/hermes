@@ -112,7 +112,6 @@ var cmdEth = &cli.Command{
 		cmdEthIds,
 		cmdEthChains,
 		cmdEthForkDigest,
-		cmdEthFilterTest,
 	},
 }
 

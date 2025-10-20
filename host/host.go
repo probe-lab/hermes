@@ -82,9 +82,11 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 			return nil, fmt.Errorf("failed to create peer filter: %w", err)
 		}
 		deferredGater.SetActual(peerFilter)
-		slog.Info("Peer filtering enabled",
+		slog.Info(
+			"Peer filtering enabled",
 			"mode", cfg.PeerFilter.Mode,
-			"patterns", cfg.PeerFilter.Patterns)
+			"patterns", cfg.PeerFilter.Patterns,
+		)
 	}
 
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
