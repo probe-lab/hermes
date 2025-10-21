@@ -100,8 +100,8 @@ type NodeConfig struct {
 	// -> 4 Sync Committee Subnets * 2.
 	// -> Block,Aggregate,ProposerSlashing,AttesterSlashing,Exits,SyncContribution * 2.
 	PubSubSubscriptionRequestLimit int
-
-	PubSubQueueSize int
+	PubSubValidateQueueSize        int
+	PubSubMaxOutputQueue           int
 
 	// Configuration for subnet selection by topic
 	SubnetConfigs map[string]*SubnetConfig
@@ -355,13 +355,11 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeVa
 			return p2p.MsgID(n.GenesisConfig.GenesisValidatorRoot, pmsg)
 		}),
 		pubsub.WithSubscriptionFilter(subFilter),
-		pubsub.WithPeerOutboundQueueSize(n.PubSubQueueSize),
+		pubsub.WithPeerOutboundQueueSize(n.PubSubMaxOutputQueue),
 		pubsub.WithMaxMessageSize(int(n.BeaconConfig.MaxPayloadSize)),
-		pubsub.WithValidateQueueSize(n.PubSubQueueSize),
+		pubsub.WithValidateQueueSize(n.PubSubValidateQueueSize),
 		pubsub.WithPeerScore(n.peerScoringParams(activeValidators)),
-		// pubsub.WithPeerScoreInspect(s.peerInspector, time.Minute),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
-		// pubsub.WithRawTracer(gossipTracer{host: s.host}),
 	}
 	return psOpts
 }

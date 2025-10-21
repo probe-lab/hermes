@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/probe-lab/hermes/tele"
 	"log/slog"
 	"time"
+
+	"github.com/probe-lab/hermes/tele"
 
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/urfave/cli/v2"
@@ -55,42 +56,12 @@ var cmdOpFlags = []cli.Flag{
 		Destination: &opConfig.PrivateKeyStr,
 		Action:      validateKeyFlag,
 	},
-	&cli.DurationFlag{
-		Name:        "dial.timeout",
-		EnvVars:     []string{"HERMES_OP_DIAL_TIMEOUT"},
-		Usage:       "The request timeout when contacting other network participants",
-		Value:       opConfig.DialTimeout,
-		Destination: &opConfig.DialTimeout,
-	},
-	&cli.StringFlag{
-		Name:        "libp2p.host",
-		EnvVars:     []string{"HERMES_OP_LIBP2P_HOST"},
-		Usage:       "Which network interface should libp2p bind to.",
-		Value:       opConfig.Libp2pHost,
-		Destination: &opConfig.Libp2pHost,
-	},
-	&cli.IntFlag{
-		Name:        "libp2p.port",
-		EnvVars:     []string{"HERMES_OP_LIBP2P_PORT"},
-		Usage:       "On which port should libp2p listen",
-		Value:       opConfig.Libp2pPort,
-		Destination: &opConfig.Libp2pPort,
-		DefaultText: "random",
-	},
 	&cli.IntFlag{
 		Name:        "chain.id",
 		EnvVars:     []string{"HERMES_OP_CHAIN_ID"},
 		Usage:       "Which network hermes should connect to",
 		Value:       opConfig.ChainID,
 		Destination: &opConfig.ChainID,
-	},
-	&cli.DurationFlag{
-		Name:        "libp2p.peerscore.snapshot.frequency",
-		EnvVars:     []string{"HERMES_OP_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
-		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
-		Value:       opConfig.Libp2pPeerscoreSnapshotFreq,
-		Destination: &opConfig.Libp2pPeerscoreSnapshotFreq,
-		DefaultText: "random",
 	},
 	&cli.StringSliceFlag{
 		Name:        "bootstrappers",
@@ -153,23 +124,31 @@ func cmdOpAction(c *cli.Context) error {
 	}
 
 	cfg := &op.NodeConfig{
-		PrivateKeyStr:               opConfig.PrivateKeyStr,
-		ChainID:                     opConfig.ChainID,
-		BlockTopics:                 blockTopics,
-		DialTimeout:                 opConfig.DialTimeout,
-		Devp2pHost:                  opConfig.Devp2pHost,
-		Devp2pPort:                  opConfig.Devp2pPort,
-		Libp2pHost:                  opConfig.Libp2pHost,
-		Libp2pPort:                  opConfig.Libp2pPort,
-		Libp2pPeerscoreSnapshotFreq: opConfig.Libp2pPeerscoreSnapshotFreq,
-		Bootstrappers:               bootstrappers,
-		DataStreamType:              host.DataStreamtypeFromStr(rootConfig.DataStreamType),
-		AWSConfig:                   rootConfig.awsConfig,
-		S3Config:                    rootConfig.s3Config,
-		KinesisRegion:               rootConfig.KinesisRegion,
-		KinesisStream:               rootConfig.KinesisStream,
-		Tracer:                      otel.GetTracerProvider().Tracer("hermes"),
-		Meter:                       otel.GetMeterProvider().Meter("hermes"),
+		PrivateKeyStr: opConfig.PrivateKeyStr,
+		ChainID:       opConfig.ChainID,
+		BlockTopics:   blockTopics,
+		Devp2pHost:    opConfig.Devp2pHost,
+		Devp2pPort:    opConfig.Devp2pPort,
+		// Libp2p config
+		DialTimeout:                 rootConfig.DialTimeout,
+		Libp2pHost:                  rootConfig.Libp2pHost,
+		Libp2pPort:                  rootConfig.Libp2pPort,
+		Libp2pPeerscoreSnapshotFreq: rootConfig.Libp2pPeerscoreSnapshotFreq,
+		PubSubValidateQueueSize:     rootConfig.PubSubValidateQueueSize,
+		PeerFilter: &host.FilterConfig{
+			Mode:     host.FilterMode(rootConfig.FilterMode),
+			Patterns: rootConfig.FilterPatterns,
+		},
+		Bootstrappers: bootstrappers,
+		// Traces
+		DataStreamType: host.DataStreamtypeFromStr(rootConfig.DataStreamType),
+		AWSConfig:      rootConfig.awsConfig,
+		S3Config:       rootConfig.s3Config,
+		KinesisRegion:  rootConfig.KinesisRegion,
+		KinesisStream:  rootConfig.KinesisStream,
+		Tracer:         otel.GetTracerProvider().Tracer("hermes"),
+		// Metrics
+		Meter: otel.GetMeterProvider().Meter("hermes"),
 	}
 
 	n, err := op.NewNode(cfg)

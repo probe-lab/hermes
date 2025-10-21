@@ -13,7 +13,7 @@ run:
     {{GOCC}} run {{BIN}} run
 
 build:
-	{{GOCC}} build -o {{TARGET_PATH}} {{BIN}}
+	{{GOCC}} build -o {{BIN}} {{TARGET_PATH}}
 
 clean:
 	@rm -r $(BIN_PATH)

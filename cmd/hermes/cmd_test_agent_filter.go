@@ -17,20 +17,20 @@ var cmdTestAgentFilter = &cli.Command{
 	Description: `Tests whether a given agent string would be allowed or blocked by the peer filter.
 
 Examples:
-  hermes test-filter "prysm/v3.0.0"
-  hermes test-filter "hermes/v1.0.0" --filter.mode=denylist --filter.patterns="^hermes.*"`,
+  hermes filter-agent "prysm/v3.0.0"
+  hermes filter-agent "hermes/v1.0.0" --filter.mode=denylist --filter.patterns="^hermes.*"`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "filter.mode",
 			Usage:   "Filter mode: disabled, denylist, or allowlist",
 			Value:   "disabled",
-			EnvVars: []string{"HERMES_ETH_FILTER_MODE"},
+			EnvVars: []string{"HERMES_FILTER_MODE"},
 		},
 		&cli.StringSliceFlag{
 			Name:    "filter.patterns",
 			Usage:   "Regex patterns for filtering peers",
 			Value:   cli.NewStringSlice("^hermes.*"),
-			EnvVars: []string{"HERMES_ETH_FILTER_PATTERNS"},
+			EnvVars: []string{"HERMES_FILTER_PATTERNS"},
 		},
 	},
 	Action: func(c *cli.Context) error {

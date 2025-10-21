@@ -95,7 +95,8 @@ func composeLocalEthNode(t *testing.T, ctx context.Context) (*Node, context.Canc
 		DialConcurrency: 10,
 
 		PubSubSubscriptionRequestLimit: 200,
-		PubSubQueueSize:                600,
+		PubSubValidateQueueSize:        512,
+		PubSubMaxOutputQueue:           600,
 		Libp2pPeerscoreSnapshotFreq:    10 * time.Second,
 		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
 		Meter:                          otel.GetMeterProvider().Meter("hermes"),
