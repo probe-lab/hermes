@@ -127,6 +127,7 @@ func cmdFilAction(c *cli.Context) error {
 			Mode:     host.FilterMode(rootConfig.FilterMode),
 			Patterns: rootConfig.FilterPatterns,
 		},
+		DirectConnections: rootConfig.DirectConnections,
 		// Traces
 		DataStreamType: host.DataStreamtypeFromStr(rootConfig.DataStreamType),
 		AWSConfig:      rootConfig.awsConfig,

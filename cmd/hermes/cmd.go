@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +66,7 @@ var rootConfig = struct {
 	MaxPeers                    int
 	FilterMode                  string
 	FilterPatterns              []string
+	DirectConnections           []string
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
@@ -95,8 +97,8 @@ var rootConfig = struct {
 	S3Region:        "",
 	S3Endpoint:      "",
 	S3Bucket:        "hermes",
-	S3Flushers:      2,
-	S3FlushInterval: 2 * time.Second,
+	S3Flushers:      runtime.NumCPU(),
+	S3FlushInterval: 5 * time.Second,
 	S3ByteLimit:     10 * 1024 * 1024, // 10MB
 	AWSAccessKeyID:  "",
 	AWSSecretKey:    "",
@@ -104,12 +106,13 @@ var rootConfig = struct {
 	Libp2pHost:                  "127.0.0.1",
 	Libp2pPort:                  0,
 	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
+	PubSubValidateQueueSize:     4096,
 	DialConcurrency:             16,
 	DialTimeout:                 5 * time.Second,
 	MaxPeers:                    30, // arbitrary
 	FilterMode:                  "denylist",
 	FilterPatterns:              []string{"^hermes*"}, // avoid connecting to other hermes instances by default
-	PubSubValidateQueueSize:     4096,
+	DirectConnections:           nil,
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
@@ -377,6 +380,15 @@ var rootFlags = []cli.Flag{
 		Usage:   "Regex patterns for filtering peers",
 		Action: func(c *cli.Context, v []string) error {
 			rootConfig.FilterPatterns = v
+			return nil
+		},
+	},
+	&cli.StringSliceFlag{
+		Name:    "libp2p.direct-connections",
+		EnvVars: []string{"HERMES_LIBP2P_DIRECT_CONNECTIONS"},
+		Usage:   "Multiaddresses of the peers that we want to keep as direct connections",
+		Action: func(c *cli.Context, v []string) error {
+			rootConfig.DirectConnections = v
 			return nil
 		},
 	},

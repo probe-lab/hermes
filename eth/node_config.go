@@ -116,6 +116,9 @@ type NodeConfig struct {
 
 	// PeerFilter configuration for filtering peers (passed to host)
 	PeerFilter *host.FilterConfig
+
+	// DirectConnections ensurest that our host doesn't prune the connection from these nodes
+	DirectConnections []string
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
@@ -228,6 +231,13 @@ func (n *NodeConfig) Validate() error {
 		}
 	}
 
+	for _, p := range n.DirectConnections {
+		_, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
+		}
+	}
+
 	if n.Tracer == nil {
 		return fmt.Errorf("tracer must not be nil")
 	}
@@ -291,6 +301,24 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	}
 
 	return gcrypto.ToECDSA(data)
+}
+
+// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
+func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
+	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
+	for i, p := range n.DirectConnections {
+		add, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			slog.Error(
+				"parsing multia-addrs for direct peer",
+				"peer", p,
+				"err", err.Error(),
+			)
+			continue
+		}
+		dirConnAddrs[i] = *add
+	}
+	return dirConnAddrs
 }
 
 // libp2pOptions returns the options to configure the libp2p node. It retrieves
@@ -442,10 +470,7 @@ func desiredPubSubBaseTopics() []string {
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
 		p2p.GossipAttestationMessage,
-		// In relation to https://github.com/probe-lab/hermes/issues/24
-		// we unfortunatelly can't validate the messages (yet)
-		// thus, better not to forward invalid messages
-		// p2p.GossipExitMessage,
+		p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
