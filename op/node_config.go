@@ -21,6 +21,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -72,6 +73,7 @@ type NodeConfig struct {
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
 	PubSubValidateQueueSize     int
+	DirectConnections           []string
 
 	// PeerFilter configuration for filtering peers (passed to host)
 	PeerFilter *host.FilterConfig
@@ -130,6 +132,13 @@ func (n *NodeConfig) Validate() error {
 			}
 		} else {
 			return fmt.Errorf("s3 configuration is empty")
+		}
+	}
+
+	for _, p := range n.DirectConnections {
+		_, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
 		}
 	}
 
@@ -196,6 +205,24 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	}
 
 	return gcrypto.ToECDSA(data)
+}
+
+// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
+func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
+	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
+	for i, p := range n.DirectConnections {
+		add, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			slog.Error(
+				"parsing multia-addrs for direct peer",
+				"peer", p,
+				"err", err.Error(),
+			)
+			continue
+		}
+		dirConnAddrs[i] = *add
+	}
+	return dirConnAddrs
 }
 
 // libp2pOptions returns the options to configure the libp2p node. It retrieves

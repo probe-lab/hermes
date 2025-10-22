@@ -139,7 +139,8 @@ func cmdOpAction(c *cli.Context) error {
 			Mode:     host.FilterMode(rootConfig.FilterMode),
 			Patterns: rootConfig.FilterPatterns,
 		},
-		Bootstrappers: bootstrappers,
+		DirectConnections: rootConfig.DirectConnections,
+		Bootstrappers:     bootstrappers,
 		// Traces
 		DataStreamType: host.DataStreamtypeFromStr(rootConfig.DataStreamType),
 		AWSConfig:      rootConfig.awsConfig,

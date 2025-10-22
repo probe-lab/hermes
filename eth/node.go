@@ -139,6 +139,7 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	hostCfg := &host.Config{
 		DataStream:            ds,
 		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
+		DirectConnections:     cfg.DirectMultiaddrs(),
 		Tracer:                cfg.Tracer,
 		Meter:                 cfg.Meter,
 		PeerFilter:            cfg.PeerFilter,
