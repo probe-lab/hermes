@@ -141,10 +141,11 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
 		Tracer:                cfg.Tracer,
 		Meter:                 cfg.Meter,
+		PeerFilter:            cfg.PeerFilter,
 	}
 
 	// initialize libp2p host
-	opts, err := cfg.libp2pOptions()
+	opts, err := cfg.buildLibp2pOptions()
 	if err != nil {
 		return nil, fmt.Errorf("build libp2p options: %w", err)
 	}

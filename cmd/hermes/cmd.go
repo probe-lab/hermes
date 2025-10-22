@@ -29,17 +29,20 @@ const (
 )
 
 var rootConfig = struct {
-	Verbose         bool
-	LogLevel        string
-	LogFormat       string
-	LogSource       bool
-	LogNoColor      bool
-	MetricsEnabled  bool
-	MetricsAddr     string
-	MetricsPort     int
-	TracingEnabled  bool
-	TracingAddr     string
-	TracingPort     int
+	// logs
+	Verbose    bool
+	LogLevel   string
+	LogFormat  string
+	LogSource  bool
+	LogNoColor bool
+	// metrics/instrumentation
+	MetricsEnabled bool
+	MetricsAddr    string
+	MetricsPort    int
+	TracingEnabled bool
+	TracingAddr    string
+	TracingPort    int
+	// traces
 	DataStreamType  string
 	KinesisRegion   string
 	KinesisStream   string
@@ -52,6 +55,16 @@ var rootConfig = struct {
 	S3Endpoint      string
 	AWSAccessKeyID  string
 	AWSSecretKey    string
+	// libp2p
+	Libp2pHost                  string
+	Libp2pPort                  int
+	Libp2pPeerscoreSnapshotFreq time.Duration
+	PubSubValidateQueueSize     int
+	DialConcurrency             int
+	DialTimeout                 time.Duration
+	MaxPeers                    int
+	FilterMode                  string
+	FilterPatterns              []string
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
@@ -62,17 +75,20 @@ var rootConfig = struct {
 	metricsShutdownFunc func(ctx context.Context) error
 	tracerShutdownFunc  func(ctx context.Context) error
 }{
-	Verbose:         false,
-	LogLevel:        "info",
-	LogFormat:       "hlog",
-	LogSource:       false,
-	LogNoColor:      false,
-	MetricsEnabled:  false,
-	MetricsAddr:     "localhost",
-	MetricsPort:     6060,
-	TracingEnabled:  false,
-	TracingAddr:     "localhost",
-	TracingPort:     4317, // default jaeger port
+	// logs
+	Verbose:    false,
+	LogLevel:   "info",
+	LogFormat:  "hlog",
+	LogSource:  false,
+	LogNoColor: false,
+	// metrics
+	MetricsEnabled: false,
+	MetricsAddr:    "localhost",
+	MetricsPort:    6060,
+	TracingEnabled: false,
+	TracingAddr:    "localhost",
+	TracingPort:    4317, // default jaeger port
+	// traces
 	DataStreamType:  host.DataStreamTypeLogger.String(),
 	KinesisRegion:   "",
 	KinesisStream:   "",
@@ -84,6 +100,16 @@ var rootConfig = struct {
 	S3ByteLimit:     10 * 1024 * 1024, // 10MB
 	AWSAccessKeyID:  "",
 	AWSSecretKey:    "",
+	// libp2p
+	Libp2pHost:                  "127.0.0.1",
+	Libp2pPort:                  0,
+	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
+	DialConcurrency:             16,
+	DialTimeout:                 5 * time.Second,
+	MaxPeers:                    30, // arbitrary
+	FilterMode:                  "denylist",
+	FilterPatterns:              []string{"^hermes*"}, // avoid connecting to other hermes instances by default
+	PubSubValidateQueueSize:     4096,
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
@@ -101,6 +127,7 @@ var app = &cli.App{
 		cmdEth,
 		cmdFil,
 		cmdOp,
+		cmdTestAgentFilter,
 		cmdBenchmark,
 	},
 	After: rootAfter,
@@ -291,6 +318,67 @@ var rootFlags = []cli.Flag{
 		Value:       rootConfig.AWSAccessKeyID,
 		Destination: &rootConfig.AWSAccessKeyID,
 		Category:    flagCategoryDataStream,
+	},
+	// libp2p host flags
+	&cli.IntFlag{
+		Name:        "dial.concurrency",
+		EnvVars:     []string{"HERMES_ETH_DIAL_CONCURRENCY"},
+		Usage:       "The maximum number of parallel workers dialing other peers in the network",
+		Value:       rootConfig.DialConcurrency,
+		Destination: &rootConfig.DialConcurrency,
+	},
+	&cli.DurationFlag{
+		Name:        "dial.timeout",
+		EnvVars:     []string{"HERMES_LIBP2P_DIAL_TIMEOUT"},
+		Usage:       "The request timeout when contacting other network participants",
+		Value:       rootConfig.DialTimeout,
+		Destination: &rootConfig.DialTimeout,
+	},
+	&cli.StringFlag{
+		Name:        "libp2p.host",
+		EnvVars:     []string{"HERMES_LIBP2P_HOST"},
+		Usage:       "Which network interface should libp2p bind to.",
+		Value:       rootConfig.Libp2pHost,
+		Destination: &rootConfig.Libp2pHost,
+	},
+	&cli.IntFlag{
+		Name:        "libp2p.port",
+		EnvVars:     []string{"HERMES_LIBP2P_PORT"},
+		Usage:       "On which port should libp2p (disv5) listen",
+		Value:       rootConfig.Libp2pPort,
+		Destination: &rootConfig.Libp2pPort,
+		DefaultText: "random",
+	},
+	&cli.DurationFlag{
+		Name:        "libp2p.peerscore.snapshot.frequency",
+		EnvVars:     []string{"HERMES_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
+		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
+		Value:       rootConfig.Libp2pPeerscoreSnapshotFreq,
+		Destination: &rootConfig.Libp2pPeerscoreSnapshotFreq,
+		DefaultText: "random",
+	},
+	&cli.IntFlag{
+		Name:        "libp2p.max-peers",
+		EnvVars:     []string{"HERMES_LIBP2P_MAX_PEERS"},
+		Usage:       "The maximum number of peers we want to be connected with",
+		Value:       rootConfig.MaxPeers,
+		Destination: &rootConfig.MaxPeers,
+	},
+	&cli.StringFlag{
+		Name:        "libp2p.filter.mode",
+		EnvVars:     []string{"HERMES_LIBP2P_FILTER_MODE"},
+		Usage:       "Peer filter mode: disabled, denylist, or allowlist",
+		Value:       rootConfig.FilterMode,
+		Destination: &rootConfig.FilterMode,
+	},
+	&cli.StringSliceFlag{
+		Name:    "libp2p.filter.patterns",
+		EnvVars: []string{"HERMES_LIBP2P_FILTER_PATTERNS"},
+		Usage:   "Regex patterns for filtering peers",
+		Action: func(c *cli.Context, v []string) error {
+			rootConfig.FilterPatterns = v
+			return nil
+		},
 	},
 }
 

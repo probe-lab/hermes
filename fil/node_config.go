@@ -41,13 +41,16 @@ type NodeConfig struct {
 	// Topic configurations to subscribe to
 	TopicConfigs map[string]*TopicConfig
 
-	// The size of the validate queue
-	PubSubValidateQueueSize int
-
 	// The address information of the local libp2p host
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+
+	// The size of the validate queue
+	PubSubValidateQueueSize int
+
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
 
 	// Whether to enable the periodic lookups
 	DiscoveryActorEnabled bool

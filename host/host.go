@@ -29,6 +29,7 @@ import (
 type Config struct {
 	DataStream            DataStream
 	PeerscoreSnapshotFreq time.Duration
+	PeerFilter            *FilterConfig // Optional peer filtering configuration
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -50,6 +51,13 @@ type Host struct {
 }
 
 func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
+	// Add peer filtering if configured
+	var deferredGater *deferredGater
+	if cfg.PeerFilter != nil && cfg.PeerFilter.Mode != FilterModeDisabled {
+		deferredGater = newDeferredGater()
+		opts = append(opts, libp2p.ConnectionGater(deferredGater))
+	}
+
 	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
@@ -65,6 +73,20 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 		cfg:   cfg,
 		avlru: avlru,
 		sk:    newScoreKeeper(cfg.PeerscoreSnapshotFreq),
+	}
+
+	// Set up peer filter if enabled
+	if deferredGater != nil {
+		peerFilter, err := NewPeerFilter(hermesHost, *cfg.PeerFilter, slog.Default())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create peer filter: %w", err)
+		}
+		deferredGater.SetActual(peerFilter)
+		slog.Info(
+			"Peer filtering enabled",
+			"mode", cfg.PeerFilter.Mode,
+			"patterns", cfg.PeerFilter.Patterns,
+		)
 	}
 
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")

@@ -34,7 +34,6 @@ const (
 	maxGossipSize = 10 * (1 << 20)
 	// minGossipSize is used to make sure that there is at least some data to validate the signature against.
 	maxOutboundQueue       = 256
-	maxValidateQueue       = 256
 	globalValidateThrottle = 512
 	gossipHeartbeat        = 500 * time.Millisecond
 	// seenMessagesTTL limits the duration that message IDs are remembered for gossip deduplication purposes
@@ -72,6 +71,10 @@ type NodeConfig struct {
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+	PubSubValidateQueueSize     int
+
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
 
 	// Pause between two discovery lookups
 	LookupInterval time.Duration
@@ -239,9 +242,9 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		pubsub.WithMessageIdFn(MsgID),
 		pubsub.WithNoAuthor(),
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithValidateQueueSize(maxValidateQueue),
 		pubsub.WithPeerOutboundQueueSize(maxOutboundQueue),
 		pubsub.WithValidateThrottle(globalValidateThrottle),
+		pubsub.WithValidateQueueSize(n.PubSubValidateQueueSize),
 		pubsub.WithSeenMessagesTTL(seenMessagesTTL),
 		pubsub.WithPeerExchange(false),
 		pubsub.WithSubscriptionFilter(subFilter),

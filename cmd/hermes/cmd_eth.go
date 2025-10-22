@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
@@ -21,26 +20,19 @@ import (
 )
 
 var ethConfig = &struct {
-	PrivateKeyStr               string
-	Chain                       string
-	Attnets                     string
-	Devp2pHost                  string
-	Devp2pPort                  int
-	Libp2pHost                  string
-	Libp2pPort                  int
-	Libp2pPeerscoreSnapshotFreq time.Duration
-	LocalTrustedAddr            bool
-	PrysmHost                   string
-	PrysmPortHTTP               int
-	PrysmPortGRPC               int
-	PrysmUseTLS                 bool
-	DialConcurrency             int
-	DialTimeout                 time.Duration
-	MaxPeers                    int
-	GenesisSSZURL               string
-	ConfigURL                   string
-	BootnodesURL                string
-	DepositContractBlockURL     string
+	PrivateKeyStr           string
+	Chain                   string
+	Devp2pHost              string
+	Devp2pPort              int
+	LocalTrustedAddr        bool
+	PrysmHost               string
+	PrysmPortHTTP           int
+	PrysmPortGRPC           int
+	PrysmUseTLS             bool
+	GenesisSSZURL           string
+	ConfigURL               string
+	BootnodesURL            string
+	DepositContractBlockURL string
 	// Subnet configuration.
 	SubnetAttestationType      string
 	SubnetAttestationSubnets   []int64
@@ -59,26 +51,19 @@ var ethConfig = &struct {
 	SubnetBlobSidecarEnd       uint64
 	SubscriptionTopics         []string
 }{
-	PrivateKeyStr:               "", // unset means it'll be generated
-	Chain:                       params.MainnetName,
-	Attnets:                     "ffffffffffffffff", // subscribed to all attnets.
-	Devp2pHost:                  "127.0.0.1",
-	Devp2pPort:                  0,
-	Libp2pHost:                  "127.0.0.1",
-	Libp2pPort:                  0,
-	Libp2pPeerscoreSnapshotFreq: 60 * time.Second,
-	LocalTrustedAddr:            false, // default -> advertise the private multiaddress to our trusted Prysm node
-	PrysmHost:                   "",
-	PrysmPortHTTP:               3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	PrysmPortGRPC:               4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
-	PrysmUseTLS:                 false,
-	DialConcurrency:             16,
-	DialTimeout:                 5 * time.Second,
-	MaxPeers:                    30, // arbitrary
-	GenesisSSZURL:               "",
-	ConfigURL:                   "",
-	BootnodesURL:                "",
-	DepositContractBlockURL:     "",
+	PrivateKeyStr:           "", // unset means it'll be generated
+	Chain:                   params.MainnetName,
+	Devp2pHost:              "127.0.0.1",
+	Devp2pPort:              0,
+	LocalTrustedAddr:        false, // default -> advertise the private multiaddress to our trusted Prysm node
+	PrysmHost:               "",
+	PrysmPortHTTP:           3500, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmPortGRPC:           4000, // default -> https://docs.prylabs.network/docs/prysm-usage/p2p-host-ip
+	PrysmUseTLS:             false,
+	GenesisSSZURL:           "",
+	ConfigURL:               "",
+	BootnodesURL:            "",
+	DepositContractBlockURL: "",
 	// Default subnet configuration values.
 	SubnetAttestationType:      "all",
 	SubnetAttestationSubnets:   []int64{},
@@ -128,28 +113,6 @@ var cmdEthFlags = []cli.Flag{
 		Destination: &ethConfig.Chain,
 	},
 	&cli.StringFlag{
-		Name:        "attnets",
-		Aliases:     []string{"a"},
-		EnvVars:     []string{"HERMES_ETH_ATTNETS"},
-		Usage:       "The attestation network digest.",
-		Value:       ethConfig.Attnets,
-		Destination: &ethConfig.Attnets,
-	},
-	&cli.IntFlag{
-		Name:        "dial.concurrency",
-		EnvVars:     []string{"HERMES_ETH_DIAL_CONCURRENCY"},
-		Usage:       "The maximum number of parallel workers dialing other peers in the network",
-		Value:       ethConfig.DialConcurrency,
-		Destination: &ethConfig.DialConcurrency,
-	},
-	&cli.DurationFlag{
-		Name:        "dial.timeout",
-		EnvVars:     []string{"HERMES_ETH_DIAL_TIMEOUT"},
-		Usage:       "The request timeout when contacting other network participants",
-		Value:       ethConfig.DialTimeout,
-		Destination: &ethConfig.DialTimeout,
-	},
-	&cli.StringFlag{
 		Name:        "devp2p.host",
 		EnvVars:     []string{"HERMES_ETH_DEVP2P_HOST"},
 		Usage:       "Which network interface should devp2p (discv5) bind to.",
@@ -164,31 +127,8 @@ var cmdEthFlags = []cli.Flag{
 		Destination: &ethConfig.Devp2pPort,
 		DefaultText: "random",
 	},
-	&cli.StringFlag{
-		Name:        "libp2p.host",
-		EnvVars:     []string{"HERMES_ETH_LIBP2P_HOST"},
-		Usage:       "Which network interface should libp2p bind to.",
-		Value:       ethConfig.Libp2pHost,
-		Destination: &ethConfig.Libp2pHost,
-	},
-	&cli.IntFlag{
-		Name:        "libp2p.port",
-		EnvVars:     []string{"HERMES_ETH_LIBP2P_PORT"},
-		Usage:       "On which port should libp2p (discv5) listen",
-		Value:       ethConfig.Libp2pPort,
-		Destination: &ethConfig.Libp2pPort,
-		DefaultText: "random",
-	},
-	&cli.DurationFlag{
-		Name:        "libp2p.peerscore.snapshot.frequency",
-		EnvVars:     []string{"HERMES_ETH_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
-		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
-		Value:       ethConfig.Libp2pPeerscoreSnapshotFreq,
-		Destination: &ethConfig.Libp2pPeerscoreSnapshotFreq,
-		DefaultText: "random",
-	},
 	&cli.BoolFlag{
-		Name:        "local.trusted.addr",
+		Name:        "prysm.local-trusted-addr",
 		EnvVars:     []string{"HERMES_ETH_LOCAL_TRUSTED_ADDRESS"},
 		Usage:       "To advertise the localhost multiaddress to our trusted control Prysm node",
 		Value:       ethConfig.LocalTrustedAddr,
@@ -221,13 +161,6 @@ var cmdEthFlags = []cli.Flag{
 		Usage:       "Whether to use TLS when connecting to Prysm",
 		Value:       ethConfig.PrysmUseTLS,
 		Destination: &ethConfig.PrysmUseTLS,
-	},
-	&cli.IntFlag{
-		Name:        "max-peers",
-		EnvVars:     []string{"HERMES_ETH_MAX_PEERS"},
-		Usage:       "The maximum number of peers we want to be connected with",
-		Value:       ethConfig.MaxPeers,
-		Destination: &ethConfig.MaxPeers,
 	},
 	&cli.StringFlag{
 		Name:        "genesis.ssz.url",
@@ -438,39 +371,46 @@ func cmdEthAction(c *cli.Context) error {
 	}
 
 	cfg := &eth.NodeConfig{
-		GenesisConfig:               config.Genesis,
-		NetworkConfig:               config.Network,
-		BeaconConfig:                config.Beacon,
-		ForkDigest:                  forkDigest,
-		ForkVersion:                 currentForkVersion,
-		PrivateKeyStr:               ethConfig.PrivateKeyStr,
-		DialTimeout:                 ethConfig.DialTimeout,
-		Devp2pHost:                  ethConfig.Devp2pHost,
-		Devp2pPort:                  ethConfig.Devp2pPort,
-		Libp2pHost:                  ethConfig.Libp2pHost,
-		Libp2pPort:                  ethConfig.Libp2pPort,
-		Libp2pPeerscoreSnapshotFreq: ethConfig.Libp2pPeerscoreSnapshotFreq,
-		GossipSubMessageEncoder:     encoder.SszNetworkEncoder{},
-		RPCEncoder:                  encoder.SszNetworkEncoder{},
-		LocalTrustedAddr:            ethConfig.LocalTrustedAddr,
-		PrysmHost:                   ethConfig.PrysmHost,
-		PrysmPortHTTP:               ethConfig.PrysmPortHTTP,
-		PrysmPortGRPC:               ethConfig.PrysmPortGRPC,
-		PrysmUseTLS:                 ethConfig.PrysmUseTLS,
-		DataStreamType:              host.DataStreamtypeFromStr(rootConfig.DataStreamType),
-		AWSConfig:                   rootConfig.awsConfig,
-		S3Config:                    rootConfig.s3Config,
-		KinesisRegion:               rootConfig.KinesisRegion,
-		KinesisStream:               rootConfig.KinesisStream,
-		MaxPeers:                    ethConfig.MaxPeers,
-		DialConcurrency:             ethConfig.DialConcurrency,
+		GenesisConfig:           config.Genesis,
+		NetworkConfig:           config.Network,
+		BeaconConfig:            config.Beacon,
+		ForkDigest:              forkDigest,
+		ForkVersion:             currentForkVersion,
+		PrivateKeyStr:           ethConfig.PrivateKeyStr,
+		Devp2pHost:              ethConfig.Devp2pHost,
+		Devp2pPort:              ethConfig.Devp2pPort,
+		GossipSubMessageEncoder: encoder.SszNetworkEncoder{},
+		RPCEncoder:              encoder.SszNetworkEncoder{},
+		LocalTrustedAddr:        ethConfig.LocalTrustedAddr,
+		PrysmHost:               ethConfig.PrysmHost,
+		PrysmPortHTTP:           ethConfig.PrysmPortHTTP,
+		PrysmPortGRPC:           ethConfig.PrysmPortGRPC,
+		PrysmUseTLS:             ethConfig.PrysmUseTLS,
+		DataStreamType:          host.DataStreamtypeFromStr(rootConfig.DataStreamType),
+		AWSConfig:               rootConfig.awsConfig,
+		S3Config:                rootConfig.s3Config,
+		KinesisRegion:           rootConfig.KinesisRegion,
+		KinesisStream:           rootConfig.KinesisStream,
+		// Libp2p config
+		MaxPeers:                    rootConfig.MaxPeers,
+		DialTimeout:                 rootConfig.DialTimeout,
+		DialConcurrency:             rootConfig.DialConcurrency,
+		Libp2pHost:                  rootConfig.Libp2pHost,
+		Libp2pPort:                  rootConfig.Libp2pPort,
+		Libp2pPeerscoreSnapshotFreq: rootConfig.Libp2pPeerscoreSnapshotFreq,
+		PubSubValidateQueueSize:     rootConfig.PubSubValidateQueueSize,
+		PeerFilter: &host.FilterConfig{
+			Mode:     host.FilterMode(rootConfig.FilterMode),
+			Patterns: rootConfig.FilterPatterns,
+		},
 		// PubSub config
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
-		PubSubQueueSize:                600, // Prysm: beacon-chain/p2p/config.go#L10
+		PubSubMaxOutputQueue:           600, // Prysm: beacon-chain/p2p/config.go#L10
 		SubnetConfigs:                  createSubnetConfigs(),
 		SubscriptionTopics:             ethConfig.SubscriptionTopics,
-		Tracer:                         otel.GetTracerProvider().Tracer("hermes"),
-		Meter:                          otel.GetMeterProvider().Meter("hermes"),
+		// Tracer and metrics
+		Tracer: otel.GetTracerProvider().Tracer("hermes"),
+		Meter:  otel.GetMeterProvider().Meter("hermes"),
 	}
 
 	n, err := eth.NewNode(cfg)

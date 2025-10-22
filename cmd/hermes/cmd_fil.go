@@ -17,25 +17,17 @@ import (
 )
 
 var filConfig = &struct {
-	PrivateKeyStr               string
-	Libp2pHost                  string
-	Libp2pPort                  int
-	Libp2pPeerscoreSnapshotFreq time.Duration
-	PubSubValidateQueueSize     int
-	LookupInterval              time.Duration
-	Network                     string
-	DialTimeout                 time.Duration
-	DiscoveryActorEnabled       bool
+	PrivateKeyStr         string
+	LookupInterval        time.Duration
+	Network               string
+	DialTimeout           time.Duration
+	DiscoveryActorEnabled bool
 }{
-	PrivateKeyStr:               "", // unset means it'll be generated
-	Libp2pHost:                  "127.0.0.1",
-	Libp2pPort:                  0,
-	Libp2pPeerscoreSnapshotFreq: 15 * time.Second,
-	PubSubValidateQueueSize:     4096,
-	LookupInterval:              time.Minute,
-	Network:                     "mainnet",
-	DialTimeout:                 5 * time.Second,
-	DiscoveryActorEnabled:       true,
+	PrivateKeyStr:         "", // unset means it'll be generated
+	LookupInterval:        time.Minute,
+	Network:               "mainnet",
+	DialTimeout:           5 * time.Second,
+	DiscoveryActorEnabled: true,
 }
 
 var cmdFil = &cli.Command{
@@ -64,41 +56,11 @@ var cmdFilFlags = []cli.Flag{
 		Destination: &filConfig.DialTimeout,
 	},
 	&cli.StringFlag{
-		Name:        "libp2p.host",
-		EnvVars:     []string{"HERMES_FIL_LIBP2P_HOST"},
-		Usage:       "Which network interface should libp2p bind to.",
-		Value:       filConfig.Libp2pHost,
-		Destination: &filConfig.Libp2pHost,
-	},
-	&cli.IntFlag{
-		Name:        "libp2p.port",
-		EnvVars:     []string{"HERMES_FIL_LIBP2P_PORT"},
-		Usage:       "On which port should libp2p listen",
-		Value:       filConfig.Libp2pPort,
-		Destination: &filConfig.Libp2pPort,
-		DefaultText: "random",
-	},
-	&cli.StringFlag{
 		Name:        "network",
 		EnvVars:     []string{"HERMES_FIL_NETWORK"},
 		Usage:       "Which network hermes should connect to. Currently only 'mainnet' is supported.",
 		Value:       filConfig.Network,
 		Destination: &filConfig.Network,
-	},
-	&cli.DurationFlag{
-		Name:        "libp2p.peerscore.snapshot.frequency",
-		EnvVars:     []string{"HERMES_FIL_LIBP2P_PEERSCORE_SNAPSHOT_FREQUENCY"},
-		Usage:       "Frequency at which GossipSub peerscores will be accessed (in seconds)",
-		Value:       filConfig.Libp2pPeerscoreSnapshotFreq,
-		Destination: &filConfig.Libp2pPeerscoreSnapshotFreq,
-		DefaultText: "random",
-	},
-	&cli.IntFlag{
-		Name:        "pubsub.validateQueueSize",
-		EnvVars:     []string{"HERMES_FIL_PUBSUB_VALIDATE_QUEUE_SIZE"},
-		Usage:       "The queue size of the gossipsub validation queue",
-		Value:       filConfig.PubSubValidateQueueSize,
-		Destination: &filConfig.PubSubValidateQueueSize,
 	},
 	&cli.DurationFlag{
 		Name:        "lookup.interval",
@@ -151,23 +113,30 @@ func cmdFilAction(c *cli.Context) error {
 	}
 
 	cfg := &fil.NodeConfig{
-		PrivateKeyStr:               filConfig.PrivateKeyStr,
-		DialTimeout:                 filConfig.DialTimeout,
-		Libp2pHost:                  filConfig.Libp2pHost,
-		Libp2pPort:                  filConfig.Libp2pPort,
-		Libp2pPeerscoreSnapshotFreq: filConfig.Libp2pPeerscoreSnapshotFreq,
-		LookupInterval:              filConfig.LookupInterval,
-		TopicConfigs:                topicConfigs(),
-		PubSubValidateQueueSize:     filConfig.PubSubValidateQueueSize,
-		Bootstrappers:               bootstrappers,
-		DataStreamType:              host.DataStreamtypeFromStr(rootConfig.DataStreamType),
-		AWSConfig:                   rootConfig.awsConfig,
-		S3Config:                    rootConfig.s3Config,
-		KinesisRegion:               rootConfig.KinesisRegion,
-		KinesisStream:               rootConfig.KinesisStream,
-		Tracer:                      otel.GetTracerProvider().Tracer("hermes"),
-		Meter:                       otel.GetMeterProvider().Meter("hermes"),
-		DiscoveryActorEnabled:       filConfig.DiscoveryActorEnabled,
+		PrivateKeyStr:           filConfig.PrivateKeyStr,
+		LookupInterval:          filConfig.LookupInterval,
+		TopicConfigs:            topicConfigs(),
+		PubSubValidateQueueSize: rootConfig.PubSubValidateQueueSize,
+		Bootstrappers:           bootstrappers,
+		// Libp2p config
+		DialTimeout:                 rootConfig.DialTimeout,
+		Libp2pHost:                  rootConfig.Libp2pHost,
+		Libp2pPort:                  rootConfig.Libp2pPort,
+		Libp2pPeerscoreSnapshotFreq: rootConfig.Libp2pPeerscoreSnapshotFreq,
+		PeerFilter: &host.FilterConfig{
+			Mode:     host.FilterMode(rootConfig.FilterMode),
+			Patterns: rootConfig.FilterPatterns,
+		},
+		// Traces
+		DataStreamType: host.DataStreamtypeFromStr(rootConfig.DataStreamType),
+		AWSConfig:      rootConfig.awsConfig,
+		S3Config:       rootConfig.s3Config,
+		KinesisRegion:  rootConfig.KinesisRegion,
+		KinesisStream:  rootConfig.KinesisStream,
+		Tracer:         otel.GetTracerProvider().Tracer("hermes"),
+		// metrics
+		Meter:                 otel.GetMeterProvider().Meter("hermes"),
+		DiscoveryActorEnabled: filConfig.DiscoveryActorEnabled,
 	}
 
 	n, err := fil.NewNode(cfg)
