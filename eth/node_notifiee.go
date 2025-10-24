@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
+	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -84,14 +86,19 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	valid := true
 	ps := n.host.Peerstore()
 
-	st, err := n.reqResp.Status(ctx, pid)
+	var (
+		err error
+		st  *pb.Status
+		md  *pb.MetaDataV1
+	)
+	st, err = n.reqResp.Status(ctx, pid)
 	if err != nil {
 		valid = false
 	} else {
-		if err := n.reqResp.Ping(ctx, pid); err != nil {
+		if err = n.reqResp.Ping(ctx, pid); err != nil {
 			valid = false
 		} else {
-			md, err := n.reqResp.MetaData(ctx, pid)
+			md, err = n.reqResp.MetaData(ctx, pid)
 			if err != nil {
 				valid = false
 			} else {
@@ -110,6 +117,20 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	}
 
 	if !valid {
+		slog.Warn(
+			"invalid handshake to peer was recorded",
+			"peer", pid.String(),
+			"err", err.Error(),
+		)
+		if slices.ContainsFunc(n.cfg.DirectMultiaddrs(), func(addr peer.AddrInfo) bool {
+			return addr.ID.String() == pid.String()
+		}) {
+			slog.Warn(
+				"ignore the invalid handshake, the peer is trusted",
+				"peer", pid.String(),
+			)
+			return
+		}
 		// the handshake failed, we disconnect and remove it from our pool
 		ps.RemovePeer(pid)
 		_ = n.host.Network().ClosePeer(pid)

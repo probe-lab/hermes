@@ -31,6 +31,7 @@ type Config struct {
 	PeerscoreSnapshotFreq time.Duration
 	PeerFilter            *FilterConfig // Optional peer filtering configuration
 	DirectConnections     []peer.AddrInfo
+	PubsubBlacklist       pubsub.Blacklist
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -192,6 +193,12 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		pubsub.WithEventTracer(h),
 		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
 	)
+	if h.cfg.PubsubBlacklist != nil {
+		opts = append(
+			opts,
+			pubsub.WithBlacklist(h.cfg.PubsubBlacklist),
+		)
+	}
 	if h.cfg.DirectConnections != nil {
 		opts = append(
 			opts,

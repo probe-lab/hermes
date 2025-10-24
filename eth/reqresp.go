@@ -385,7 +385,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 			"FinalizedEpoch": status.FinalizedEpoch,
 		}
 	}
-
+	defer upstream.Close()
 	// check if the request comes from our delegate node. If so, just mirror
 	// its own status back and update our latest known status.
 	if upstream.Conn().RemotePeer() == r.delegate {
@@ -408,7 +408,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 			"Response": statusTraceData(resp),
 		}
 
-		return traceData, upstream.Close()
+		return traceData, nil
 	}
 
 	// first, read the status from the remote peer
@@ -446,7 +446,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 				"Response": statusTraceData(statusCpy),
 			}
 
-			return traceData, upstream.Close()
+			return traceData, nil
 		}
 
 		// we got a valid response from our delegate node. Update our own status
@@ -463,6 +463,13 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 		"Response": statusTraceData(resp),
 	}
 
+	slog.Debug(
+		"status response",
+		"peer", upstream.Conn().RemotePeer().String(),
+		"head-slot", resp.HeadSlot,
+		"fork_digest", hex.EncodeToString(resp.ForkDigest),
+	)
+
 	return traceData, nil
 }
 
@@ -474,6 +481,7 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 	}
 	r.metaDataMu.RUnlock()
 
+	defer stream.Close()
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		return nil, fmt.Errorf("write meta data v1: %w", err)
 	}
@@ -485,9 +493,10 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 
 	slog.Info(
 		"metadata response",
+		"peer", stream.Conn().RemotePeer().String(),
 		"attnets", metaData.Attnets,
 	)
-	return traceData, stream.Close()
+	return traceData, nil
 }
 
 func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
@@ -499,6 +508,7 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 	}
 	r.metaDataMu.RUnlock()
 
+	defer stream.Close()
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		return nil, fmt.Errorf("write meta data v2: %w", err)
 	}
@@ -508,12 +518,13 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 		"Syncnets":  hex.EncodeToString(metaData.Syncnets.Bytes()),
 	}
-	slog.Info(
+	slog.Debug(
 		"metadata response",
+		"peer", stream.Conn().RemotePeer().String(),
 		"attnets", metaData.Attnets,
 		"synccommittees", metaData.Syncnets,
 	)
-	return traceData, stream.Close()
+	return traceData, nil
 }
 
 func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
@@ -821,7 +832,7 @@ func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, l
 	slog.Debug("Perform blocks_by_range request", tele.LogAttrPeerID(pid))
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
 	if err != nil {
-		return blocks, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
+		return blocks, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCBlocksByRangeTopicV2, pid, err)
 	}
 	defer stream.Close()
 	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
@@ -948,6 +959,13 @@ func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data 
 			span.SetStatus(codes.Error, err.Error())
 		}
 		span.End()
+		if err = stream.CloseWrite(); err != nil {
+			slog.Error(
+				"failed to close writing side of stream",
+				"peer", stream.Conn().RemotePeer().String(),
+				"error", err.Error(),
+			)
+		}
 	}()
 
 	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
@@ -956,10 +974,6 @@ func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data 
 
 	if _, err = r.cfg.Encoder.EncodeWithMaxLength(stream, data); err != nil {
 		return fmt.Errorf("read sequence number: %w", err)
-	}
-
-	if err = stream.CloseWrite(); err != nil {
-		return fmt.Errorf("failed to close writing side of stream: %w", err)
 	}
 
 	return nil

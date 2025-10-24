@@ -12,6 +12,7 @@ import (
 	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/thejerf/suture/v4"
@@ -28,7 +29,8 @@ type Node struct {
 	cfg *NodeConfig
 
 	// The libp2p host, however, this is a custom Hermes wrapper host.
-	host *host.Host
+	host            *host.Host
+	pubsubBlacklist pubsub.Blacklist
 
 	// The data stream to which we transmit data
 	ds host.DataStream
@@ -188,6 +190,28 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	}
 	slog.Info("Initialized new devp2p Node", "enr", disc.node.Node().String())
 
+	// initialize the custom Prysm client to communicate with its API
+	pryClient, err := NewPrysmClientWithTLS(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.PrysmUseTLS, cfg.DialTimeout, cfg.GenesisConfig)
+	if err != nil {
+		return nil, fmt.Errorf("new prysm client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
+	if err != nil {
+		return nil, fmt.Errorf("prysm client: %w", err)
+	}
+	if !onNetwork {
+		return nil, fmt.Errorf("prysm client not in correct fork_digest")
+	}
+	pryCtx, pryCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer pryCancel()
+	prysmID, err := pryClient.Identity(pryCtx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't ident")
+	}
+
 	// initialize the request-response protocol handlers
 	reqRespCfg := &ReqRespConfig{
 		ForkDigest:              cfg.ForkDigest,
@@ -220,35 +244,23 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new PubSub service: %w", err)
 	}
-
-	// initialize the custom Prysm client to communicate with its API
-	pryClient, err := NewPrysmClientWithTLS(cfg.PrysmHost, cfg.PrysmPortHTTP, cfg.PrysmPortGRPC, cfg.PrysmUseTLS, cfg.DialTimeout, cfg.GenesisConfig)
-	if err != nil {
-		return nil, fmt.Errorf("new prysm client: %w", err)
-	}
-	// check if Prysm is valid
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
-	if err != nil {
-		return nil, fmt.Errorf("prysm client: %w", err)
-	}
-	if !onNetwork {
-		return nil, fmt.Errorf("prysm client not in correct fork_digest")
-	}
+	// Create a new Blacklisting map
+	// This is to prevent the node from connecting at the GossipSub level withe trusted Prysm node
+	blacklistMap := pubsub.NewMapBlacklist()
 
 	// finally, initialize hermes node
 	n := &Node{
-		cfg:            cfg,
-		host:           h,
-		ds:             ds,
-		sup:            suture.NewSimple("eth"),
-		reqResp:        reqResp,
-		pubSub:         pubSub,
-		pryClient:      pryClient,
-		peerer:         NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
-		disc:           disc,
-		eventCallbacks: []func(ctx context.Context, event *host.TraceEvent){},
+		cfg:             cfg,
+		host:            h,
+		pubsubBlacklist: blacklistMap,
+		ds:              ds,
+		sup:             suture.NewSimple("eth"),
+		reqResp:         reqResp,
+		pubSub:          pubSub,
+		pryClient:       pryClient,
+		peerer:          NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
+		disc:            disc,
+		eventCallbacks:  []func(ctx context.Context, event *host.TraceEvent){},
 	}
 
 	if ds.Type() == host.DataStreamTypeCallback {
@@ -376,6 +388,8 @@ func (n *Node) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get prysm node p2p addr info: %w", err)
 	}
+	// Once the Prysm node has been identified, ensure we blacklist it at the pubsub level
+	n.pubsubBlacklist.Add(addrInfo.ID) // check if Prysm is valid
 
 	slog.Info("Prysm P2P Identity:", tele.LogAttrPeerID(addrInfo.ID))
 	for i, maddr := range addrInfo.Addrs {
