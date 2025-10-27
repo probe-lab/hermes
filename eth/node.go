@@ -205,12 +205,6 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if !onNetwork {
 		return nil, fmt.Errorf("prysm client not in correct fork_digest")
 	}
-	pryCtx, pryCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer pryCancel()
-	prysmID, err := pryClient.Identity(pryCtx)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't ident")
-	}
 
 	// initialize the request-response protocol handlers
 	reqRespCfg := &ReqRespConfig{

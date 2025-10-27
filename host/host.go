@@ -193,14 +193,14 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		pubsub.WithEventTracer(h),
 		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
 	)
-  
+
 	if h.cfg.PubsubBlacklist != nil {
 		opts = append(
 			opts,
 			pubsub.WithBlacklist(h.cfg.PubsubBlacklist),
 		)
 	}
-  
+
 	if h.cfg.DirectConnections != nil {
 		opts = append(
 			opts,
