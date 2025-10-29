@@ -41,13 +41,18 @@ type NodeConfig struct {
 	// Topic configurations to subscribe to
 	TopicConfigs map[string]*TopicConfig
 
-	// The size of the validate queue
-	PubSubValidateQueueSize int
-
 	// The address information of the local libp2p host
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+
+	// The size of the validate queue
+	PubSubValidateQueueSize int
+
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
+
+	DirectConnections []string
 
 	// Whether to enable the periodic lookups
 	DiscoveryActorEnabled bool
@@ -106,6 +111,13 @@ func (n *NodeConfig) Validate() error {
 			}
 		} else {
 			return fmt.Errorf("s3 configuration is empty")
+		}
+	}
+
+	for _, p := range n.DirectConnections {
+		_, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
 		}
 	}
 
@@ -172,6 +184,24 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	}
 
 	return gcrypto.ToECDSA(data)
+}
+
+// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
+func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
+	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
+	for i, p := range n.DirectConnections {
+		add, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			slog.Error(
+				"parsing multia-addrs for direct peer",
+				"peer", p,
+				"err", err.Error(),
+			)
+			continue
+		}
+		dirConnAddrs[i] = *add
+	}
+	return dirConnAddrs
 }
 
 // libp2pOptions returns the options to configure the libp2p node. It retrieves

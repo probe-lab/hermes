@@ -9,11 +9,9 @@ import (
 	"time"
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
-	"github.com/OffchainLabs/prysm/v6/config/params"
-	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
-	"github.com/OffchainLabs/prysm/v6/time/slots"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	gk "github.com/dennis-tra/go-kinesis"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/thejerf/suture/v4"
@@ -30,7 +28,8 @@ type Node struct {
 	cfg *NodeConfig
 
 	// The libp2p host, however, this is a custom Hermes wrapper host.
-	host *host.Host
+	host            *host.Host
+	pubsubBlacklist pubsub.Blacklist
 
 	// The data stream to which we transmit data
 	ds host.DataStream
@@ -44,6 +43,9 @@ type Node struct {
 	// A custom client to use various Prysm APIs
 	pryClient *PrysmClient
 
+	// The reference point to ask for the latest chian updates (forks, head, status, metadata, etc)
+	chain *Chain
+
 	// The request/response protocol handlers as well as some client methods
 	reqResp *ReqResp
 
@@ -56,7 +58,7 @@ type Node struct {
 	// The discovery service, periodically querying the discv5 DHT network
 	disc *Discovery
 
-	// Metrics
+	// MetricTasks
 	connCount     metric.Int64ObservableGauge
 	connDurHist   metric.Float64Histogram
 	connBeacon    metric.Int64ObservableGauge
@@ -141,12 +143,14 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	hostCfg := &host.Config{
 		DataStream:            ds,
 		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
+		DirectConnections:     cfg.DirectMultiaddrs(),
 		Tracer:                cfg.Tracer,
 		Meter:                 cfg.Meter,
+		PeerFilter:            cfg.PeerFilter,
 	}
 
 	// initialize libp2p host
-	opts, err := cfg.libp2pOptions()
+	opts, err := cfg.buildLibp2pOptions()
 	if err != nil {
 		return nil, fmt.Errorf("build libp2p options: %w", err)
 	}
@@ -171,41 +175,9 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if !ok {
 		syncConfig = new(SubnetConfig)
 	}
-
-	disc, err := NewDiscovery(privKey, &DiscoveryConfig{
-		GenesisConfig:           cfg.GenesisConfig,
-		NetworkConfig:           cfg.NetworkConfig,
-		AttestationSubnetConfig: attConfig,
-		SyncSubnetConfig:        syncConfig,
-		Addr:                    cfg.Devp2pHost,
-		UDPPort:                 cfg.Devp2pPort,
-		TCPPort:                 cfg.Libp2pPort,
-		Tracer:                  cfg.Tracer,
-		Meter:                   cfg.Meter,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("new discovery service: %w", err)
-	}
-	slog.Info("Initialized new devp2p Node", "enr", disc.node.Node().String())
-
-	// initialize the request-response protocol handlers
-	reqRespCfg := &ReqRespConfig{
-		ForkDigest:              cfg.ForkDigest,
-		Encoder:                 cfg.RPCEncoder,
-		AttestationSubnetConfig: attConfig,
-		SyncSubnetConfig:        syncConfig,
-		DataStream:              ds,
-		ReadTimeout:             cfg.BeaconConfig.TtfbTimeoutDuration(),
-		WriteTimeout:            cfg.BeaconConfig.RespTimeoutDuration(),
-		BeaconConfig:            cfg.BeaconConfig,
-		GenesisConfig:           cfg.GenesisConfig,
-		Tracer:                  cfg.Tracer,
-		Meter:                   cfg.Meter,
-	}
-
-	reqResp, err := NewReqResp(h, reqRespCfg)
-	if err != nil {
-		return nil, fmt.Errorf("new p2p server: %w", err)
+	columConfig, ok := cfg.SubnetConfigs[p2p.GossipDataColumnSidecarMessage]
+	if !ok {
+		columConfig = new(SubnetConfig)
 	}
 
 	// initialize the custom Prysm client to communicate with its API
@@ -214,20 +186,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new prysm client: %w", err)
 	}
 
-	// Fetch and set the BlobSchedule from Prysm for correct BPO fork digest calculation.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := pryClient.FetchAndSetBlobSchedule(ctx); err != nil {
-		// Continue even if this fails, as the network might not have BPO enabled.
-		slog.Warn("Failed to fetch BlobSchedule from Prysm", tele.LogAttrError(err))
-	}
-
-	// Recalculate fork digest after loading BlobSchedule.
-	currentSlot := slots.CurrentSlot(cfg.GenesisConfig.GenesisTime)
-	currentEpoch := slots.ToEpoch(currentSlot)
-	cfg.ForkDigest = params.ForkDigest(currentEpoch)
-
-	// check if Prysm is valid
 	onNetwork, err := pryClient.isOnNetwork(ctx, cfg.ForkDigest)
 	if err != nil {
 		return nil, fmt.Errorf("prysm client: %w", err)
@@ -236,12 +196,55 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("prysm client not in correct fork_digest")
 	}
 
+	// init the Chain module
+	chainCfg := &ChainConfig{
+		clClient:                pryClient,
+		BeaconConfig:            cfg.BeaconConfig,
+		GenesisConfig:           cfg.GenesisConfig,
+		NetworkConfig:           cfg.NetworkConfig,
+		AttestationSubnetConfig: attConfig,
+		SyncSubnetConfig:        syncConfig,
+		ColumnSubnetConfig:      columConfig,
+	}
+	chain, err := NewChain(ctx, chainCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new chain module %w", err)
+	}
+
+	disc, err := NewDiscovery(privKey, &DiscoveryConfig{
+		Chain:   chain,
+		Addr:    cfg.Devp2pHost,
+		UDPPort: cfg.Devp2pPort,
+		TCPPort: cfg.Libp2pPort,
+		Tracer:  cfg.Tracer,
+		Meter:   cfg.Meter,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new discovery service: %w", err)
+	}
+	slog.Info("Initialized new devp2p Node", "enr", disc.node.Node().String())
+
+	// initialize the request-response protocol handlers
+	reqRespCfg := &ReqRespConfig{
+		Encoder:      cfg.RPCEncoder,
+		DataStream:   ds,
+		Chain:        chain,
+		ReadTimeout:  cfg.BeaconConfig.TtfbTimeoutDuration(),
+		WriteTimeout: cfg.BeaconConfig.RespTimeoutDuration(),
+		Tracer:       cfg.Tracer,
+		Meter:        cfg.Meter,
+	}
+
+	reqResp, err := NewReqResp(h, reqRespCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new p2p server: %w", err)
+	}
+
 	pubSubConfig := &PubSubConfig{
+		Chain:          chain,
 		Topics:         cfg.getDesiredFullTopics(cfg.GossipSubMessageEncoder),
-		ForkVersion:    cfg.ForkVersion,
 		Encoder:        cfg.GossipSubMessageEncoder,
 		SecondsPerSlot: time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second,
-		GenesisTime:    cfg.GenesisConfig.GenesisTime,
 		DataStream:     ds,
 	}
 
@@ -250,18 +253,24 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new PubSub service: %w", err)
 	}
 
+	// Create a new Blacklisting map
+	// This is to prevent the node from connecting at the GossipSub level withe trusted Prysm node
+	blacklistMap := pubsub.NewMapBlacklist()
+
 	// finally, initialize hermes node
 	n := &Node{
-		cfg:            cfg,
-		host:           h,
-		ds:             ds,
-		sup:            suture.NewSimple("eth"),
-		reqResp:        reqResp,
-		pubSub:         pubSub,
-		pryClient:      pryClient,
-		peerer:         NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
-		disc:           disc,
-		eventCallbacks: []func(ctx context.Context, event *host.TraceEvent){},
+		cfg:             cfg,
+		host:            h,
+		chain:           chain,
+		pubsubBlacklist: blacklistMap,
+		ds:              ds,
+		sup:             suture.NewSimple("eth"),
+		reqResp:         reqResp,
+		pubSub:          pubSub,
+		pryClient:       pryClient,
+		peerer:          NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
+		disc:            disc,
+		eventCallbacks:  []func(ctx context.Context, event *host.TraceEvent){},
 	}
 
 	if ds.Type() == host.DataStreamTypeCallback {
@@ -389,57 +398,16 @@ func (n *Node) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get prysm node p2p addr info: %w", err)
 	}
+	// Once the Prysm node has been identified, ensure we blacklist it at the pubsub level
+	n.pubsubBlacklist.Add(addrInfo.ID)
 
 	slog.Info("Prysm P2P Identity:", tele.LogAttrPeerID(addrInfo.ID))
 	for i, maddr := range addrInfo.Addrs {
 		slog.Info(fmt.Sprintf("  [%d] %s", i, maddr.String()))
 	}
-
 	// cache the address information on the node
 	n.pryInfo = addrInfo
 	n.reqResp.delegate = addrInfo.ID
-
-	// Now we have the beacon node's identity. The next thing we need is its
-	// current status. The status consists of the ForkDigest, FinalizedRoot,
-	// FinalizedEpoch, HeadRoot, and HeadSlot. We need the status so that we
-	// can reply with it upon status requests. This is just need for
-	// bootstrapping purposes. Subsequent Status requests will be forwarded to
-	// the beacon node, and the response will then be recorded and used from
-	// then on in the future.
-	slog.Info("Getting Prysm's chain head...")
-	chainHead, err := n.pryClient.ChainHead(ctx)
-	if err != nil {
-		return fmt.Errorf("get finalized finality checkpoints: %w", err)
-	}
-
-	// Determine which status version to use based on the fork
-	currentSlot := slots.CurrentSlot(n.cfg.GenesisConfig.GenesisTime)
-	currentEpoch := slots.ToEpoch(currentSlot)
-
-	// Use StatusV2 for Fulu fork and later, StatusV1 for earlier forks
-	if n.cfg.BeaconConfig.FuluForkEpoch != params.BeaconConfig().FarFutureEpoch &&
-		currentEpoch >= n.cfg.BeaconConfig.FuluForkEpoch {
-		// Fulu or later - use StatusV2
-		status := &eth.StatusV2{
-			ForkDigest:            n.cfg.ForkDigest[:],
-			FinalizedRoot:         chainHead.FinalizedBlockRoot,
-			FinalizedEpoch:        chainHead.FinalizedEpoch,
-			HeadRoot:              chainHead.HeadBlockRoot,
-			HeadSlot:              chainHead.HeadSlot,
-			EarliestAvailableSlot: 0, // TODO: Get actual earliest slot from beacon node
-		}
-		n.reqResp.SetStatusV2(status)
-	} else {
-		// Pre-Fulu - use StatusV1
-		status := &eth.Status{
-			ForkDigest:     n.cfg.ForkDigest[:],
-			FinalizedRoot:  chainHead.FinalizedBlockRoot,
-			FinalizedEpoch: chainHead.FinalizedEpoch,
-			HeadRoot:       chainHead.HeadBlockRoot,
-			HeadSlot:       chainHead.HeadSlot,
-		}
-		n.reqResp.SetStatusV1(status)
-	}
 
 	// Set stream handlers on our libp2p host
 	if err := n.reqResp.RegisterHandlers(ctx); err != nil {
@@ -451,7 +419,6 @@ func (n *Node) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch active validators: %w", err)
 	}
-
 	// initialize GossipSub
 	n.pubSub.gs, err = n.host.InitGossipSub(ctx, n.cfg.pubsubOptions(n, actVals)...)
 	if err != nil {
@@ -515,6 +482,9 @@ func (n *Node) Start(ctx context.Context) error {
 
 	// protect connection to beacon node so that it's not pruned at some point
 	n.host.ConnManager().Protect(addrInfo.ID, "hermes")
+
+	// start the chain module
+	n.sup.Add(n.chain)
 
 	// start the discovery service to find peers in the discv5 DHT
 	n.sup.Add(n.disc)

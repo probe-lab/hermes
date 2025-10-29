@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -84,14 +87,55 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	valid := true
 	ps := n.host.Peerstore()
 
-	st, err := n.reqResp.Status(ctx, pid)
+	var (
+		err        error
+		forkDigest []byte
+		headSlot   uint64
+		attnets    []byte
+		seqNum     uint64
+	)
+
+	currentFork := n.chain.CurrentFork()
+	switch currentFork {
+	case phase0, altair, bellatrix, capella, deneb, electra:
+		var st *pb.Status
+		st, err = n.reqResp.Status(ctx, pid)
+		if err == nil {
+			forkDigest = st.ForkDigest
+			headSlot = uint64(st.HeadSlot)
+		}
+	case fulu:
+		var st *pb.StatusV2
+		st, err = n.reqResp.StatusV2(ctx, pid)
+		if err == nil {
+			forkDigest = st.ForkDigest
+			headSlot = uint64(st.HeadSlot)
+		}
+	}
 	if err != nil {
 		valid = false
 	} else {
-		if err := n.reqResp.Ping(ctx, pid); err != nil {
+		if err = n.reqResp.Ping(ctx, pid); err != nil {
 			valid = false
 		} else {
-			md, err := n.reqResp.MetaData(ctx, pid)
+			switch currentFork {
+			case phase0:
+				slog.Warn("too old, metadata v0 not supported")
+			case altair, bellatrix, capella, deneb, electra:
+				var md *pb.MetaDataV1
+				md, err = n.reqResp.MetaDataV1(ctx, pid)
+				if err == nil {
+					attnets = md.Attnets.Bytes()
+					seqNum = md.SeqNumber
+				}
+			case fulu:
+				var md *pb.MetaDataV2
+				md, err = n.reqResp.MetaDataV2(ctx, pid)
+				if err == nil {
+					attnets = md.Attnets.Bytes()
+					seqNum = md.SeqNumber
+				}
+			}
 			if err != nil {
 				valid = false
 			} else {
@@ -104,12 +148,33 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 					slog.Warn("Failed to store handshaked marker in peerstore", tele.LogAttrError(err))
 				}
 
-				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", av, "fork-digest", hex.EncodeToString(st.ForkDigest))
+				slog.Info(
+					"Performed successful handshake",
+					tele.LogAttrPeerID(pid),
+					"head-slot", strconv.FormatUint(headSlot, 10),
+					"seq", seqNum,
+					"attnets", hex.EncodeToString(attnets),
+					"agent", av,
+					"fork-digest", hex.EncodeToString(forkDigest))
 			}
 		}
 	}
 
 	if !valid {
+		slog.Warn(
+			"invalid handshake to peer was recorded",
+			"peer", pid.String(),
+			"err", err.Error(),
+		)
+		if slices.ContainsFunc(n.cfg.DirectMultiaddrs(), func(addr peer.AddrInfo) bool {
+			return addr.ID.String() == pid.String()
+		}) {
+			slog.Warn(
+				"ignore the invalid handshake, the peer is trusted",
+				"peer", pid.String(),
+			)
+			return
+		}
 		// the handshake failed, we disconnect and remove it from our pool
 		ps.RemovePeer(pid)
 		_ = n.host.Network().ClosePeer(pid)

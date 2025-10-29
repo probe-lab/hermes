@@ -9,9 +9,7 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/OffchainLabs/prysm/v6/config/params"
 	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
-	"github.com/OffchainLabs/prysm/v6/time/slots"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -32,7 +30,8 @@ type Discovery struct {
 	cfg  *DiscoveryConfig
 	pk   *ecdsa.PrivateKey
 	node *enode.LocalNode
-	out  chan *DiscoveredPeer
+
+	out chan *DiscoveredPeer
 
 	// Metrics
 	MeterDiscoveredPeers metric.Int64Counter
@@ -57,7 +56,8 @@ func NewDiscovery(privKey *ecdsa.PrivateKey, cfg *DiscoveryConfig) (*Discovery, 
 	localNode.Set(enr.TCP(cfg.TCPPort))
 	localNode.Set(cfg.enrAttnetsEntry())
 	localNode.Set(cfg.enrSyncnetsEntry())
-	localNode.SetFallbackIP(ip)
+	localNode.Set(cfg.enrCustodyEntry())
+	localNode.SetFallbackIP(net.ParseIP("127.0.0.1"))
 	localNode.SetFallbackUDP(cfg.TCPPort)
 
 	enrEth2Entry, err := cfg.enrEth2Entry()
@@ -67,19 +67,24 @@ func NewDiscovery(privKey *ecdsa.PrivateKey, cfg *DiscoveryConfig) (*Discovery, 
 
 	localNode.Set(enrEth2Entry)
 
-	slog.Info("Initialized new enode",
-		"id", localNode.ID().String(),
-		"ip", localNode.Node().IP().String(),
-		"tcp", localNode.Node().TCP(),
-		"udp", localNode.Node().UDP(),
-	)
-
 	d := &Discovery{
 		cfg:  cfg,
 		pk:   privKey,
 		node: localNode,
 		out:  make(chan *DiscoveredPeer),
 	}
+	cfg.Chain.RegisterChainUpgrade(d.forkUpdateSubs)
+
+	slog.Info("Initialized new enode",
+		"id", localNode.ID().String(),
+		"ip", localNode.Node().IP().String(),
+		"tcp", localNode.Node().TCP(),
+		"udp", localNode.Node().UDP(),
+		"attnets", cfg.Chain.cfg.AttestationSubnetConfig.Subnets,
+		"syncnets", cfg.Chain.cfg.SyncSubnetConfig.Subnets,
+		"cgc", cfg.Chain.cfg.ColumnSubnetConfig.Count,
+		"columns", cfg.Chain.GetColumnCustodySubnets(localNode.ID()),
+	)
 
 	d.MeterDiscoveredPeers, err = cfg.Meter.Int64Counter("discovered_peers", metric.WithDescription("Total number of discovered peers"))
 	if err != nil {
@@ -94,11 +99,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 	defer slog.Info("Stopped disv5 Discovery Service")
 	defer func() { err = terminateSupervisorTreeOnErr(err) }()
 
-	genesisTime := d.cfg.GenesisConfig.GenesisTime
-	currentSlot := slots.CurrentSlot(genesisTime)
-	currentEpoch := slots.ToEpoch(currentSlot)
-	digest := params.ForkDigest(currentEpoch)
-
+	_, _, _, forkDigest, err := d.cfg.Chain.epochStats()
 	ip := net.ParseIP(d.cfg.Addr)
 
 	var bindIP net.IP
@@ -189,7 +190,7 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 			continue
 		}
 
-		if !bytes.Equal(forkEntry.CurrentForkDigest, digest[:]) {
+		if !bytes.Equal(forkEntry.CurrentForkDigest, forkDigest[:]) {
 			// irrelevant network
 			continue
 		}
@@ -210,6 +211,28 @@ func (d *Discovery) Serve(ctx context.Context) (err error) {
 			return nil
 		}
 	}
+}
+
+func (d *Discovery) forkUpdateSubs() error {
+	// update the enr entry with the new fork
+	enrEth2Entry, err := d.cfg.enrEth2Entry()
+	if err != nil {
+		return fmt.Errorf("build enr fork entry: %w", err)
+	}
+
+	d.node.Set(enrEth2Entry)
+
+	slog.Info("Initialized new enode",
+		"seq", d.node.Seq(),
+		"id", d.node.ID().String(),
+		"ip", d.node.Node().IP().String(),
+		"tcp", d.node.Node().TCP(),
+		"udp", d.node.Node().UDP(),
+		"attnets", d.cfg.Chain.cfg.AttestationSubnetConfig.Subnets,
+		"syncnets", d.cfg.Chain.cfg.SyncSubnetConfig.Subnets,
+		"cgc", len(d.cfg.Chain.cfg.ColumnSubnetConfig.Subnets),
+	)
+	return nil
 }
 
 type DiscoveredPeer struct {

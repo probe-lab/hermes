@@ -112,7 +112,7 @@ func (k *KinesisOutput) renderPhase0Block(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 
@@ -134,7 +134,7 @@ func (k *KinesisOutput) renderAltairBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 
@@ -156,7 +156,7 @@ func (k *KinesisOutput) renderBellatrixBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 
@@ -178,7 +178,7 @@ func (k *KinesisOutput) renderCapellaBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 
@@ -200,7 +200,7 @@ func (k *KinesisOutput) renderDenebBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 
@@ -222,7 +222,7 @@ func (k *KinesisOutput) renderElectraBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 
@@ -244,7 +244,7 @@ func (k *KinesisOutput) renderFuluBlock(
 		"Slot":       block.GetBlock().GetSlot(),
 		"Root":       root,
 		"ValIdx":     block.GetBlock().GetProposerIndex(),
-		"TimeInSlot": k.cfg.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
+		"TimeInSlot": k.cfg.Chain.cfg.GenesisConfig.GenesisTime.Add(time.Duration(block.GetBlock().GetSlot()) * k.cfg.SecondsPerSlot),
 	}, nil
 }
 

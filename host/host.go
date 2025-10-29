@@ -29,6 +29,9 @@ import (
 type Config struct {
 	DataStream            DataStream
 	PeerscoreSnapshotFreq time.Duration
+	PeerFilter            *FilterConfig // Optional peer filtering configuration
+	DirectConnections     []peer.AddrInfo
+	PubsubBlacklist       pubsub.Blacklist
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -50,6 +53,13 @@ type Host struct {
 }
 
 func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
+	// Add peer filtering if configured
+	var deferredGater *deferredGater
+	if cfg.PeerFilter != nil && cfg.PeerFilter.Mode != FilterModeDisabled {
+		deferredGater = newDeferredGater()
+		opts = append(opts, libp2p.ConnectionGater(deferredGater))
+	}
+
 	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
@@ -65,6 +75,33 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 		cfg:   cfg,
 		avlru: avlru,
 		sk:    newScoreKeeper(cfg.PeerscoreSnapshotFreq),
+	}
+
+	// Set up peer filter if enabled
+	if deferredGater != nil {
+		peerFilter, err := NewPeerFilter(hermesHost, *cfg.PeerFilter, slog.Default())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create peer filter: %w", err)
+		}
+		deferredGater.SetActual(peerFilter)
+		slog.Info(
+			"Peer filtering enabled",
+			"mode", cfg.PeerFilter.Mode,
+			"patterns", cfg.PeerFilter.Patterns,
+		)
+	}
+
+	// Check if there are any kind of direct connections enabled
+	if cfg.DirectConnections != nil {
+		for _, directPeer := range cfg.DirectConnections {
+			hermesHost.Host.ConnManager().Protect(directPeer.ID, "keep-alive")
+			slog.Info(
+				"protecting connection to...",
+				"peer", directPeer.ID.String(),
+				"multiaddrs", directPeer.Addrs,
+			)
+		}
+
 	}
 
 	hermesHost.meterSubmittedTraces, err = cfg.Meter.Int64Counter("submitted_traces")
@@ -156,6 +193,21 @@ func (h *Host) InitGossipSub(ctx context.Context, opts ...pubsub.Option) (*pubsu
 		pubsub.WithEventTracer(h),
 		pubsub.WithPeerScoreInspect(h.UpdatePeerScore, h.sk.freq),
 	)
+
+	if h.cfg.PubsubBlacklist != nil {
+		opts = append(
+			opts,
+			pubsub.WithBlacklist(h.cfg.PubsubBlacklist),
+		)
+	}
+
+	if h.cfg.DirectConnections != nil {
+		opts = append(
+			opts,
+			pubsub.WithDirectPeers(h.cfg.DirectConnections),
+			pubsub.WithDirectConnectTicks(1), // TODO: hardcoded for now, if too high, it could can delay the initial conncetion of the peers
+		)
+	}
 	ps, err := pubsub.NewGossipSub(ctx, h, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new gossip sub: %w", err)

@@ -23,11 +23,10 @@ import (
 const eventTypeHandleMessage = "HANDLE_MESSAGE"
 
 type PubSubConfig struct {
+	Chain          *Chain
 	Topics         []string
-	ForkVersion    ForkVersion
 	Encoder        encoder.NetworkEncoding
 	SecondsPerSlot time.Duration
-	GenesisTime    time.Time
 	DataStream     host.DataStream
 }
 
@@ -40,7 +39,7 @@ func (p PubSubConfig) Validate() error {
 		return fmt.Errorf("seconds per slot must not be 0")
 	}
 
-	if p.GenesisTime.IsZero() {
+	if p.Chain.cfg.GenesisConfig.GenesisTime.IsZero() {
 		return fmt.Errorf("genesis time must not be zero time")
 	}
 
@@ -173,23 +172,23 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 		block ssz.Unmarshaler
 	)
 
-	switch p.cfg.ForkVersion {
-	case Phase0ForkVersion:
+	switch p.cfg.Chain.CurrentFork() {
+	case phase0:
 		block = &ethtypes.SignedBeaconBlock{}
-	case AltairForkVersion:
+	case altair:
 		block = &ethtypes.SignedBeaconBlockAltair{}
-	case BellatrixForkVersion:
+	case bellatrix:
 		block = &ethtypes.SignedBeaconBlockBellatrix{}
-	case CapellaForkVersion:
+	case capella:
 		block = &ethtypes.SignedBeaconBlockCapella{}
-	case DenebForkVersion:
+	case deneb:
 		block = &ethtypes.SignedBeaconBlockDeneb{}
-	case ElectraForkVersion:
+	case electra:
 		block = &ethtypes.SignedBeaconBlockElectra{}
-	case FuluForkVersion:
+	case fulu:
 		block = &ethtypes.SignedBeaconBlockFulu{}
 	default:
-		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %s", p.cfg.ForkVersion.String())
+		return fmt.Errorf("handleBeaconBlock(): unrecognized fork-version: %d", p.cfg.Chain.CurrentFork())
 	}
 
 	evt, err = p.dsr.RenderPayload(evt, msg, block)
@@ -203,7 +202,10 @@ func (p *PubSub) handleBeaconBlock(ctx context.Context, msg *pubsub.Message) err
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn(
-			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+			"failed putting topic handler event",
+			"topic", msg.GetTopic(),
+			"fork_version", p.cfg.Chain.CurrentFork(),
+			"err", tele.LogAttrError(err),
 		)
 	}
 
@@ -225,18 +227,21 @@ func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) err
 		}
 	)
 
-	switch p.cfg.ForkVersion {
-	case Phase0ForkVersion, AltairForkVersion, BellatrixForkVersion, CapellaForkVersion, DenebForkVersion:
+	switch p.cfg.Chain.CurrentFork() {
+	case phase0, altair, bellatrix, capella, deneb:
 		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.Attestation{})
-	case ElectraForkVersion, FuluForkVersion:
+	case electra, fulu:
 		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SingleAttestation{})
 	default:
-		return fmt.Errorf("handleAttestation(): unrecognized fork-version: %x", p.cfg.ForkVersion)
+		return fmt.Errorf("handleAttestation(): unrecognized fork-version: %d", p.cfg.Chain.CurrentFork())
 	}
 
 	if err != nil {
 		slog.Warn(
-			"failed rendering topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+			"failed rendering topic handler event",
+			"topic", msg.GetTopic(),
+			"fork_version", p.cfg.Chain.CurrentFork(),
+			"err", tele.LogAttrError(err),
 		)
 
 		return nil
@@ -266,13 +271,13 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 		}
 	)
 
-	switch p.cfg.ForkVersion {
-	case Phase0ForkVersion, AltairForkVersion, BellatrixForkVersion, CapellaForkVersion, DenebForkVersion:
+	switch p.cfg.Chain.CurrentFork() {
+	case phase0, altair, bellatrix, capella, deneb:
 		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProof{})
-	case ElectraForkVersion, FuluForkVersion:
+	case electra, fulu:
 		evt, err = p.dsr.RenderPayload(evt, msg, &ethtypes.SignedAggregateAttestationAndProofElectra{})
 	default:
-		return fmt.Errorf("handleAggregateAndProof(): unrecognized fork-version: %x", p.cfg.ForkVersion)
+		return fmt.Errorf("handleAggregateAndProof(): unrecognized fork-version: %x", p.cfg.Chain.CurrentFork())
 	}
 
 	if err != nil {
@@ -285,7 +290,10 @@ func (p *PubSub) handleAggregateAndProof(ctx context.Context, msg *pubsub.Messag
 
 	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
 		slog.Warn(
-			"failed putting topic handler event", "topic", msg.GetTopic(), "err", tele.LogAttrError(err),
+			"failed putting topic handler event",
+			"topic", msg.GetTopic(),
+			"fork_version", p.cfg.Chain.CurrentFork(),
+			"err", tele.LogAttrError(err),
 		)
 	}
 
@@ -506,8 +514,8 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 		}
 	)
 
-	switch p.cfg.ForkVersion {
-	case DenebForkVersion, ElectraForkVersion, FuluForkVersion:
+	switch p.cfg.Chain.CurrentFork() {
+	case deneb, electra, fulu:
 		blob := ethtypes.BlobSidecar{}
 
 		evt, err = p.dsr.RenderPayload(evt, msg, &blob)
@@ -525,7 +533,7 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 			)
 		}
 	default:
-		return fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
+		return fmt.Errorf("non recognized fork-version: %d", p.cfg.Chain.CurrentFork())
 	}
 
 	return nil

@@ -21,6 +21,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -34,7 +35,6 @@ const (
 	maxGossipSize = 10 * (1 << 20)
 	// minGossipSize is used to make sure that there is at least some data to validate the signature against.
 	maxOutboundQueue       = 256
-	maxValidateQueue       = 256
 	globalValidateThrottle = 512
 	gossipHeartbeat        = 500 * time.Millisecond
 	// seenMessagesTTL limits the duration that message IDs are remembered for gossip deduplication purposes
@@ -72,6 +72,11 @@ type NodeConfig struct {
 	Libp2pHost                  string
 	Libp2pPort                  int
 	Libp2pPeerscoreSnapshotFreq time.Duration
+	PubSubValidateQueueSize     int
+	DirectConnections           []string
+
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
 
 	// Pause between two discovery lookups
 	LookupInterval time.Duration
@@ -127,6 +132,13 @@ func (n *NodeConfig) Validate() error {
 			}
 		} else {
 			return fmt.Errorf("s3 configuration is empty")
+		}
+	}
+
+	for _, p := range n.DirectConnections {
+		_, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
 		}
 	}
 
@@ -195,6 +207,24 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	return gcrypto.ToECDSA(data)
 }
 
+// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
+func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
+	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
+	for i, p := range n.DirectConnections {
+		add, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			slog.Error(
+				"parsing multia-addrs for direct peer",
+				"peer", p,
+				"err", err.Error(),
+			)
+			continue
+		}
+		dirConnAddrs[i] = *add
+	}
+	return dirConnAddrs
+}
+
 // libp2pOptions returns the options to configure the libp2p node. It retrieves
 // the private key, constructs the libp2p listen multiaddr based on the node
 // configuration. The options include setting the identity with the private key,
@@ -239,9 +269,9 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter) []pubsub
 		pubsub.WithMessageIdFn(MsgID),
 		pubsub.WithNoAuthor(),
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithValidateQueueSize(maxValidateQueue),
 		pubsub.WithPeerOutboundQueueSize(maxOutboundQueue),
 		pubsub.WithValidateThrottle(globalValidateThrottle),
+		pubsub.WithValidateQueueSize(n.PubSubValidateQueueSize),
 		pubsub.WithSeenMessagesTTL(seenMessagesTTL),
 		pubsub.WithPeerExchange(false),
 		pubsub.WithSubscriptionFilter(subFilter),

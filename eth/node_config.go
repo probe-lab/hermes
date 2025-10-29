@@ -100,8 +100,8 @@ type NodeConfig struct {
 	// -> 4 Sync Committee Subnets * 2.
 	// -> Block,Aggregate,ProposerSlashing,AttesterSlashing,Exits,SyncContribution * 2.
 	PubSubSubscriptionRequestLimit int
-
-	PubSubQueueSize int
+	PubSubValidateQueueSize        int
+	PubSubMaxOutputQueue           int
 
 	// Configuration for subnet selection by topic
 	SubnetConfigs map[string]*SubnetConfig
@@ -113,6 +113,12 @@ type NodeConfig struct {
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
+
+	// PeerFilter configuration for filtering peers (passed to host)
+	PeerFilter *host.FilterConfig
+
+	// DirectConnections ensurest that our host doesn't prune the connection from these nodes
+	DirectConnections []string
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
@@ -225,6 +231,13 @@ func (n *NodeConfig) Validate() error {
 		}
 	}
 
+	for _, p := range n.DirectConnections {
+		_, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
+		}
+	}
+
 	if n.Tracer == nil {
 		return fmt.Errorf("tracer must not be nil")
 	}
@@ -290,6 +303,24 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	return gcrypto.ToECDSA(data)
 }
 
+// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
+func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
+	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
+	for i, p := range n.DirectConnections {
+		add, err := peer.AddrInfoFromString(p)
+		if err != nil {
+			slog.Error(
+				"parsing multia-addrs for direct peer",
+				"peer", p,
+				"err", err.Error(),
+			)
+			continue
+		}
+		dirConnAddrs[i] = *add
+	}
+	return dirConnAddrs
+}
+
 // libp2pOptions returns the options to configure the libp2p node. It retrieves
 // the private key, constructs the libp2p listen multiaddr based on the node
 // configuration. The options include setting the identity with the private key,
@@ -330,6 +361,17 @@ func (n *NodeConfig) libp2pOptions() ([]libp2p.Option, error) {
 		libp2p.ResourceManager(rmgr),
 		libp2p.DisableMetrics(),
 	}
+
+	return opts, nil
+}
+
+// buildLibp2pOptions builds libp2p options for the node
+func (n *NodeConfig) buildLibp2pOptions() ([]libp2p.Option, error) {
+	opts, err := n.libp2pOptions()
+	if err != nil {
+		return nil, err
+	}
+
 	return opts, nil
 }
 
@@ -341,13 +383,11 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeVa
 			return p2p.MsgID(n.GenesisConfig.GenesisValidatorRoot, pmsg)
 		}),
 		pubsub.WithSubscriptionFilter(subFilter),
-		pubsub.WithPeerOutboundQueueSize(n.PubSubQueueSize),
+		pubsub.WithPeerOutboundQueueSize(n.PubSubMaxOutputQueue),
 		pubsub.WithMaxMessageSize(int(n.BeaconConfig.MaxPayloadSize)),
-		pubsub.WithValidateQueueSize(n.PubSubQueueSize),
+		pubsub.WithValidateQueueSize(n.PubSubValidateQueueSize),
 		pubsub.WithPeerScore(n.peerScoringParams(activeValidators)),
-		// pubsub.WithPeerScoreInspect(s.peerInspector, time.Minute),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
-		// pubsub.WithRawTracer(gossipTracer{host: s.host}),
 	}
 	return psOpts
 }
@@ -430,10 +470,7 @@ func desiredPubSubBaseTopics() []string {
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
 		p2p.GossipAttestationMessage,
-		// In relation to https://github.com/probe-lab/hermes/issues/24
-		// we unfortunatelly can't validate the messages (yet)
-		// thus, better not to forward invalid messages
-		// p2p.GossipExitMessage,
+		p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
 		p2p.GossipContributionAndProofMessage,
