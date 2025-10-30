@@ -57,7 +57,7 @@ func NewDiscovery(privKey *ecdsa.PrivateKey, cfg *DiscoveryConfig) (*Discovery, 
 	localNode.Set(cfg.enrAttnetsEntry())
 	localNode.Set(cfg.enrSyncnetsEntry())
 	localNode.Set(cfg.enrCustodyEntry())
-	localNode.SetFallbackIP(net.ParseIP("127.0.0.1"))
+	localNode.SetFallbackIP(ip)
 	localNode.SetFallbackUDP(cfg.TCPPort)
 
 	enrEth2Entry, err := cfg.enrEth2Entry()
