@@ -19,8 +19,6 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/OffchainLabs/hashtree v0.2.1-0.20250530191054-577f0b75c7f7 h1:0r1HjExe/tyypkt380UTpjvILd5kLw51Xzl6a+hknQ8=
 github.com/OffchainLabs/hashtree v0.2.1-0.20250530191054-577f0b75c7f7/go.mod h1:b07+cRZs+eAR8TR57CB9TQlt5Gnl/06Xs76xt/1wq0M=
-github.com/OffchainLabs/prysm/v6 v6.1.2 h1:Kzu4BE6R39fj+Tx1Fmr1amNl60+eUnH+mS/YBQPVpF0=
-github.com/OffchainLabs/prysm/v6 v6.1.2/go.mod h1:VbMsULGbZkgM4kwbKxb/ywhhR/EtebwGPIAszIU59Ws=
 github.com/OffchainLabs/prysm/v6 v6.1.4 h1:gwLBbGaYsEh9zpZL337uVjXPX3F86UNJ7KIiFiPsY7c=
 github.com/OffchainLabs/prysm/v6 v6.1.4/go.mod h1:VbMsULGbZkgM4kwbKxb/ywhhR/EtebwGPIAszIU59Ws=
 github.com/Shopify/sarama v1.19.0/go.mod h1:FVkBWblsNy7DGZRfXLU0O9RCGt5g3g3yEuWXgklEdEo=
