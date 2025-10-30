@@ -39,13 +39,13 @@ const (
 
 const (
 	// chain fork
-	phase0Fork chainFork = iota
-	altairFork
-	bellatrixFork
-	capellaFork
-	denebFork
-	electraFork
-	fuluFork
+	phase0 chainFork = iota
+	altair
+	bellatrix
+	capella
+	deneb
+	electra
+	fulu
 )
 
 type chainUpgradeSubFn func() error
@@ -203,7 +203,7 @@ func (c *Chain) epochUpdate(ctx context.Context) error {
 
 func (c *Chain) epochStats() (primitives.Slot, primitives.Epoch, chainFork, [4]byte, error) {
 	if c.cfg.BeaconConfig == nil || c.cfg.GenesisConfig == nil {
-		return 0, 0, phase0Fork, [4]byte{}, fmt.Errorf("chain internals doest have beacon config")
+		return 0, 0, phase0, [4]byte{}, fmt.Errorf("chain internals doest have beacon config")
 	}
 	var (
 		slot       = slots.CurrentSlot(c.cfg.GenesisConfig.GenesisTime)
@@ -215,19 +215,19 @@ func (c *Chain) epochStats() (primitives.Slot, primitives.Epoch, chainFork, [4]b
 }
 
 func (c *Chain) forkFromEpoch(epoch primitives.Epoch) chainFork {
-	var fork = phase0Fork
+	var fork = phase0
 	if c.cfg.BeaconConfig.FuluForkEpoch != params.BeaconConfig().FarFutureEpoch && epoch >= c.cfg.BeaconConfig.FuluForkEpoch {
-		fork = fuluFork
+		fork = fulu
 	} else if c.cfg.BeaconConfig.ElectraForkEpoch != params.BeaconConfig().FarFutureEpoch && epoch >= c.cfg.BeaconConfig.ElectraForkEpoch {
-		fork = electraFork
+		fork = electra
 	} else if c.cfg.BeaconConfig.DenebForkEpoch != params.BeaconConfig().FarFutureEpoch && epoch >= c.cfg.BeaconConfig.DenebForkEpoch {
-		fork = denebFork
+		fork = deneb
 	} else if c.cfg.BeaconConfig.CapellaForkEpoch != params.BeaconConfig().FarFutureEpoch && epoch >= c.cfg.BeaconConfig.CapellaForkEpoch {
-		fork = capellaFork
+		fork = capella
 	} else if c.cfg.BeaconConfig.BellatrixForkEpoch != params.BeaconConfig().FarFutureEpoch && epoch >= c.cfg.BeaconConfig.BellatrixForkEpoch {
-		fork = bellatrixFork
+		fork = bellatrix
 	} else if c.cfg.BeaconConfig.AltairForkEpoch != params.BeaconConfig().FarFutureEpoch && epoch >= c.cfg.BeaconConfig.AltairForkEpoch {
-		fork = altairFork
+		fork = altair
 	}
 	return fork
 }
@@ -325,7 +325,7 @@ func (c *Chain) GetStatus(v statusVersion) any {
 	defer c.statusMu.RUnlock()
 	switch v {
 	case statusV0:
-		return &StatusV1{
+		return &pb.Status{
 			ForkDigest:     c.statusHolder.ForkDigest(),
 			FinalizedRoot:  c.statusHolder.FinalizedRoot(),
 			FinalizedEpoch: c.statusHolder.FinalizedEpoch(),
@@ -360,7 +360,7 @@ func (c *Chain) UpdateStatus(v statusVersion, st any) error {
 	defer c.statusMu.Unlock()
 	switch v {
 	case statusV1, statusV0:
-		st1, ok := st.(*StatusV2)
+		st1, ok := st.(*pb.StatusV2)
 		if !ok {
 			return fmt.Errorf("chain internal: status-update: invalid type for md version %d", v+1)
 		}

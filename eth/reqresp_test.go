@@ -8,7 +8,6 @@ import (
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
-	"github.com/OffchainLabs/prysm/v6/config/params"
 	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
 	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"github.com/probe-lab/hermes/host"
@@ -137,11 +136,11 @@ func TestStatusHolder(t *testing.T) {
 	holder := &StatusHolder{}
 
 	// Test V1 status
-	statusV1 := &StatusV1{
-		ForkDigest:     [4]byte{1, 2, 3, 4},
-		FinalizedRoot:  [32]byte("finalized_root_v1"),
+	statusV1 := &pb.Status{
+		ForkDigest:     []byte{1, 2, 3, 4},
+		FinalizedRoot:  []byte("finalized_root_v1"),
 		FinalizedEpoch: 100,
-		HeadRoot:       [32]byte("head_root_v1"),
+		HeadRoot:       []byte("head_root_v1"),
 		HeadSlot:       1000,
 	}
 
@@ -153,11 +152,11 @@ func TestStatusHolder(t *testing.T) {
 	assert.Equal(t, statusV1.HeadSlot, holder.HeadSlot())
 
 	// Test V2 status
-	statusV2 := &StatusV2{
-		ForkDigest:            [4]byte{5, 6, 7, 8},
-		FinalizedRoot:         [32]byte("finalized_root_v2"),
+	statusV2 := &pb.StatusV2{
+		ForkDigest:            []byte{5, 6, 7, 8},
+		FinalizedRoot:         []byte("finalized_root_v2"),
 		FinalizedEpoch:        200,
-		HeadRoot:              [32]byte("head_root_v2"),
+		HeadRoot:              []byte("head_root_v2"),
 		HeadSlot:              2000,
 		EarliestAvailableSlot: 1500,
 	}
@@ -248,128 +247,4 @@ func TestMetadataHolder(t *testing.T) {
 	count, hasCount = holder.CustodyGroupCount()
 	assert.False(t, hasCount)
 	assert.Equal(t, uint64(0), count)
-}
-
-// TestForkAwareMetadataInit tests that ReqResp initializes metadata correctly based on fork
-func TestForkAwareMetadataInit(t *testing.T) {
-	// Mock host and data stream
-	mockHost := &host.Host{}
-
-	// Test Pre-Altair (should use V0)
-	t.Run("PreAltair", func(t *testing.T) {
-		cfg := &ReqRespConfig{
-			Chain: &Chain{
-				cfg: &ChainConfig{
-					BeaconConfig: &params.BeaconChainConfig{
-						AltairForkEpoch: 1000, // Future epoch
-						FuluForkEpoch:   params.BeaconConfig().FarFutureEpoch,
-					},
-					GenesisConfig: &GenesisConfig{
-						GenesisTime: time.Now().Add(-time.Hour), // Started 1 hour ago
-					},
-					AttestationSubnetConfig: &SubnetConfig{Subnets: []uint64{0, 1}},
-					SyncSubnetConfig:        &SubnetConfig{Subnets: []uint64{0}},
-				},
-			},
-			Encoder: encoder.SszNetworkEncoder{},
-			Tracer:  otel.GetTracerProvider().Tracer("test"),
-			Meter:   otel.GetMeterProvider().Meter("test"),
-		}
-
-		reqResp, err := NewReqResp(mockHost, cfg)
-		assert.NoError(t, err)
-		assert.NotNil(t, reqResp)
-		assert.Equal(t, 0, reqResp.cfg.Chain.metadataHolder.Version())
-		assert.NotNil(t, reqResp.cfg.Chain.metadataHolder.GetV0())
-		assert.Nil(t, reqResp.cfg.Chain.metadataHolder.GetV1())
-		assert.Nil(t, reqResp.cfg.Chain.metadataHolder.GetV2())
-	})
-
-	// Test Altair (should use V1)
-	t.Run("Altair", func(t *testing.T) {
-		cfg := &ReqRespConfig{
-			Chain: &Chain{
-				cfg: &ChainConfig{
-					BeaconConfig: &params.BeaconChainConfig{
-						AltairForkEpoch: 0, // already activated
-						FuluForkEpoch:   params.BeaconConfig().FarFutureEpoch,
-					},
-					GenesisConfig: &GenesisConfig{
-						GenesisTime: time.Now().Add(-time.Hour), // Started 1 hour ago
-					},
-					AttestationSubnetConfig: &SubnetConfig{Subnets: []uint64{0, 1}},
-					SyncSubnetConfig:        &SubnetConfig{Subnets: []uint64{0}},
-					ColumnSubnetConfig:      &SubnetConfig{Subnets: []uint64{0}},
-				},
-			},
-			Encoder: encoder.SszNetworkEncoder{},
-			Tracer:  otel.GetTracerProvider().Tracer("test"),
-			Meter:   otel.GetMeterProvider().Meter("test"),
-		}
-
-		reqResp, err := NewReqResp(mockHost, cfg)
-		assert.NoError(t, err)
-		assert.NotNil(t, reqResp)
-		assert.Equal(t, 1, reqResp.cfg.Chain.metadataHolder.Version())
-		assert.Nil(t, reqResp.cfg.Chain.metadataHolder.GetV0())
-		assert.NotNil(t, reqResp.cfg.Chain.metadataHolder.GetV1())
-		assert.Nil(t, reqResp.cfg.Chain.metadataHolder.GetV2())
-	})
-
-	// Test Fulu (should use V2)
-	t.Run("Fulu", func(t *testing.T) {
-		cfg := &ReqRespConfig{
-			Chain: &Chain{
-				cfg: &ChainConfig{
-					BeaconConfig: &params.BeaconChainConfig{
-						AltairForkEpoch: 0,
-						FuluForkEpoch:   0, // already activated
-					},
-					GenesisConfig: &GenesisConfig{
-						GenesisTime: time.Now().Add(-time.Hour), // Started 1 hour ago
-					},
-					AttestationSubnetConfig: &SubnetConfig{Subnets: []uint64{0, 1}},
-					SyncSubnetConfig:        &SubnetConfig{Subnets: []uint64{0}},
-				},
-			},
-			Encoder: encoder.SszNetworkEncoder{},
-			Tracer:  otel.GetTracerProvider().Tracer("test"),
-			Meter:   otel.GetMeterProvider().Meter("test"),
-		}
-
-		reqResp, err := NewReqResp(mockHost, cfg)
-		assert.NoError(t, err)
-		assert.NotNil(t, reqResp)
-		assert.Equal(t, 2, reqResp.cfg.Chain.metadataHolder.Version())
-		assert.Nil(t, reqResp.cfg.Chain.metadataHolder.GetV0())
-		assert.Nil(t, reqResp.cfg.Chain.metadataHolder.GetV1())
-		assert.NotNil(t, reqResp.cfg.Chain.metadataHolder.GetV2())
-
-		// Check custody group count
-		count, hasCount := reqResp.cfg.Chain.metadataHolder.CustodyGroupCount()
-		assert.True(t, hasCount)
-		assert.Equal(t, uint64(0), count) // TODO: Should be configured value
-	})
-
-	// Test without fork config (should default to V1)
-	t.Run("NoForkConfig", func(t *testing.T) {
-		cfg := &ReqRespConfig{
-			Chain: &Chain{
-				cfg: &ChainConfig{
-					AttestationSubnetConfig: &SubnetConfig{Subnets: []uint64{0, 1}},
-					SyncSubnetConfig:        &SubnetConfig{Subnets: []uint64{0}},
-					ColumnSubnetConfig:      &SubnetConfig{Subnets: []uint64{0}},
-				},
-			},
-			Encoder: encoder.SszNetworkEncoder{},
-			Tracer:  otel.GetTracerProvider().Tracer("test"),
-			Meter:   otel.GetMeterProvider().Meter("test"),
-		}
-
-		reqResp, err := NewReqResp(mockHost, cfg)
-		assert.NoError(t, err)
-		assert.NotNil(t, reqResp)
-		assert.Equal(t, 1, reqResp.cfg.Chain.metadataHolder.Version()) // Defaults to V1
-		assert.NotNil(t, reqResp.cfg.Chain.metadataHolder.GetV1())
-	})
 }

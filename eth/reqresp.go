@@ -3,6 +3,7 @@ package eth
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,15 +15,19 @@ import (
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/types"
+	psync "github.com/OffchainLabs/prysm/v6/beacon-chain/sync"
 	"github.com/OffchainLabs/prysm/v6/consensus-types/blocks"
 	"github.com/OffchainLabs/prysm/v6/consensus-types/interfaces"
 	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
 	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	ssz "github.com/ferranbt/fastssz"
+	"github.com/libp2p/go-libp2p/core"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/time/rate"
@@ -209,13 +214,13 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 
 func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	req := new(primitives.SSZUint64)
-	if err := r.readRequest(stream, req); err != nil {
+	if err := r.readRequest(ctx, stream, req); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("read sequence number: %w", err)
 	}
 
 	sq := r.cfg.Chain.CurrentSeqNumber()
-	if err := r.writeResponse(stream, &sq); err != nil {
+	if err := r.writeResponse(ctx, stream, &sq); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write sequence number: %w", err)
 	}
@@ -231,13 +236,13 @@ func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) (map[s
 }
 
 func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (map[string]any, error) {
-	req := primitives.SSZUint64(0)
-	if err := r.readRequest(stream, &req); err != nil {
+	req := new(primitives.SSZUint64)
+	if err := r.readRequest(ctx, stream, req); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("read sequence number: %w", err)
 	}
 
-	msg, found := types.GoodbyeCodeMessages[req]
+	msg, found := types.GoodbyeCodeMessages[*req]
 	if found {
 		if _, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), peerstoreKeyIsHandshaked); err == nil {
 			var (
@@ -260,7 +265,7 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 
 			r.goodbyeCounter.Add(ctx, 1, metric.WithAttributes(
 				[]attribute.KeyValue{
-					attribute.Int64("code", int64(req)),
+					attribute.Int64("code", int64(*req)),
 					attribute.String("reason", reason),
 					attribute.String("agent", agentVersion),
 				}...,
@@ -273,7 +278,7 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 	}
 
 	traceData := map[string]any{
-		"Code":   req,
+		"Code":   *req,
 		"Reason": msg,
 	}
 
@@ -295,7 +300,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 
 	// first, read the status from the remote peer
 	req := &pb.Status{}
-	if err := r.readRequest(upstream, req); err != nil {
+	if err := r.readRequest(ctx, upstream, req); err != nil {
 		upstream.Reset()
 		return nil, fmt.Errorf("read status data from remote peer: %w", err)
 	}
@@ -303,7 +308,7 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 	// let the upstream peer (who initiated the request) know the latest status
 	localStI := r.cfg.Chain.GetStatus(statusV0)
 	localSt, _ := localStI.(*pb.Status)
-	if err := r.writeResponse(upstream, localSt); err != nil {
+	if err := r.writeResponse(ctx, upstream, localSt); err != nil {
 		upstream.Reset()
 		return nil, fmt.Errorf("respond status to upstream: %w", err)
 	}
@@ -341,7 +346,7 @@ func (r *ReqResp) statusV2Handler(ctx context.Context, upstream network.Stream) 
 
 	// first, read the status from the remote peer
 	req := &pb.StatusV2{}
-	if err := r.readRequest(upstream, req); err != nil {
+	if err := r.readRequest(ctx, upstream, req); err != nil {
 		upstream.Reset()
 		return nil, fmt.Errorf("read status V2 data from peer: %w", err)
 	}
@@ -351,7 +356,7 @@ func (r *ReqResp) statusV2Handler(ctx context.Context, upstream network.Stream) 
 	localSt, _ := localStI.(*pb.StatusV2)
 
 	// let the upstream peer (who initiated the request) know the latest status
-	if err := r.writeResponse(upstream, localSt); err != nil {
+	if err := r.writeResponse(ctx, upstream, localSt); err != nil {
 		upstream.Reset()
 		return nil, fmt.Errorf("respond status V2 to upstream: %w", err)
 	}
@@ -378,7 +383,7 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 	mdI := r.cfg.Chain.GetMetadata(metadataV0)
 	metaData, _ := mdI.(*pb.MetaDataV0)
 
-	if err := r.writeResponse(stream, metaData); err != nil {
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write meta data v1: %w", err)
 	}
@@ -403,12 +408,12 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 	mdI := r.cfg.Chain.GetMetadata(metadataV1)
 	metaData, _ := mdI.(*pb.MetaDataV1)
 
-	if err := r.writeResponse(stream, metaData); err != nil {
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write meta data v1: %w", err)
 	}
 
-	if err := r.writeResponse(stream, metaData); err != nil {
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write meta data v2: %w", err)
 	}
@@ -438,7 +443,7 @@ func (r *ReqResp) metadataV3Handler(ctx context.Context, stream network.Stream) 
 		return nil, fmt.Errorf("no metadata available")
 	}
 
-	if err := r.writeResponse(stream, metaData); err != nil {
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write meta data v3: %w", err)
 	}
@@ -466,7 +471,7 @@ func (r *ReqResp) metadataV3Handler(ctx context.Context, stream network.Stream) 
 
 func (r *ReqResp) DataColumnsByRangeV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	req := new(pb.DataColumnSidecarsByRangeRequest)
-	err := r.readRequest(stream, req)
+	err := r.readRequest(ctx, stream, req)
 	if err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("error to read data-column-by-range request %w", err)
@@ -496,7 +501,7 @@ func (r *ReqResp) DataColumnsByRangeV1Handler(ctx context.Context, stream networ
 
 func (r *ReqResp) DataColumnsByRootV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	req := new(types.DataColumnsByRootIdentifiers)
-	err := r.readRequest(stream, req)
+	err := r.readRequest(ctx, stream, req)
 	if err != nil {
 		return nil, fmt.Errorf("error to read data-column-by-root request %w", err)
 	}
@@ -663,14 +668,14 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 	stI := r.cfg.Chain.GetStatus(statusV0)
 	stReq, _ := stI.(*pb.Status)
 
-	if err := r.writeRequest(stream, stReq); err != nil {
+	if err := r.writeRequest(ctx, stream, stReq); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write status request: %w", err)
 	}
 
 	// read and decode status response
 	resp := &pb.Status{}
-	if err := r.readResponse(stream, resp); err != nil {
+	if err := r.readResponse(ctx, stream, resp); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("read status response: %w", err)
 	}
@@ -734,40 +739,19 @@ func (r *ReqResp) StatusV2(ctx context.Context, pid peer.ID) (status *pb.StatusV
 	localStI := r.cfg.Chain.GetStatus(statusV1)
 	localSt, _ := localStI.(*pb.StatusV2)
 
-	slog.Info(
-		"sending local status v2 request",
-		"peer", stream.Conn().RemotePeer().String(),
-		"trusted-peer", stream.Conn().RemotePeer() == r.delegate,
-		"head-slot", localSt.HeadSlot,
-		"head-root", hex.EncodeToString(localSt.HeadRoot),
-		"finalized-root", hex.EncodeToString(localSt.FinalizedRoot),
-		"fork-digest", hex.EncodeToString(localSt.ForkDigest),
-		"eas", localSt.EarliestAvailableSlot,
-	)
-	if err := r.writeRequest(stream, localSt); err != nil {
+	if err := r.writeRequest(ctx, stream, localSt); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write status V2 request: %w", err)
 	}
 
 	// read and decode status response
 	resp := &pb.StatusV2{}
-	if err := r.readResponse(stream, resp); err != nil {
+	if err := r.readResponse(ctx, stream, resp); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("read status V2 response: %w", err)
 	}
 
 	_ = stream.Close()
-
-	slog.Info(
-		"successful status v2 response",
-		"peer", stream.Conn().RemotePeer().String(),
-		"trusted-peer", stream.Conn().RemotePeer() == r.delegate,
-		"head-slot", resp.HeadSlot,
-		"head-root", hex.EncodeToString(resp.HeadRoot),
-		"finalized-root", hex.EncodeToString(resp.FinalizedRoot),
-		"fork-digest", hex.EncodeToString(resp.ForkDigest),
-		"eas", resp.EarliestAvailableSlot,
-	)
 
 	return resp, nil
 }
@@ -803,14 +787,14 @@ func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 	seqNum := r.cfg.Chain.CurrentSeqNumber()
 
 	req := primitives.SSZUint64(seqNum)
-	if err := r.writeRequest(stream, &req); err != nil {
+	if err := r.writeRequest(ctx, stream, &req); err != nil {
 		stream.Reset()
 		return fmt.Errorf("write ping request: %w", err)
 	}
 
 	// read and decode status response
 	resp := new(primitives.SSZUint64)
-	if err := r.readResponse(stream, resp); err != nil {
+	if err := r.readResponse(ctx, stream, resp); err != nil {
 		stream.Reset()
 		return fmt.Errorf("read ping response: %w", err)
 	}
@@ -861,14 +845,14 @@ func (r *ReqResp) MetaDataV1(ctx context.Context, pid peer.ID) (resp *pb.MetaDat
 		return resp, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
 	}
 
-	if err := r.writeRequest(stream, nil); err != nil {
+	if err := r.writeRequest(ctx, stream, nil); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write metadata v2 request %s", err)
 	}
 
 	// read and decode metadata response
 	resp = &pb.MetaDataV1{}
-	if err := r.readResponse(stream, resp); err != nil {
+	if err := r.readResponse(ctx, stream, resp); err != nil {
 		stream.Reset()
 		return resp, fmt.Errorf("read metadata response: %w", err)
 	}
@@ -920,14 +904,14 @@ func (r *ReqResp) MetaDataV2(ctx context.Context, pid peer.ID) (resp *pb.MetaDat
 		return resp, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV3, pid, err)
 	}
 
-	if err := r.writeRequest(stream, nil); err != nil {
+	if err := r.writeRequest(ctx, stream, nil); err != nil {
 		stream.Reset()
 		return nil, fmt.Errorf("write metadata v2 request %s", err)
 	}
 
 	// read and decode metadata response
 	resp = &pb.MetaDataV2{}
-	if err := r.readResponse(stream, resp); err != nil {
+	if err := r.readResponse(ctx, stream, resp); err != nil {
 		stream.Reset()
 		return resp, fmt.Errorf("read metadata V2 response: %w", err)
 	}
@@ -938,8 +922,292 @@ func (r *ReqResp) MetaDataV2(ctx context.Context, pid peer.ID) (resp *pb.MetaDat
 }
 
 func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, lastSlot uint64) ([]interfaces.ReadOnlySignedBeaconBlock, error) {
-	// TODO: reimplement this logic usin the das-guardian logic?
-	return make([]interfaces.ReadOnlySignedBeaconBlock, 0, (lastSlot - firstSlot)), nil
+	var err error
+	blocks := make([]interfaces.ReadOnlySignedBeaconBlock, 0, (lastSlot - firstSlot))
+	startT := time.Now()
+	defer func() {
+		reqData := map[string]any{
+			"PeerID": pid.String(),
+		}
+
+		if blocks != nil {
+			reqData["RequestedBlocks"] = lastSlot - firstSlot
+			reqData["ReceivedBlocks"] = len(blocks)
+			reqData["Duration"] = time.Since(startT)
+		}
+
+		if err != nil {
+			reqData["Error"] = err.Error()
+		}
+
+		traceEvt := &hermeshost.TraceEvent{
+			Type:      "REQUEST_BLOCKS_BY_RANGE",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Payload:   reqData,
+		}
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
+		}
+
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "block_by_range"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	slog.Debug("Perform blocks_by_range request", tele.LogAttrPeerID(pid))
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCBlocksByRangeTopicV2))
+	if err != nil {
+		return blocks, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCBlocksByRangeTopicV2, pid, err)
+	}
+
+	req := &pb.BeaconBlocksByRangeRequest{
+		StartSlot: primitives.Slot(firstSlot),
+		Count:     (lastSlot - firstSlot),
+		Step:      1,
+	}
+	if err := r.writeRequest(ctx, stream, req); err != nil {
+		stream.Reset()
+		return blocks, fmt.Errorf("write block_by_range request: %w", err)
+	}
+
+	// read and decode status response
+	process := func(blk interfaces.ReadOnlySignedBeaconBlock) error {
+		blocks = append(blocks, blk)
+		slog.Info(
+			"got signed_beacon_block",
+			slog.Attr{Key: "block_number", Value: slog.AnyValue(blk.Block().Slot())},
+			slog.Attr{Key: "from", Value: slog.AnyValue(pid.String())},
+		)
+		return nil
+	}
+
+	for i := uint64(0); ; i++ {
+		isFirstChunk := i == 0
+		blk, err := r.readChunkedBlock(stream, &encoder.SszNetworkEncoder{}, isFirstChunk)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			stream.Reset()
+			return nil, fmt.Errorf("reading block_by_range request: %w", err)
+		}
+		if err := process(blk); err != nil {
+			return nil, fmt.Errorf("processing block_by_range chunk: %w", err)
+		}
+	}
+
+	_ = stream.Close()
+
+	return blocks, nil
+}
+
+// readRequest reads a request from the given network stream and populates the
+// data parameter with the decoded request. It also sets a read deadline on the
+// stream and returns an error if it fails to do so. After reading the request,
+// it closes the reading side of the stream and returns an error if it fails to
+// do so. The method also records any errors encountered using the
+// tracer configured at [ReqResp] initialization.
+func (r *ReqResp) readRequest(ctx context.Context, stream network.Stream, data ssz.Unmarshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "read_request")
+	defer func() {
+		if err != nil {
+			slog.Error("reading request", "err", err.Error())
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
+	if err = stream.SetReadDeadline(time.Now().Add(r.cfg.ReadTimeout)); err != nil {
+		return fmt.Errorf("failed setting read deadline on stream: %w", err)
+	}
+
+	if err = r.cfg.Encoder.DecodeWithMaxLength(stream, data); err != nil {
+		return fmt.Errorf("read request data %T: %w", data, err)
+	}
+
+	if err = stream.CloseRead(); err != nil {
+		return fmt.Errorf("failed to close reading side of stream: %w", err)
+	}
+	return nil
+}
+
+// readResponse differs from readRequest in first reading a single byte that
+// indicates the response code before actually reading the payload data. It also
+// handles the response code in case it is not 0 (which would indicate success).
+func (r *ReqResp) readResponse(ctx context.Context, stream network.Stream, data ssz.Unmarshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "read_response")
+	defer func() {
+		if err != nil {
+			slog.Error("reading response", "err", err.Error())
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
+	if err = stream.SetReadDeadline(time.Now().Add(r.cfg.ReadTimeout)); err != nil {
+		return fmt.Errorf("failed setting read deadline on stream: %w", err)
+	}
+
+	code := make([]byte, 1)
+	if _, err := io.ReadFull(stream, code); err != nil {
+		return fmt.Errorf("failed reading response code: %w", err)
+	}
+
+	// code == 0 means success
+	// code != 0 means error
+	if int(code[0]) != 0 {
+		errData, err := io.ReadAll(stream)
+		if err != nil {
+			return fmt.Errorf("failed reading error data (code %d): %w", int(code[0]), err)
+		}
+
+		return fmt.Errorf("received error response (code %d): %s", int(code[0]), string(errData))
+	}
+
+	if err = r.cfg.Encoder.DecodeWithMaxLength(stream, data); err != nil {
+		return fmt.Errorf("read request data %T: %w", data, err)
+	}
+
+	if err = stream.CloseRead(); err != nil {
+		return fmt.Errorf("failed to close reading side of stream: %w", err)
+	}
+
+	return nil
+}
+
+// writeRequest writes the given payload data to the given stream. It sets the
+// appropriate timeouts and closes the stream for further writes.
+func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data ssz.Marshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "write_request")
+	defer func() {
+		if err != nil {
+			slog.Error("error writing request", "err", err.Error())
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+		if wErr := stream.CloseWrite(); wErr != nil {
+			slog.Error(
+				"failed to close writing side of stream",
+				"peer", stream.Conn().RemotePeer().String(),
+				"error", err.Error(),
+			)
+		}
+	}()
+
+	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+
+	if _, err = r.cfg.Encoder.EncodeWithMaxLength(stream, data); err != nil {
+		return fmt.Errorf("read sequence number: %w", err)
+	}
+
+	return nil
+}
+
+// writeResponse differs from writeRequest in prefixing the payload data with
+// a response code byte.
+func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data ssz.Marshaler) (err error) {
+	_, span := r.cfg.Tracer.Start(ctx, "write_response")
+	defer func() {
+		if err != nil {
+			slog.Error("error writing response", "err", err.Error())
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+		if wErr := stream.CloseWrite(); wErr != nil {
+			slog.Error(
+				"failed to close writing side of stream",
+				"peer", stream.Conn().RemotePeer().String(),
+				"error", err.Error(),
+			)
+		}
+	}()
+
+	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+
+	if _, err := stream.Write([]byte{0x00}); err != nil { // success response
+		return fmt.Errorf("write success response code: %w", err)
+	}
+
+	if _, err = r.cfg.Encoder.EncodeWithMaxLength(stream, data); err != nil {
+		return fmt.Errorf("read sequence number: %w", err)
+	}
+
+	return nil
+}
+
+// ReadChunkedBlock handles each response chunk that is sent by the
+// peer and converts it into a beacon block.
+// Adaptation from Prysm's -> https://github.com/prysmaticlabs/prysm/blob/2e29164582c3665cdf5a472cd4ec9838655c9754/beacon-chain/sync/rpc_chunked_response.go#L85
+func (r *ReqResp) readChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding, isFirstChunk bool) (interfaces.ReadOnlySignedBeaconBlock, error) {
+	// Handle deadlines differently for first chunk
+	if isFirstChunk {
+		return r.readFirstChunkedBlock(stream, encoding)
+	}
+	return r.readResponseChunk(stream, encoding)
+}
+
+// readFirstChunkedBlock reads the first chunked block and applies the appropriate deadlines to it.
+func (r *ReqResp) readFirstChunkedBlock(stream core.Stream, encoding encoder.NetworkEncoding) (interfaces.ReadOnlySignedBeaconBlock, error) {
+	// read status
+	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, errors.New(errMsg)
+	}
+	// set deadline for reading from stream
+	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+	// get fork version and block type
+	forkD, err := r.readForkDigestFromStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	forkV, err := GetForkVersionFromForkDigest(forkD)
+	if err != nil {
+		return nil, err
+	}
+	return r.getBlockForForkVersion(forkV, encoding, stream)
+}
+
+// readResponseChunk reads the response from the stream and decodes it into the
+// provided message type.
+func (r *ReqResp) readResponseChunk(stream core.Stream, encoding encoder.NetworkEncoding) (interfaces.ReadOnlySignedBeaconBlock, error) {
+	if err := stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
+		return nil, fmt.Errorf("failed setting write deadline on stream: %w", err)
+	}
+	code, errMsg, err := psync.ReadStatusCode(stream, encoding)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, errors.New(errMsg)
+	}
+	// No-op for now with the rpc context.
+	forkD, err := r.readForkDigestFromStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	forkV, err := GetForkVersionFromForkDigest(forkD)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.getBlockForForkVersion(forkV, encoding, stream)
 }
 
 // readForkDigestFromStream reads any attached context-bytes to the payload.
