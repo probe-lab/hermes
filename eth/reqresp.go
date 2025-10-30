@@ -120,13 +120,13 @@ func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
 		p2p.RPCMetaDataTopicV1: r.metadataV1Handler,
 		p2p.RPCMetaDataTopicV2: r.metadataV2Handler,
 		p2p.RPCMetaDataTopicV3: r.metadataV3Handler,
-		// TODO: get this back online
+		// TODO: this is just a test to see if we can avoid the extra BW
 		// p2p.RPCBlocksByRangeTopicV2:       r.blocksByRangeV2Handler,
 		// p2p.RPCBlocksByRootTopicV2:        r.blocksByRootV2Handler,
 		// p2p.RPCBlobSidecarsByRangeTopicV1: r.blobsByRangeV2Handler,
 		// p2p.RPCBlobSidecarsByRootTopicV1: r.blobsByRootV2Handler,
-		p2p.RPCDataColumnSidecarsByRangeTopicV1: r.DataColumnsByRangeV1Handler,
-		p2p.RPCDataColumnSidecarsByRootTopicV1:  r.DataColumnsByRootV1Handler,
+		// p2p.RPCDataColumnSidecarsByRangeTopicV1: r.DataColumnsByRangeV1Handler,
+		// p2p.RPCDataColumnSidecarsByRootTopicV1:  r.DataColumnsByRootV1Handler,
 	}
 
 	for id, handler := range handlers {
@@ -393,7 +393,7 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 	}
 
-	slog.Info(
+	slog.Debug(
 		"metadata response",
 		"peer", stream.Conn().RemotePeer().String(),
 		"attnets", metaData.Attnets,
@@ -423,7 +423,7 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 		"Syncnets":  hex.EncodeToString(metaData.Syncnets.Bytes()),
 	}
-	slog.Info(
+	slog.Debug(
 		"metadata response",
 		"peer", stream.Conn().RemotePeer().String(),
 		"attnets", metaData.Attnets,
@@ -458,7 +458,7 @@ func (r *ReqResp) metadataV3Handler(ctx context.Context, stream network.Stream) 
 		traceData["Syncnets"] = hex.EncodeToString(metaData.Syncnets.Bytes())
 	}
 
-	slog.Info(
+	slog.Debug(
 		"metadata V3 response",
 		"attnets", metaData.Attnets,
 		"synccommittees", metaData.Syncnets,
