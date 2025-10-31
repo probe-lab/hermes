@@ -1,6 +1,8 @@
 package host
 
-import "strings"
+import (
+	"strings"
+)
 
 // EventTypeFromBeaconChainProtocol returns the event type for a given protocol string.
 func EventTypeFromBeaconChainProtocol(protocol string) string {

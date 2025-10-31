@@ -4,27 +4,24 @@ import (
 	"fmt"
 
 	"github.com/OffchainLabs/prysm/v6/config/params"
-	"github.com/OffchainLabs/prysm/v6/network/forks"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
 	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
-	"github.com/OffchainLabs/prysm/v6/time/slots"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+
+	dasguardian "github.com/probe-lab/eth-das-guardian"
 )
 
 type DiscoveryConfig struct {
-	GenesisConfig *GenesisConfig
-	NetworkConfig *params.NetworkConfig
-
 	Addr    string
 	UDPPort int
 	TCPPort int
 	Tracer  trace.Tracer
 	Meter   metric.Meter
 
-	AttestationSubnetConfig *SubnetConfig
-	SyncSubnetConfig        *SubnetConfig
+	Chain *Chain
 }
 
 // enrEth2Entry generates an Ethereum 2.0 entry for the Ethereum Node Record
@@ -33,24 +30,21 @@ type DiscoveryConfig struct {
 // byte slice. Finally, it returns an ENR entry with the eth2 key and the
 // encoded fork information.
 func (d *DiscoveryConfig) enrEth2Entry() (enr.Entry, error) {
-	genesisRoot := d.GenesisConfig.GenesisValidatorRoot
-	genesisTime := d.GenesisConfig.GenesisTime
+	var (
+		_, currentEpoch, _, forkDigest, err = d.Chain.epochStats()
+		nextEntry                           = params.NextNetworkScheduleEntry(currentEpoch)
+		nextForkVersion                     [4]byte
+		nextForkEpoch                       primitives.Epoch
+	)
 
-	digest, err := forks.CreateForkDigest(genesisTime, genesisRoot)
-	if err != nil {
-		return nil, fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
-	}
-
-	currentSlot := slots.Since(genesisTime)
-	currentEpoch := slots.ToEpoch(currentSlot)
-
-	nextForkVersion, nextForkEpoch, err := forks.NextForkData(currentEpoch)
-	if err != nil {
-		return nil, fmt.Errorf("calculate next fork data: %w", err)
+	// Is there another fork coming up?
+	if nextEntry.Epoch > currentEpoch {
+		copy(nextForkVersion[:], nextEntry.ForkVersion[:])
+		nextForkEpoch = nextEntry.Epoch
 	}
 
 	enrForkID := &pb.ENRForkID{
-		CurrentForkDigest: digest[:],
+		CurrentForkDigest: forkDigest[:],
 		NextForkVersion:   nextForkVersion[:],
 		NextForkEpoch:     nextForkEpoch,
 	}
@@ -60,22 +54,26 @@ func (d *DiscoveryConfig) enrEth2Entry() (enr.Entry, error) {
 		return nil, fmt.Errorf("marshal enr fork id: %w", err)
 	}
 
-	return enr.WithEntry(d.NetworkConfig.ETH2Key, enc), nil
+	return enr.WithEntry("eth2", enc), nil
 }
 
 func (d *DiscoveryConfig) enrAttnetsEntry() enr.Entry {
-	bitV := BitArrayFromAttestationSubnets(d.AttestationSubnetConfig.Subnets)
-	return enr.WithEntry(d.NetworkConfig.AttSubnetKey, bitV.Bytes())
+	bitV := BitArrayFromAttestationSubnets(d.Chain.cfg.AttestationSubnetConfig.Subnets)
+	return enr.WithEntry(d.Chain.cfg.NetworkConfig.AttSubnetKey, bitV.Bytes())
 }
 
 func (d *DiscoveryConfig) enrSyncnetsEntry() enr.Entry {
-	bitV := BitArrayFromSyncSubnets(d.SyncSubnetConfig.Subnets)
-	return enr.WithEntry(d.NetworkConfig.SyncCommsSubnetKey, bitV.Bytes())
+	bitV := BitArrayFromSyncSubnets(d.Chain.cfg.SyncSubnetConfig.Subnets)
+	return enr.WithEntry(d.Chain.cfg.NetworkConfig.SyncCommsSubnetKey, bitV.Bytes())
+}
+
+func (d *DiscoveryConfig) enrCustodyEntry() enr.Entry {
+	return dasguardian.CgcEntry(d.Chain.cfg.ColumnSubnetConfig.Count)
 }
 
 func (d *DiscoveryConfig) BootstrapNodes() ([]*enode.Node, error) {
-	nodes := make([]*enode.Node, 0, len(d.NetworkConfig.BootstrapNodes))
-	for _, enrStr := range d.NetworkConfig.BootstrapNodes {
+	nodes := make([]*enode.Node, 0, len(d.Chain.cfg.NetworkConfig.BootstrapNodes))
+	for _, enrStr := range d.Chain.cfg.NetworkConfig.BootstrapNodes {
 		node, err := enode.Parse(enode.ValidSchemes, enrStr)
 		if err != nil {
 			return nil, fmt.Errorf("parse bootstrap enr: %w", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,18 +88,54 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 	ps := n.host.Peerstore()
 
 	var (
-		err error
-		st  *pb.Status
-		md  *pb.MetaDataV1
+		err        error
+		forkDigest []byte
+		headSlot   uint64
+		attnets    []byte
+		seqNum     uint64
 	)
-	st, err = n.reqResp.Status(ctx, pid)
+
+	currentFork := n.chain.CurrentFork()
+	switch currentFork {
+	case phase0, altair, bellatrix, capella, deneb, electra:
+		var st *pb.Status
+		st, err = n.reqResp.Status(ctx, pid)
+		if err == nil {
+			forkDigest = st.ForkDigest
+			headSlot = uint64(st.HeadSlot)
+		}
+	case fulu:
+		var st *pb.StatusV2
+		st, err = n.reqResp.StatusV2(ctx, pid)
+		if err == nil {
+			forkDigest = st.ForkDigest
+			headSlot = uint64(st.HeadSlot)
+		}
+	}
 	if err != nil {
 		valid = false
 	} else {
 		if err = n.reqResp.Ping(ctx, pid); err != nil {
 			valid = false
 		} else {
-			md, err = n.reqResp.MetaData(ctx, pid)
+			switch currentFork {
+			case phase0:
+				slog.Warn("too old, metadata v0 not supported")
+			case altair, bellatrix, capella, deneb, electra:
+				var md *pb.MetaDataV1
+				md, err = n.reqResp.MetaDataV1(ctx, pid)
+				if err == nil {
+					attnets = md.Attnets.Bytes()
+					seqNum = md.SeqNumber
+				}
+			case fulu:
+				var md *pb.MetaDataV2
+				md, err = n.reqResp.MetaDataV2(ctx, pid)
+				if err == nil {
+					attnets = md.Attnets.Bytes()
+					seqNum = md.SeqNumber
+				}
+			}
 			if err != nil {
 				valid = false
 			} else {
@@ -111,7 +148,14 @@ func (n *Node) handleNewConnection(pid peer.ID) {
 					slog.Warn("Failed to store handshaked marker in peerstore", tele.LogAttrError(err))
 				}
 
-				slog.Info("Performed successful handshake", tele.LogAttrPeerID(pid), "seq", md.SeqNumber, "attnets", hex.EncodeToString(md.Attnets.Bytes()), "agent", av, "fork-digest", hex.EncodeToString(st.ForkDigest))
+				slog.Info(
+					"Performed successful handshake",
+					tele.LogAttrPeerID(pid),
+					"head-slot", strconv.FormatUint(headSlot, 10),
+					"seq", seqNum,
+					"attnets", hex.EncodeToString(attnets),
+					"agent", av,
+					"fork-digest", hex.EncodeToString(forkDigest))
 			}
 		}
 	}

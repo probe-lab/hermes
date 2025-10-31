@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/signing"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/encoder"
 	"github.com/OffchainLabs/prysm/v6/config/params"
@@ -49,6 +48,8 @@ var ethConfig = &struct {
 	SubnetBlobSidecarCount     uint64
 	SubnetBlobSidecarStart     uint64
 	SubnetBlobSidecarEnd       uint64
+	SubnetDataColumnsType      string
+	SubnetDataColumnsCount     uint64
 	SubscriptionTopics         []string
 }{
 	PrivateKeyStr:           "", // unset means it'll be generated
@@ -65,21 +66,29 @@ var ethConfig = &struct {
 	BootnodesURL:            "",
 	DepositContractBlockURL: "",
 	// Default subnet configuration values.
-	SubnetAttestationType:      "all",
+	SubnetAttestationType:      "random",
 	SubnetAttestationSubnets:   []int64{},
-	SubnetAttestationCount:     0,
+	SubnetAttestationCount:     2,
 	SubnetAttestationStart:     0,
 	SubnetAttestationEnd:       0,
-	SubnetSyncCommitteeType:    "all",
+	SubnetSyncCommitteeType:    "random",
 	SubnetSyncCommitteeSubnets: []int64{},
-	SubnetSyncCommitteeCount:   0,
+	SubnetSyncCommitteeCount:   1,
 	SubnetSyncCommitteeStart:   0,
 	SubnetSyncCommitteeEnd:     0,
-	SubnetBlobSidecarType:      "all",
+	SubnetBlobSidecarType:      "random",
 	SubnetBlobSidecarSubnets:   []int64{},
-	SubnetBlobSidecarCount:     0,
+	SubnetBlobSidecarCount:     2,
 	SubnetBlobSidecarStart:     0,
 	SubnetBlobSidecarEnd:       0,
+	SubnetDataColumnsType:      "random",
+	SubnetDataColumnsCount:     4,
+	SubscriptionTopics: []string{
+		"beacon_attestations",
+		"beacon_block",
+		"sync_committee",
+		"data_column_sidecar",
+	},
 }
 
 var cmdEth = &cli.Command{
@@ -313,6 +322,20 @@ var cmdEthFlags = []cli.Flag{
 			return nil
 		},
 	},
+	&cli.StringFlag{
+		Name:        "subnet.datacolumn.type",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_DATACOLUMN_TYPE"},
+		Usage:       "Subnet selection strategy for data column topics (all, random)",
+		Value:       ethConfig.SubnetDataColumnsType,
+		Destination: &ethConfig.SubnetDataColumnsType,
+	},
+	&cli.Uint64Flag{
+		Name:        "subnet.datacolumn.count",
+		EnvVars:     []string{"HERMES_ETH_SUBNET_DATACOLUMN_COUNT"},
+		Usage:       "Number of random for data columns to select when type=random",
+		Value:       ethConfig.SubnetDataColumnsCount,
+		Destination: &ethConfig.SubnetDataColumnsCount,
+	},
 }
 
 func cmdEthAction(c *cli.Context) error {
@@ -348,16 +371,15 @@ func cmdEthAction(c *cli.Context) error {
 		config = c
 	}
 
-	// Overriding configuration so that functions like ComputForkDigest take the
-	// correct input data from the global configuration.
+	// Overriding configuration so that params.ForkDigest and other functions
+	// use the correct network configuration.
 	params.OverrideBeaconConfig(config.Beacon)
 	params.OverrideBeaconNetworkConfig(config.Network)
 
-	genesisRoot := config.Genesis.GenesisValidatorRoot
 	genesisTime := config.Genesis.GenesisTime
 
 	// compute fork version and fork digest
-	currentSlot := slots.Since(genesisTime)
+	currentSlot := slots.CurrentSlot(genesisTime)
 	currentEpoch := slots.ToEpoch(currentSlot)
 
 	currentForkVersion, err := eth.GetCurrentForkVersion(currentEpoch, config.Beacon)
@@ -365,10 +387,7 @@ func cmdEthAction(c *cli.Context) error {
 		return fmt.Errorf("compute fork version for epoch %d: %w", currentEpoch, err)
 	}
 
-	forkDigest, err := signing.ComputeForkDigest(currentForkVersion[:], genesisRoot)
-	if err != nil {
-		return fmt.Errorf("create fork digest (%s, %x): %w", genesisTime, genesisRoot, err)
-	}
+	forkDigest := params.ForkDigest(currentEpoch)
 
 	cfg := &eth.NodeConfig{
 		GenesisConfig:           config.Genesis,
@@ -450,7 +469,13 @@ func createSubnetConfigs() map[string]*eth.SubnetConfig {
 			"type", ethConfig.SubnetBlobSidecarType,
 			"config", subnetConfigs[p2p.GossipBlobSidecarMessage])
 	}
-
+	// Configure das column sidecars as specified
+	if configureDataColumnSubnet() {
+		subnetConfigs[p2p.GossipDataColumnSidecarMessage] = createDataColumnSubnetConfig()
+		slog.Info("Configured data column subnet",
+			"type", ethConfig.SubnetDataColumnsType,
+			"config", subnetConfigs[p2p.GossipDataColumnSidecarMessage])
+	}
 	return subnetConfigs
 }
 
@@ -490,6 +515,11 @@ func configureBlobSidecarSubnet() bool {
 		ethConfig.SubnetBlobSidecarEnd == 0 {
 		return false
 	}
+	return true
+}
+
+// configureDataColumnSubnet checks if blob sidecar subnet configuration is provided.
+func configureDataColumnSubnet() bool {
 	return true
 }
 
@@ -571,6 +601,26 @@ func createBlobSidecarSubnetConfig() *eth.SubnetConfig {
 		config.End = ethConfig.SubnetBlobSidecarEnd
 	}
 	eth.GetSubscribedSubnets(config, eth.GlobalBeaconConfig.BlobsidecarSubnetCountElectra)
+	return config
+}
+
+// createDataColumnSubnetConfig creates a SubnetConfig for data column topics.
+func createDataColumnSubnetConfig() *eth.SubnetConfig {
+	// edgy case, as we need the node ID to compute the subnets (unless we subscribe to all)
+	// either way, compose this afterwards at the eth-chain level
+	config := &eth.SubnetConfig{
+		Type: eth.SubnetSelectionType(ethConfig.SubnetDataColumnsType),
+	}
+	switch config.Type {
+	case eth.SubnetAll:
+		config.Count = eth.GlobalBeaconConfig.DataColumnSidecarSubnetCount
+	case eth.SubnetRandom:
+		// ensure that we don't get real random subnets (we compute them at the Chain)
+		config.Count = ethConfig.SubnetDataColumnsCount
+	default:
+		slog.Warn("invalid type given for cgc, applying default custody of 4 data-columns")
+		config.Count = eth.GlobalBeaconConfig.CustodyRequirement
+	}
 	return config
 }
 

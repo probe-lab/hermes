@@ -6,14 +6,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/probe-lab/hermes/tele"
-
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/op"
+	"github.com/probe-lab/hermes/tele"
 )
 
 var opConfig = &struct {

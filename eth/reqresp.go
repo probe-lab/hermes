@@ -1,7 +1,6 @@
 package eth
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"maps"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
@@ -39,15 +37,13 @@ import (
 )
 
 type ReqRespConfig struct {
-	ForkDigest [4]byte
-	Encoder    encoder.NetworkEncoding
-	DataStream hermeshost.DataStream
-
-	AttestationSubnetConfig *SubnetConfig
-	SyncSubnetConfig        *SubnetConfig
-
+	Encoder      encoder.NetworkEncoding
+	DataStream   hermeshost.DataStream
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	// Chain related info
+	Chain *Chain
 
 	// Telemetry accessors
 	Tracer trace.Tracer
@@ -61,11 +57,6 @@ type ReqResp struct {
 	cfg      *ReqRespConfig
 	delegate peer.ID // peer ID that we delegate requests to
 
-	metaDataMu sync.RWMutex
-	metaData   *pb.MetaDataV1
-
-	statusMu  sync.RWMutex
-	status    *pb.Status
 	statusLim *rate.Limiter
 
 	// metrics
@@ -81,21 +72,9 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 		return nil, fmt.Errorf("req resp server config must not be nil")
 	}
 
-	md := &pb.MetaDataV1{
-		SeqNumber: 0,
-		Attnets:   BitArrayFromAttestationSubnets(cfg.AttestationSubnetConfig.Subnets),
-		Syncnets:  BitArrayFromSyncSubnets(cfg.SyncSubnetConfig.Subnets),
-	}
-
-	slog.Info("Composed local MetaData",
-		"attnets", md.Attnets,
-		"syncnets", md.Syncnets,
-	)
-
 	p := &ReqResp{
 		host:      h,
 		cfg:       cfg,
-		metaData:  md,
 		statusLim: rate.NewLimiter(1, 5),
 	}
 
@@ -124,95 +103,30 @@ func NewReqResp(h host.Host, cfg *ReqRespConfig) (*ReqResp, error) {
 	return p, nil
 }
 
-func (r *ReqResp) SetMetaData(seq uint64) {
-	r.metaDataMu.Lock()
-	defer r.metaDataMu.Unlock()
-
-	if r.metaData.SeqNumber > seq {
-		slog.Warn("Updated metadata with lower sequence number", "old", r.metaData.SeqNumber, "new", seq)
-	}
-
-	r.metaData = &pb.MetaDataV1{
-		SeqNumber: seq,
-		Attnets:   r.metaData.Attnets,
-		Syncnets:  r.metaData.Syncnets,
-	}
-}
-
-func (r *ReqResp) SetStatus(status *pb.Status) {
-	r.statusMu.Lock()
-	defer r.statusMu.Unlock()
-
-	// if the ForkDigest is not the same, we should drop updating the local status
-	// TODO: this might be re-checked for hardforks (make the client resilient to them)
-	if r.status != nil && !bytes.Equal(r.status.ForkDigest, status.ForkDigest) {
-		return
-	}
-
-	// check if anything has changed. Prevents the below log message to pollute
-	// the log output.
-	if r.status != nil && bytes.Equal(r.status.ForkDigest, status.ForkDigest) &&
-		bytes.Equal(r.status.FinalizedRoot, status.FinalizedRoot) &&
-		r.status.FinalizedEpoch == status.FinalizedEpoch &&
-		bytes.Equal(r.status.HeadRoot, status.HeadRoot) &&
-		r.status.HeadSlot == status.HeadSlot {
-		// nothing has changed -> return
-		return
-	}
-
-	slog.Info("New status:")
-	slog.Info("  fork_digest: " + hex.EncodeToString(status.ForkDigest))
-	slog.Info("  finalized_root: " + hex.EncodeToString(status.FinalizedRoot))
-	slog.Info("  finalized_epoch: " + strconv.FormatUint(uint64(status.FinalizedEpoch), 10))
-	slog.Info("  head_root: " + hex.EncodeToString(status.HeadRoot))
-	slog.Info("  head_slot: " + strconv.FormatUint(uint64(status.HeadSlot), 10))
-
-	r.status = status
-}
-
-func (r *ReqResp) cpyStatus() *pb.Status {
-	r.statusMu.RLock()
-	defer r.statusMu.RUnlock()
-
-	if r.status == nil {
-		return nil
-	}
-
-	return &pb.Status{
-		ForkDigest:     bytes.Clone(r.status.ForkDigest),
-		FinalizedRoot:  bytes.Clone(r.status.FinalizedRoot),
-		FinalizedEpoch: r.status.FinalizedEpoch,
-		HeadRoot:       bytes.Clone(r.status.HeadRoot),
-		HeadSlot:       r.status.HeadSlot,
-	}
-}
-
 // RegisterHandlers registers all RPC handlers. It checks first if all
 // preconditions are met. This includes valid initial status and metadata
 // values.
 func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
-	r.statusMu.RLock()
-	defer r.statusMu.RUnlock()
-	if r.status == nil {
-		return fmt.Errorf("chain status is nil")
-	}
-
-	r.metaDataMu.RLock()
-	defer r.metaDataMu.RUnlock()
-	if r.metaData == nil {
-		return fmt.Errorf("chain metadata is nil")
+	init, cause := r.cfg.Chain.IsInit()
+	if !init {
+		return fmt.Errorf("reqresp: chain module is not init (%s)", cause)
 	}
 
 	handlers := map[string]ContextStreamHandler{
-		p2p.RPCPingTopicV1:                r.pingHandler,
-		p2p.RPCGoodByeTopicV1:             r.goodbyeHandler,
-		p2p.RPCStatusTopicV1:              r.statusHandler,
-		p2p.RPCMetaDataTopicV1:            r.metadataV1Handler,
-		p2p.RPCMetaDataTopicV2:            r.metadataV2Handler,
-		p2p.RPCBlocksByRangeTopicV2:       r.blocksByRangeV2Handler,
-		p2p.RPCBlocksByRootTopicV2:        r.blocksByRootV2Handler,
-		p2p.RPCBlobSidecarsByRangeTopicV1: r.blobsByRangeV2Handler,
-		p2p.RPCBlobSidecarsByRootTopicV1:  r.blobsByRootV2Handler,
+		p2p.RPCPingTopicV1:     r.pingHandler,
+		p2p.RPCGoodByeTopicV1:  r.goodbyeHandler,
+		p2p.RPCStatusTopicV1:   r.statusHandler,
+		p2p.RPCStatusTopicV2:   r.statusV2Handler,
+		p2p.RPCMetaDataTopicV1: r.metadataV1Handler,
+		p2p.RPCMetaDataTopicV2: r.metadataV2Handler,
+		p2p.RPCMetaDataTopicV3: r.metadataV3Handler,
+		// TODO: this is just a test to see if we can avoid the extra BW
+		// p2p.RPCBlocksByRangeTopicV2:       r.blocksByRangeV2Handler,
+		// p2p.RPCBlocksByRootTopicV2:        r.blocksByRootV2Handler,
+		// p2p.RPCBlobSidecarsByRangeTopicV1: r.blobsByRangeV2Handler,
+		// p2p.RPCBlobSidecarsByRootTopicV1: r.blobsByRootV2Handler,
+		// p2p.RPCDataColumnSidecarsByRangeTopicV1: r.DataColumnsByRangeV1Handler,
+		// p2p.RPCDataColumnSidecarsByRootTopicV1:  r.DataColumnsByRootV1Handler,
 	}
 
 	for id, handler := range handlers {
@@ -234,8 +148,15 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 	tattrs := trace.WithAttributes(attrs...)
 
 	return func(s network.Stream) {
-		rawVal, err := r.host.Peerstore().Get(s.Conn().RemotePeer(), "AgentVersion")
+		// handle the request
+		start := time.Now()
+		traceData, err := handler(ctx, s)
+		if err != nil {
+			slog.Warn("failed handling rpc", "protocol", s.Protocol(), tele.LogAttrError(err), tele.LogAttrPeerID(s.Conn().RemotePeer()))
+		}
+		end := time.Now()
 
+		rawVal, err := r.host.Peerstore().Get(s.Conn().RemotePeer(), "AgentVersion")
 		agentVersion := "n.a."
 		if err == nil {
 			if av, ok := rawVal.(string); ok {
@@ -245,26 +166,13 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 
 		slog.Debug("Stream Opened", tele.LogAttrPeerID(s.Conn().RemotePeer()), "protocol", s.Protocol(), "agent", agentVersion)
 
-		// Reset is a no-op if the stream is already closed. Closing the stream
-		// is the responsibility of the handler.
-		defer logDeferErr(s.Reset, "failed to reset stream")
-
 		// Start request tracing
 		ctx, span := r.cfg.Tracer.Start(ctx, "rpc", tattrs)
 		span.SetAttributes(attribute.String("peer_id", s.Conn().RemotePeer().String()))
 		span.SetAttributes(attribute.String("agent", agentVersion))
 		defer span.End()
 
-		// time the request handling
-		start := time.Now()
-		traceData, err := handler(ctx, s)
-		if err != nil {
-			slog.Debug("failed handling rpc", "protocol", s.Protocol(), tele.LogAttrError(err), tele.LogAttrPeerID(s.Conn().RemotePeer()), "agent", agentVersion)
-		}
-		end := time.Now()
-
 		traceType := "HANDLE_STREAM"
-
 		protocol := string(s.Protocol())
 
 		// Usual protocol string: /eth2/beacon_chain/req/metadata/2/ssz_snappy
@@ -305,16 +213,15 @@ func (r *ReqResp) wrapStreamHandler(ctx context.Context, name string, handler Co
 }
 
 func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) (map[string]any, error) {
-	req := primitives.SSZUint64(0)
-	if err := r.readRequest(ctx, stream, &req); err != nil {
+	req := new(primitives.SSZUint64)
+	if err := r.readRequest(ctx, stream, req); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("read sequence number: %w", err)
 	}
 
-	r.metaDataMu.RLock()
-	sq := primitives.SSZUint64(r.metaData.SeqNumber)
-	r.metaDataMu.RUnlock()
-
+	sq := r.cfg.Chain.CurrentSeqNumber()
 	if err := r.writeResponse(ctx, stream, &sq); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("write sequence number: %w", err)
 	}
 
@@ -323,16 +230,19 @@ func (r *ReqResp) pingHandler(ctx context.Context, stream network.Stream) (map[s
 		"SentSeq":     sq,
 	}
 
-	return traceData, stream.Close()
+	_ = stream.Close()
+
+	return traceData, nil
 }
 
 func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (map[string]any, error) {
-	req := primitives.SSZUint64(0)
-	if err := r.readRequest(ctx, stream, &req); err != nil {
+	req := new(primitives.SSZUint64)
+	if err := r.readRequest(ctx, stream, req); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("read sequence number: %w", err)
 	}
 
-	msg, found := types.GoodbyeCodeMessages[req]
+	msg, found := types.GoodbyeCodeMessages[*req]
 	if found {
 		if _, err := r.host.Peerstore().Get(stream.Conn().RemotePeer(), peerstoreKeyIsHandshaked); err == nil {
 			var (
@@ -355,7 +265,7 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 
 			r.goodbyeCounter.Add(ctx, 1, metric.WithAttributes(
 				[]attribute.KeyValue{
-					attribute.Int64("code", int64(req)),
+					attribute.Int64("code", int64(*req)),
 					attribute.String("reason", reason),
 					attribute.String("agent", agentVersion),
 				}...,
@@ -368,11 +278,13 @@ func (r *ReqResp) goodbyeHandler(ctx context.Context, stream network.Stream) (ma
 	}
 
 	traceData := map[string]any{
-		"Code":   req,
+		"Code":   *req,
 		"Reason": msg,
 	}
 
-	return traceData, stream.Close()
+	_ = stream.Close()
+
+	return traceData, nil
 }
 
 func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
@@ -385,104 +297,94 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 			"FinalizedEpoch": status.FinalizedEpoch,
 		}
 	}
-	defer upstream.Close()
-	// check if the request comes from our delegate node. If so, just mirror
-	// its own status back and update our latest known status.
-	if upstream.Conn().RemotePeer() == r.delegate {
-
-		resp := &pb.Status{}
-		if err := r.readRequest(ctx, upstream, resp); err != nil {
-			return nil, fmt.Errorf("read status data from delegate: %w", err)
-		}
-
-		// update status
-		r.SetStatus(resp)
-
-		// mirror its own status back
-		if err := r.writeResponse(ctx, upstream, resp); err != nil {
-			return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
-		}
-
-		traceData := map[string]any{
-			"Request":  statusTraceData(resp),
-			"Response": statusTraceData(resp),
-		}
-
-		return traceData, nil
-	}
 
 	// first, read the status from the remote peer
 	req := &pb.Status{}
 	if err := r.readRequest(ctx, upstream, req); err != nil {
-		return nil, fmt.Errorf("read status data from delegate: %w", err)
-	}
-
-	// create response status from memory status
-	resp := r.cpyStatus()
-
-	// if the rate limiter allows requesting a new status, do that.
-	if r.statusLim.Allow() {
-		r.statusLim.Reserve()
-
-		// ask our delegate node for the latest status, using our known latest status
-		// this is important because blindly forwarding the request from a remote peer
-		// will lead to intermittent disconnects from the beacon node. The "trusted peer"
-		// setting doesn't seem to apply if we send, e.g., a status payload with
-		// a non-matching fork-digest or non-finalized root hash.
-		dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
-		var err error
-		resp, err = r.Status(dialCtx, r.delegate)
-		if err != nil {
-			// asking for the latest status failed. Use our own latest known status
-			slog.Warn("Downstream status request failed, using the latest known status")
-
-			statusCpy := r.cpyStatus()
-			if err := r.writeResponse(ctx, upstream, statusCpy); err != nil {
-				return nil, fmt.Errorf("write mirrored status response to delegate: %w", err)
-			}
-
-			traceData := map[string]any{
-				"Request":  statusTraceData(req),
-				"Response": statusTraceData(statusCpy),
-			}
-
-			return traceData, nil
-		}
-
-		// we got a valid response from our delegate node. Update our own status
-		r.SetStatus(resp)
+		upstream.Reset()
+		return nil, fmt.Errorf("read status data from remote peer: %w", err)
 	}
 
 	// let the upstream peer (who initiated the request) know the latest status
-	if err := r.writeResponse(ctx, upstream, resp); err != nil {
+	localStI := r.cfg.Chain.GetStatus(statusV0)
+	localSt, _ := localStI.(*pb.Status)
+	if err := r.writeResponse(ctx, upstream, localSt); err != nil {
+		upstream.Reset()
 		return nil, fmt.Errorf("respond status to upstream: %w", err)
 	}
 
 	traceData := map[string]any{
 		"Request":  statusTraceData(req),
-		"Response": statusTraceData(resp),
+		"Response": statusTraceData(localSt),
 	}
 
 	slog.Debug(
-		"status response",
+		"status v1 response",
 		"peer", upstream.Conn().RemotePeer().String(),
-		"head-slot", resp.HeadSlot,
-		"fork_digest", hex.EncodeToString(resp.ForkDigest),
+		"trusted-peer", upstream.Conn().RemotePeer() == r.delegate,
+		"head-slot", localSt.HeadSlot,
+		"fork_digest", hex.EncodeToString(localSt.ForkDigest),
 	)
+
+	_ = upstream.Close()
+
+	return traceData, nil
+}
+
+// statusV2Handler handles StatusV2 protocol requests
+func (r *ReqResp) statusV2Handler(ctx context.Context, upstream network.Stream) (map[string]any, error) {
+	statusTraceData := func(status *pb.StatusV2) map[string]any {
+		return map[string]any{
+			"ForkDigest":            hex.EncodeToString(status.ForkDigest),
+			"HeadRoot":              hex.EncodeToString(status.HeadRoot),
+			"HeadSlot":              status.HeadSlot,
+			"FinalizedRoot":         hex.EncodeToString(status.FinalizedRoot),
+			"FinalizedEpoch":        status.FinalizedEpoch,
+			"EarliestAvailableSlot": status.EarliestAvailableSlot,
+		}
+	}
+
+	// first, read the status from the remote peer
+	req := &pb.StatusV2{}
+	if err := r.readRequest(ctx, upstream, req); err != nil {
+		upstream.Reset()
+		return nil, fmt.Errorf("read status V2 data from peer: %w", err)
+	}
+
+	// create response status from memory status
+	localStI := r.cfg.Chain.GetStatus(statusV1)
+	localSt, _ := localStI.(*pb.StatusV2)
+
+	// let the upstream peer (who initiated the request) know the latest status
+	if err := r.writeResponse(ctx, upstream, localSt); err != nil {
+		upstream.Reset()
+		return nil, fmt.Errorf("respond status V2 to upstream: %w", err)
+	}
+
+	traceData := map[string]any{
+		"Request":  statusTraceData(req),
+		"Response": statusTraceData(localSt),
+	}
+
+	slog.Debug(
+		"status v2 response",
+		"peer", upstream.Conn().RemotePeer().String(),
+		"trusted-peer", upstream.Conn().RemotePeer() == r.delegate,
+		"head-slot", localSt.HeadSlot,
+		"fork_digest", hex.EncodeToString(localSt.ForkDigest),
+	)
+
+	_ = upstream.Close()
 
 	return traceData, nil
 }
 
 func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
-	r.metaDataMu.RLock()
-	metaData := &pb.MetaDataV0{
-		SeqNumber: r.metaData.SeqNumber,
-		Attnets:   r.metaData.Attnets,
-	}
-	r.metaDataMu.RUnlock()
+	mdI := r.cfg.Chain.GetMetadata(metadataV0)
+	metaData, _ := mdI.(*pb.MetaDataV0)
 
-	defer stream.Close()
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("write meta data v1: %w", err)
 	}
 
@@ -491,25 +393,28 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 		"Attnets":   hex.EncodeToString(metaData.Attnets.Bytes()),
 	}
 
-	slog.Info(
+	slog.Debug(
 		"metadata response",
 		"peer", stream.Conn().RemotePeer().String(),
 		"attnets", metaData.Attnets,
 	)
+
+	_ = stream.Close()
+
 	return traceData, nil
 }
 
 func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
-	r.metaDataMu.RLock()
-	metaData := &pb.MetaDataV1{
-		SeqNumber: r.metaData.SeqNumber,
-		Attnets:   r.metaData.Attnets,
-		Syncnets:  r.metaData.Syncnets,
-	}
-	r.metaDataMu.RUnlock()
+	mdI := r.cfg.Chain.GetMetadata(metadataV1)
+	metaData, _ := mdI.(*pb.MetaDataV1)
 
-	defer stream.Close()
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("write meta data v1: %w", err)
+	}
+
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("write meta data v2: %w", err)
 	}
 
@@ -524,9 +429,104 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 		"attnets", metaData.Attnets,
 		"synccommittees", metaData.Syncnets,
 	)
+
+	_ = stream.Close()
+
 	return traceData, nil
 }
 
+// metadataV3Handler handles MetadataV3 protocol requests (returns MetaDataV2 type)
+func (r *ReqResp) metadataV3Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
+	mdI := r.cfg.Chain.GetMetadata(metadataV2)
+	metaData, _ := mdI.(*pb.MetaDataV2)
+	if metaData == nil {
+		return nil, fmt.Errorf("no metadata available")
+	}
+
+	if err := r.writeResponse(ctx, stream, metaData); err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("write meta data v3: %w", err)
+	}
+
+	traceData := map[string]any{
+		"SeqNumber":         metaData.SeqNumber,
+		"Attnets":           hex.EncodeToString(metaData.Attnets.Bytes()),
+		"CustodyGroupCount": metaData.CustodyGroupCount,
+	}
+
+	if metaData.Syncnets != nil {
+		traceData["Syncnets"] = hex.EncodeToString(metaData.Syncnets.Bytes())
+	}
+
+	slog.Debug(
+		"metadata V3 response",
+		"attnets", metaData.Attnets,
+		"synccommittees", metaData.Syncnets,
+		"custody_group_count", metaData.CustodyGroupCount,
+	)
+
+	_ = stream.Close()
+	return traceData, nil
+}
+
+func (r *ReqResp) DataColumnsByRangeV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
+	req := new(pb.DataColumnSidecarsByRangeRequest)
+	err := r.readRequest(ctx, stream, req)
+	if err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("error to read data-column-by-range request %w", err)
+	}
+
+	// TODO: handle this correctly
+	// remote this and close correctly
+	stream.Reset()
+
+	traceData := map[string]any{
+		"PeerID":    stream.Conn().RemotePeer().String(),
+		"StartSlot": req.StartSlot,
+		"Count":     req.Count,
+		"Columns":   req.Columns,
+	}
+
+	slog.Info(
+		"data-columns-by-range",
+		"PeerID", stream.Conn().RemotePeer().String(),
+		"Columns", req.Columns,
+	)
+
+	// _ = stream.Close()
+
+	return traceData, nil
+}
+
+func (r *ReqResp) DataColumnsByRootV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
+	req := new(types.DataColumnsByRootIdentifiers)
+	err := r.readRequest(ctx, stream, req)
+	if err != nil {
+		return nil, fmt.Errorf("error to read data-column-by-root request %w", err)
+	}
+
+	// TODO: handle this correctly
+	// remote this and close correctly
+	stream.Reset()
+
+	traceData := map[string]any{
+		"PeerID": stream.Conn().RemotePeer().String(),
+		"Roots":  strconv.Itoa(len(*req)),
+	}
+
+	slog.Info(
+		"data-columns-by-root",
+		"PeerID", stream.Conn().RemotePeer().String(),
+		"Roots", len(*req),
+	)
+
+	_ = stream.Close()
+
+	return traceData, nil
+}
+
+//lint:ignore U1000 ignore the unused litner error - testing
 func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
 		return nil, fmt.Errorf("blocks by range request from delegate peer")
@@ -535,6 +535,7 @@ func (r *ReqResp) blocksByRangeV2Handler(ctx context.Context, stream network.Str
 	return nil, r.delegateStream(ctx, stream)
 }
 
+//lint:ignore U1000 ignore the unused litner error - testing
 func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
 		return nil, fmt.Errorf("blocks by root request from delegate peer")
@@ -543,6 +544,7 @@ func (r *ReqResp) blocksByRootV2Handler(ctx context.Context, stream network.Stre
 	return nil, r.delegateStream(ctx, stream)
 }
 
+//lint:ignore U1000 ignore the unused litner error - testing
 func (r *ReqResp) blobsByRangeV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
 		return nil, fmt.Errorf("blobs by range request from delegate peer")
@@ -551,6 +553,7 @@ func (r *ReqResp) blobsByRangeV2Handler(ctx context.Context, stream network.Stre
 	return nil, r.delegateStream(ctx, stream)
 }
 
+//lint:ignore U1000 ignore the unused litner error - testing
 func (r *ReqResp) blobsByRootV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	if stream.Conn().RemotePeer() == r.delegate {
 		return nil, fmt.Errorf("blobs by root request from delegate peer")
@@ -559,6 +562,7 @@ func (r *ReqResp) blobsByRootV2Handler(ctx context.Context, stream network.Strea
 	return nil, r.delegateStream(ctx, stream)
 }
 
+//lint:ignore U1000 ignore the unused litner error - testing
 func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) error {
 	dialCtx := network.WithForceDirectDial(ctx, "prevent backoff")
 	downstream, err := r.host.NewStream(dialCtx, r.delegate, upstream.Protocol())
@@ -611,6 +615,7 @@ func (r *ReqResp) delegateStream(ctx context.Context, upstream network.Stream) e
 	return nil
 }
 
+// Status requests V1 status from a peer
 func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, err error) {
 	defer func() {
 		av, err := r.host.Peerstore().Get(pid, "AgentVersion")
@@ -653,36 +658,100 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
-	slog.Info("Perform status request", tele.LogAttrPeerID(pid))
+	slog.Info("Perform status V1 request", tele.LogAttrPeerID(pid))
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCStatusTopicV1))
 	if err != nil {
 		return nil, fmt.Errorf("new stream to peer %s: %w", pid, err)
 	}
-	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
 
 	// actually write the data to the stream
-	req := r.cpyStatus()
-	if req == nil {
-		return nil, fmt.Errorf("status unknown")
-	}
+	stI := r.cfg.Chain.GetStatus(statusV0)
+	stReq, _ := stI.(*pb.Status)
 
-	if err := r.writeRequest(ctx, stream, req); err != nil {
+	if err := r.writeRequest(ctx, stream, stReq); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("write status request: %w", err)
 	}
 
 	// read and decode status response
 	resp := &pb.Status{}
 	if err := r.readResponse(ctx, stream, resp); err != nil {
+		stream.Reset()
 		return nil, fmt.Errorf("read status response: %w", err)
-	}
-
-	// if we requested the status from our delegate
-	if stream.Conn().RemotePeer() == r.delegate {
-		r.SetStatus(resp)
 	}
 
 	// we have the data that we want, so ignore error here
 	_ = stream.Close() // (both sides should actually be already closed)
+
+	return resp, nil
+}
+
+// StatusV2 requests V2 status from a peer
+func (r *ReqResp) StatusV2(ctx context.Context, pid peer.ID) (status *pb.StatusV2, err error) {
+	defer func() {
+		av, err := r.host.Peerstore().Get(pid, "AgentVersion")
+		if err != nil {
+			av = "unknown"
+		}
+
+		reqData := map[string]any{
+			"AgentVersion": av,
+			"PeerID":       pid.String(),
+		}
+		if status != nil {
+			reqData["ForkDigest"] = hex.EncodeToString(status.ForkDigest)
+			reqData["HeadRoot"] = hex.EncodeToString(status.HeadRoot)
+			reqData["HeadSlot"] = status.HeadSlot
+			reqData["FinalizedRoot"] = hex.EncodeToString(status.FinalizedRoot)
+			reqData["FinalizedEpoch"] = status.FinalizedEpoch
+			reqData["EarliestAvailableSlot"] = status.EarliestAvailableSlot
+		}
+
+		if err != nil {
+			reqData["Error"] = err.Error()
+		}
+
+		traceEvt := &hermeshost.TraceEvent{
+			Type:      "REQUEST_STATUS",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Payload:   reqData,
+		}
+
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
+		}
+
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "status_v2"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCStatusTopicV2))
+	if err != nil {
+		return nil, fmt.Errorf("new stream to peer %s: %w", pid, err)
+	}
+
+	// actually write the data to the stream
+	localStI := r.cfg.Chain.GetStatus(statusV1)
+	localSt, _ := localStI.(*pb.StatusV2)
+
+	if err := r.writeRequest(ctx, stream, localSt); err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("write status V2 request: %w", err)
+	}
+
+	// read and decode status response
+	resp := &pb.StatusV2{}
+	if err := r.readResponse(ctx, stream, resp); err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("read status V2 response: %w", err)
+	}
+
+	_ = stream.Close()
 
 	return resp, nil
 }
@@ -714,30 +783,29 @@ func (r *ReqResp) Ping(ctx context.Context, pid peer.ID) (err error) {
 	if err != nil {
 		return fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCPingTopicV1, pid, err)
 	}
-	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
 
-	r.metaDataMu.RLock()
-	seqNum := r.metaData.SeqNumber
-	r.metaDataMu.RUnlock()
+	seqNum := r.cfg.Chain.CurrentSeqNumber()
 
 	req := primitives.SSZUint64(seqNum)
 	if err := r.writeRequest(ctx, stream, &req); err != nil {
+		stream.Reset()
 		return fmt.Errorf("write ping request: %w", err)
 	}
 
 	// read and decode status response
 	resp := new(primitives.SSZUint64)
 	if err := r.readResponse(ctx, stream, resp); err != nil {
+		stream.Reset()
 		return fmt.Errorf("read ping response: %w", err)
 	}
 
-	// we have the data that we want, so ignore error here
-	_ = stream.Close() // (both sides should actually be already closed)
+	_ = stream.Close()
 
 	return nil
 }
 
-func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV1, err error) {
+// MetaData requests V1 metadata from a peer
+func (r *ReqResp) MetaDataV1(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV1, err error) {
 	defer func() {
 		reqData := map[string]any{
 			"PeerID": pid.String(),
@@ -771,21 +839,84 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
-	slog.Debug("Perform metadata request", tele.LogAttrPeerID(pid))
+	slog.Debug("Perform metadata V1 request", tele.LogAttrPeerID(pid))
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCMetaDataTopicV2))
 	if err != nil {
 		return resp, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV2, pid, err)
 	}
-	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
 
-	// read and decode status response
-	resp = &pb.MetaDataV1{}
-	if err := r.readResponse(ctx, stream, resp); err != nil {
-		return resp, fmt.Errorf("read ping response: %w", err)
+	if err := r.writeRequest(ctx, stream, nil); err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("write metadata v2 request %s", err)
 	}
 
-	// we have the data that we want, so ignore error here
-	_ = stream.Close() // (both sides should actually be already closed)
+	// read and decode metadata response
+	resp = &pb.MetaDataV1{}
+	if err := r.readResponse(ctx, stream, resp); err != nil {
+		stream.Reset()
+		return resp, fmt.Errorf("read metadata response: %w", err)
+	}
+
+	_ = stream.Close()
+
+	return resp, nil
+}
+
+// MetaDataV2 requests V2 metadata from a peer (includes custody group count)
+func (r *ReqResp) MetaDataV2(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV2, err error) {
+	defer func() {
+		reqData := map[string]any{
+			"PeerID": pid.String(),
+		}
+
+		if resp != nil {
+			reqData["SeqNumber"] = resp.SeqNumber
+			reqData["Attnets"] = resp.Attnets
+			reqData["Syncnets"] = resp.Syncnets
+			reqData["CustodyGroupCount"] = resp.CustodyGroupCount
+		}
+
+		if err != nil {
+			reqData["Error"] = err.Error()
+		}
+
+		traceEvt := &hermeshost.TraceEvent{
+			Type:      "REQUEST_METADATA_V2",
+			PeerID:    r.host.ID(),
+			Timestamp: time.Now(),
+			Payload:   reqData,
+		}
+		traceCtx := context.Background()
+		if err := r.cfg.DataStream.PutRecord(traceCtx, traceEvt); err != nil {
+			slog.Warn("failed to put record", tele.LogAttrError(err))
+		}
+
+		attrs := []attribute.KeyValue{
+			attribute.String("rpc", "meta_data_v2"),
+			attribute.Bool("success", err == nil),
+		}
+		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
+	}()
+
+	slog.Debug("Perform metadata V2 request", tele.LogAttrPeerID(pid))
+	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCMetaDataTopicV3))
+	if err != nil {
+		return resp, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCMetaDataTopicV3, pid, err)
+	}
+
+	if err := r.writeRequest(ctx, stream, nil); err != nil {
+		stream.Reset()
+		return nil, fmt.Errorf("write metadata v2 request %s", err)
+	}
+
+	// read and decode metadata response
+	resp = &pb.MetaDataV2{}
+	if err := r.readResponse(ctx, stream, resp); err != nil {
+		stream.Reset()
+		return resp, fmt.Errorf("read metadata V2 response: %w", err)
+	}
+
+	_ = stream.Close()
 
 	return resp, nil
 }
@@ -793,9 +924,7 @@ func (r *ReqResp) MetaData(ctx context.Context, pid peer.ID) (resp *pb.MetaDataV
 func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, lastSlot uint64) ([]interfaces.ReadOnlySignedBeaconBlock, error) {
 	var err error
 	blocks := make([]interfaces.ReadOnlySignedBeaconBlock, 0, (lastSlot - firstSlot))
-
 	startT := time.Now()
-
 	defer func() {
 		reqData := map[string]any{
 			"PeerID": pid.String(),
@@ -834,8 +963,6 @@ func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, l
 	if err != nil {
 		return blocks, fmt.Errorf("new %s stream to peer %s: %w", p2p.RPCBlocksByRangeTopicV2, pid, err)
 	}
-	defer stream.Close()
-	defer logDeferErr(stream.Reset, "failed closing stream") // no-op if closed
 
 	req := &pb.BeaconBlocksByRangeRequest{
 		StartSlot: primitives.Slot(firstSlot),
@@ -843,6 +970,7 @@ func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, l
 		Step:      1,
 	}
 	if err := r.writeRequest(ctx, stream, req); err != nil {
+		stream.Reset()
 		return blocks, fmt.Errorf("write block_by_range request: %w", err)
 	}
 
@@ -864,12 +992,16 @@ func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, l
 			break
 		}
 		if err != nil {
+			stream.Reset()
 			return nil, fmt.Errorf("reading block_by_range request: %w", err)
 		}
 		if err := process(blk); err != nil {
+			stream.Reset()
 			return nil, fmt.Errorf("processing block_by_range chunk: %w", err)
 		}
 	}
+
+	_ = stream.Close()
 
 	return blocks, nil
 }
@@ -884,6 +1016,7 @@ func (r *ReqResp) readRequest(ctx context.Context, stream network.Stream, data s
 	_, span := r.cfg.Tracer.Start(ctx, "read_request")
 	defer func() {
 		if err != nil {
+			slog.Error("reading request", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
@@ -901,7 +1034,6 @@ func (r *ReqResp) readRequest(ctx context.Context, stream network.Stream, data s
 	if err = stream.CloseRead(); err != nil {
 		return fmt.Errorf("failed to close reading side of stream: %w", err)
 	}
-
 	return nil
 }
 
@@ -912,6 +1044,7 @@ func (r *ReqResp) readResponse(ctx context.Context, stream network.Stream, data 
 	_, span := r.cfg.Tracer.Start(ctx, "read_response")
 	defer func() {
 		if err != nil {
+			slog.Error("reading response", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
@@ -955,11 +1088,12 @@ func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data 
 	_, span := r.cfg.Tracer.Start(ctx, "write_request")
 	defer func() {
 		if err != nil {
+			slog.Error("error writing request", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		span.End()
-		if err = stream.CloseWrite(); err != nil {
+		if wErr := stream.CloseWrite(); wErr != nil {
 			slog.Error(
 				"failed to close writing side of stream",
 				"peer", stream.Conn().RemotePeer().String(),
@@ -985,26 +1119,30 @@ func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data
 	_, span := r.cfg.Tracer.Start(ctx, "write_response")
 	defer func() {
 		if err != nil {
+			slog.Error("error writing response", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		span.End()
+		if wErr := stream.CloseWrite(); wErr != nil {
+			slog.Error(
+				"failed to close writing side of stream",
+				"peer", stream.Conn().RemotePeer().String(),
+				"error", err.Error(),
+			)
+		}
 	}()
 
 	if err = stream.SetWriteDeadline(time.Now().Add(r.cfg.WriteTimeout)); err != nil {
 		return fmt.Errorf("failed setting write deadline on stream: %w", err)
 	}
 
-	if _, err := stream.Write([]byte{0}); err != nil { // success response
+	if _, err := stream.Write([]byte{0x00}); err != nil { // success response
 		return fmt.Errorf("write success response code: %w", err)
 	}
 
 	if _, err = r.cfg.Encoder.EncodeWithMaxLength(stream, data); err != nil {
 		return fmt.Errorf("read sequence number: %w", err)
-	}
-
-	if err = stream.CloseWrite(); err != nil {
-		return fmt.Errorf("failed to close writing side of stream: %w", err)
 	}
 
 	return nil
@@ -1136,7 +1274,7 @@ func (r *ReqResp) getBlockForForkVersion(forkV ForkVersion, encoding encoder.Net
 		return blocks.NewSignedBeaconBlock(blk)
 	default:
 		sblk, _ := blocks.NewSignedBeaconBlock(&pb.SignedBeaconBlock{})
-		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %s) (global: %s)", forkV, r.cfg.ForkDigest, DenebForkVersion)
+		return sblk, fmt.Errorf("unrecognized fork_version (received:%s) (ours: %d) (global: %s)", forkV, r.cfg.Chain.CurrentFork(), DenebForkVersion)
 	}
 }
 
