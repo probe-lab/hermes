@@ -996,6 +996,7 @@ func (r *ReqResp) BlocksByRangeV2(ctx context.Context, pid peer.ID, firstSlot, l
 			return nil, fmt.Errorf("reading block_by_range request: %w", err)
 		}
 		if err := process(blk); err != nil {
+			stream.Reset()
 			return nil, fmt.Errorf("processing block_by_range chunk: %w", err)
 		}
 	}
