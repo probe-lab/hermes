@@ -113,7 +113,7 @@ func (c *Chain) init(ctx context.Context) error {
 		slog.Warn("Failed to fetch BlobSchedule from Prysm", tele.LogAttrError(err))
 	}
 
-	// try to always set the highest versions (versions bellow can be obtained from there)
+	// try to always set the highest versions (versions below can be obtained from there)
 	// Status
 	st := &pb.StatusV2{
 		ForkDigest:     forkDigest[:],
