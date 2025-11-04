@@ -240,7 +240,7 @@ func (c *Chain) Serve(ctx context.Context) error {
 	for {
 		select {
 		// Epoch iteration:
-		case <-time.After(384 * time.Second):
+		case <-time.After(120 * time.Second):
 			slog.Info("chian internal: new chain epoch...")
 			err := c.epochUpdate(ctx)
 			if err != nil {

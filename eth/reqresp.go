@@ -124,7 +124,7 @@ func (r *ReqResp) RegisterHandlers(ctx context.Context) error {
 		// p2p.RPCBlocksByRangeTopicV2:       r.blocksByRangeV2Handler,
 		// p2p.RPCBlocksByRootTopicV2:        r.blocksByRootV2Handler,
 		// p2p.RPCBlobSidecarsByRangeTopicV1: r.blobsByRangeV2Handler,
-		// p2p.RPCBlobSidecarsByRootTopicV1: r.blobsByRootV2Handler,
+		// p2p.RPCBlobSidecarsByRootTopicV1:  r.blobsByRootV2Handler,
 		// p2p.RPCDataColumnSidecarsByRangeTopicV1: r.DataColumnsByRangeV1Handler,
 		// p2p.RPCDataColumnSidecarsByRootTopicV1:  r.DataColumnsByRootV1Handler,
 	}
@@ -307,7 +307,11 @@ func (r *ReqResp) statusHandler(ctx context.Context, upstream network.Stream) (m
 
 	// let the upstream peer (who initiated the request) know the latest status
 	localStI := r.cfg.Chain.GetStatus(statusV0)
-	localSt, _ := localStI.(*pb.Status)
+	localSt, ok := localStI.(*pb.Status)
+	if !ok {
+		slog.Warn("no local status v2 for status handler")
+	}
+
 	if err := r.writeResponse(ctx, upstream, localSt); err != nil {
 		upstream.Reset()
 		return nil, fmt.Errorf("respond status to upstream: %w", err)
@@ -353,7 +357,10 @@ func (r *ReqResp) statusV2Handler(ctx context.Context, upstream network.Stream) 
 
 	// create response status from memory status
 	localStI := r.cfg.Chain.GetStatus(statusV1)
-	localSt, _ := localStI.(*pb.StatusV2)
+	localSt, ok := localStI.(*pb.StatusV2)
+	if !ok {
+		slog.Warn("no local status v2 for status handler")
+	}
 
 	// let the upstream peer (who initiated the request) know the latest status
 	if err := r.writeResponse(ctx, upstream, localSt); err != nil {
@@ -381,7 +388,10 @@ func (r *ReqResp) statusV2Handler(ctx context.Context, upstream network.Stream) 
 
 func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	mdI := r.cfg.Chain.GetMetadata(metadataV0)
-	metaData, _ := mdI.(*pb.MetaDataV0)
+	metaData, ok := mdI.(*pb.MetaDataV0)
+	if !ok {
+		slog.Warn("no local metadata v2 for metadata handler")
+	}
 
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
 		stream.Reset()
@@ -406,11 +416,9 @@ func (r *ReqResp) metadataV1Handler(ctx context.Context, stream network.Stream) 
 
 func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	mdI := r.cfg.Chain.GetMetadata(metadataV1)
-	metaData, _ := mdI.(*pb.MetaDataV1)
-
-	if err := r.writeResponse(ctx, stream, metaData); err != nil {
-		stream.Reset()
-		return nil, fmt.Errorf("write meta data v1: %w", err)
+	metaData, ok := mdI.(*pb.MetaDataV1)
+	if !ok {
+		slog.Warn("no local metadata v2 for metadata handler")
 	}
 
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
@@ -438,9 +446,9 @@ func (r *ReqResp) metadataV2Handler(ctx context.Context, stream network.Stream) 
 // metadataV3Handler handles MetadataV3 protocol requests (returns MetaDataV2 type)
 func (r *ReqResp) metadataV3Handler(ctx context.Context, stream network.Stream) (map[string]any, error) {
 	mdI := r.cfg.Chain.GetMetadata(metadataV2)
-	metaData, _ := mdI.(*pb.MetaDataV2)
-	if metaData == nil {
-		return nil, fmt.Errorf("no metadata available")
+	metaData, ok := mdI.(*pb.MetaDataV2)
+	if !ok {
+		slog.Warn("no local metadata v3 for metadata handler")
 	}
 
 	if err := r.writeResponse(ctx, stream, metaData); err != nil {
@@ -479,7 +487,6 @@ func (r *ReqResp) DataColumnsByRangeV1Handler(ctx context.Context, stream networ
 
 	// TODO: handle this correctly
 	// remote this and close correctly
-	stream.Reset()
 
 	traceData := map[string]any{
 		"PeerID":    stream.Conn().RemotePeer().String(),
@@ -658,7 +665,7 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 		r.meterRequestCounter.Add(traceCtx, 1, metric.WithAttributes(attrs...))
 	}()
 
-	slog.Info("Perform status V1 request", tele.LogAttrPeerID(pid))
+	slog.Debug("Perform status V1 request", tele.LogAttrPeerID(pid))
 	stream, err := r.host.NewStream(ctx, pid, r.protocolID(p2p.RPCStatusTopicV1))
 	if err != nil {
 		return nil, fmt.Errorf("new stream to peer %s: %w", pid, err)
@@ -666,7 +673,10 @@ func (r *ReqResp) Status(ctx context.Context, pid peer.ID) (status *pb.Status, e
 
 	// actually write the data to the stream
 	stI := r.cfg.Chain.GetStatus(statusV0)
-	stReq, _ := stI.(*pb.Status)
+	stReq, ok := stI.(*pb.Status)
+	if !ok {
+		slog.Warn("no local status ready")
+	}
 
 	if err := r.writeRequest(ctx, stream, stReq); err != nil {
 		stream.Reset()
@@ -1016,7 +1026,7 @@ func (r *ReqResp) readRequest(ctx context.Context, stream network.Stream, data s
 	_, span := r.cfg.Tracer.Start(ctx, "read_request")
 	defer func() {
 		if err != nil {
-			slog.Error("reading request", "err", err.Error())
+			slog.Debug("reading request", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
@@ -1044,7 +1054,7 @@ func (r *ReqResp) readResponse(ctx context.Context, stream network.Stream, data 
 	_, span := r.cfg.Tracer.Start(ctx, "read_response")
 	defer func() {
 		if err != nil {
-			slog.Error("reading response", "err", err.Error())
+			slog.Debug("reading response", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
@@ -1088,7 +1098,7 @@ func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data 
 	_, span := r.cfg.Tracer.Start(ctx, "write_request")
 	defer func() {
 		if err != nil {
-			slog.Error("error writing request", "err", err.Error())
+			slog.Debug("error writing request", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
@@ -1097,7 +1107,7 @@ func (r *ReqResp) writeRequest(ctx context.Context, stream network.Stream, data 
 			slog.Error(
 				"failed to close writing side of stream",
 				"peer", stream.Conn().RemotePeer().String(),
-				"error", err.Error(),
+				"error", wErr.Error(),
 			)
 		}
 	}()
@@ -1119,7 +1129,7 @@ func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data
 	_, span := r.cfg.Tracer.Start(ctx, "write_response")
 	defer func() {
 		if err != nil {
-			slog.Error("error writing response", "err", err.Error())
+			slog.Debug("error writing response", "err", err.Error())
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
@@ -1128,7 +1138,7 @@ func (r *ReqResp) writeResponse(ctx context.Context, stream network.Stream, data
 			slog.Error(
 				"failed to close writing side of stream",
 				"peer", stream.Conn().RemotePeer().String(),
-				"error", err.Error(),
+				"error", wErr.Error(),
 			)
 		}
 	}()
