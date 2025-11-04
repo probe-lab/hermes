@@ -84,7 +84,7 @@ var ethConfig = &struct {
 	SubnetDataColumnsType:      "random",
 	SubnetDataColumnsCount:     4,
 	SubscriptionTopics: []string{
-		"beacon_attestations",
+		"beacon_attestation",
 		"beacon_block",
 		"sync_committee",
 		"data_column_sidecar",

@@ -325,7 +325,7 @@ var rootFlags = []cli.Flag{
 	// libp2p host flags
 	&cli.IntFlag{
 		Name:        "dial.concurrency",
-		EnvVars:     []string{"HERMES_ETH_DIAL_CONCURRENCY"},
+		EnvVars:     []string{"HERMES_LIBP2P_DIAL_CONCURRENCY"},
 		Usage:       "The maximum number of parallel workers dialing other peers in the network",
 		Value:       rootConfig.DialConcurrency,
 		Destination: &rootConfig.DialConcurrency,
