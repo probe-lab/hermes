@@ -15,6 +15,7 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o hermes ./cmd/hermes
 FROM debian:latest
 
 # Create user hermes
+RUN apt-get update && apt-get install -y adduser
 RUN adduser --system --no-create-home --disabled-login --group hermes
 WORKDIR /home/hermes
 USER hermes
