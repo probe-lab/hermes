@@ -190,7 +190,6 @@ func (s3ds *S3DataStream) PutRecord(ctx context.Context, event *TraceEvent) erro
 			s3ds.s3Telemetry.batcherFlushIntervalHist.Record(
 				ctx,
 				int64(tSinceLastReset.Seconds()),
-				metric.WithAttributes(attribute.String("event_type", t.String())),
 			)
 			return s3ds.submitRecords(ctx, submissionT)
 		}
@@ -348,7 +347,6 @@ func (s3ds *S3DataStream) startPeriodicFlusher(ctx context.Context, interval tim
 				s3ds.s3Telemetry.batcherFlushIntervalHist.Record(
 					ctx,
 					int64(tSinceLastReset.Seconds()),
-					metric.WithAttributes(attribute.String("event_type", evType.String())),
 				)
 				cancel()
 			}
@@ -495,25 +493,23 @@ func (s3ds *S3DataStream) startS3Flusher(
 			uploadT := time.Since(uploadStartT)
 			totalT := time.Since(formatStartT)
 			// register the metrics
-			s3ds.s3Telemetry.bulkTraceHist.Record(
+			s3ds.s3Telemetry.bulkTraceCount.Add(
 				ctx,
 				int64(len(eventT.Events)),
 				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
 			)
+			s3ds.s3Telemetry.s3PutOpsCount.Add(ctx, 1)
 			s3ds.s3Telemetry.parquetFormatingLatencyHist.Record(
 				ctx,
 				formatT.Milliseconds(),
-				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
 			)
 			s3ds.s3Telemetry.s3SubmissionLantencyHist.Record(
 				ctx,
 				uploadT.Milliseconds(),
-				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
 			)
 			s3ds.s3Telemetry.parquetFileSizeHist.Record(
 				ctx,
 				int64(totBytes/(1024*1024)),
-				metric.WithAttributes(attribute.String("event_type", eventT.EventType.String())),
 			)
 			slog.Debug("submitted file to s3",
 				"MB", float32(totBytes)/(1024.0*1024.0),
@@ -707,7 +703,8 @@ func (b *eventBatcher) GetLastResetTime() time.Time {
 }
 
 type s3Telemetry struct {
-	bulkTraceHist               metric.Int64Histogram
+	bulkTraceCount              metric.Int64Counter
+	s3PutOpsCount               metric.Int64Counter
 	parquetFormatingLatencyHist metric.Int64Histogram
 	s3SubmissionLantencyHist    metric.Int64Histogram
 	parquetFileSizeHist         metric.Int64Histogram
@@ -715,17 +712,22 @@ type s3Telemetry struct {
 }
 
 func newS3Telemetry(meter metric.Meter) (*s3Telemetry, error) {
-	bulkTraceHist, err := meter.Int64Histogram(
+	bulkTraceCount, err := meter.Int64Counter(
 		"s3_bulk_traced_events",
 		metric.WithDescription("Number of bulk events added on each s3 submission per event category"),
-		metric.WithExplicitBucketBoundaries(
-			0, 100, 200, 500, 1000, 1500, 4000, 8000, 10000,
-		),
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	s3PutOpsCount, err := meter.Int64Counter(
+		"s3_put_ops",
+		metric.WithDescription("Number of individual s3 Put operations"),
+	)
+
+	if err != nil {
+		return nil, err
+	}
 	parquetFormatingLatencyHist, err := meter.Int64Histogram(
 		"s3_parquet_formating_latency_ms",
 		metric.WithDescription("Milliseconds that it took to format the given traces into a parquet file"),
@@ -745,7 +747,7 @@ func newS3Telemetry(meter metric.Meter) (*s3Telemetry, error) {
 	parquetFileSizeHist, err := meter.Int64Histogram(
 		"s3_parquet_file_size_mb",
 		metric.WithDescription("Size (in MB) of the submited parquet files to s3"),
-		metric.WithExplicitBucketBoundaries(0, 2, 5, 10, 12, 15, 20, 25, 30),
+		metric.WithExplicitBucketBoundaries(0, 5, 10, 15, 20, 25, 30),
 	)
 	if err != nil {
 		return nil, err
@@ -754,14 +756,15 @@ func newS3Telemetry(meter metric.Meter) (*s3Telemetry, error) {
 	batcherFlushIntervalHist, err := meter.Int64Histogram(
 		"s3_batcher_flush_interval_s",
 		metric.WithDescription("Interval between batcher flush times (in seconds)"),
-		metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 4, 5, 10, 12, 15, 20, 30),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 4, 5, 10),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	return &s3Telemetry{
-		bulkTraceHist:               bulkTraceHist,
+		bulkTraceCount:              bulkTraceCount,
+		s3PutOpsCount:               s3PutOpsCount,
 		parquetFormatingLatencyHist: parquetFormatingLatencyHist,
 		s3SubmissionLantencyHist:    s3SubmissionLatencyHist,
 		parquetFileSizeHist:         parquetFileSizeHist,
