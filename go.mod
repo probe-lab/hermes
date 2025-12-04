@@ -3,7 +3,8 @@ module github.com/probe-lab/hermes
 go 1.25.1
 
 require (
-	github.com/OffchainLabs/prysm/v6 v6.1.4
+	github.com/OffchainLabs/go-bitfield v0.0.0-20251031151322-f427d04d8506
+	github.com/OffchainLabs/prysm/v7 v7.0.0
 	github.com/aws/aws-sdk-go-v2 v1.32.7
 	github.com/aws/aws-sdk-go-v2/config v1.28.7
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.48
@@ -30,7 +31,7 @@ require (
 	github.com/parquet-go/parquet-go v0.24.0
 	github.com/probe-lab/eth-das-guardian v0.2.2
 	github.com/prometheus/client_golang v1.23.2
-	github.com/prysmaticlabs/fastssz v0.0.0-20241008181541-518c4ce73516
+	github.com/prysmaticlabs/fastssz v0.0.0-20251103153600-259302269bfc
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/stretchr/testify v1.11.1
 	github.com/thejerf/suture/v4 v4.0.6

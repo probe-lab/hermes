@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	pb "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"

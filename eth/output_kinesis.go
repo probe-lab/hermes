@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	ethtypes "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	ethtypes "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/probe-lab/hermes/host"

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p"
+	"github.com/OffchainLabs/prysm/v7/beacon-chain/p2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/probe-lab/hermes/tele"
 )

@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"net"
 
-	pb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	pb "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
