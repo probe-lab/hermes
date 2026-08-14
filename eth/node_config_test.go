@@ -8,11 +8,57 @@ import (
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/p2p"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/p2p/encoder"
 	"github.com/OffchainLabs/prysm/v7/config/params"
+	libp2ptest "github.com/libp2p/go-libp2p/core/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/metric/noop"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 )
+
+func TestNodeConfig_ValidateBlacklistPeers(t *testing.T) {
+	pid := libp2ptest.RandPeerIDFatal(t)
+	validAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/9000/p2p/%s", pid)
+
+	tests := []struct {
+		name           string
+		blacklistPeers []string
+		wantErr        string
+	}{
+		{
+			name:           "valid peer multiaddress",
+			blacklistPeers: []string{validAddr},
+		},
+		{
+			name:           "missing peer ID",
+			blacklistPeers: []string{"/ip4/127.0.0.1/tcp/9000"},
+			wantErr:        "blacklisted peer",
+		},
+		{
+			name:           "malformed peer ID",
+			blacklistPeers: []string{"/ip4/127.0.0.1/tcp/9000/p2p/not-a-peer-id"},
+			wantErr:        "blacklisted peer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := setupTestNodeConfig()
+			cfg.BlacklistPeers = tt.blacklistPeers
+
+			err := cfg.Validate()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			blacklistedPeers, err := cfg.BlacklistMultiaddrs()
+			require.NoError(t, err)
+			require.Len(t, blacklistedPeers, 1)
+			assert.Equal(t, pid, blacklistedPeers[0].ID)
+		})
+	}
+}
 
 func TestNodeConfig_ValidateSubnetConfigs(t *testing.T) {
 	tests := []struct {

@@ -128,6 +128,7 @@ func cmdFilAction(c *cli.Context) error {
 			Patterns: rootConfig.FilterPatterns,
 		},
 		DirectConnections: rootConfig.DirectConnections,
+		BlacklistPeers:    rootConfig.BlacklistPeers,
 		// Traces
 		DataStreamType: host.DataStreamtypeFromStr(rootConfig.DataStreamType),
 		AWSConfig:      rootConfig.awsConfig,

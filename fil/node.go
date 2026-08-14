@@ -62,6 +62,14 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
 	}
+	directConnections, err := cfg.DirectMultiaddrs()
+	if err != nil {
+		return nil, fmt.Errorf("parse direct connections: %w", err)
+	}
+	blacklistPeers, err := cfg.BlacklistMultiaddrs()
+	if err != nil {
+		return nil, fmt.Errorf("parse GossipSub blacklisted peers: %w", err)
+	}
 
 	var ds host.DataStream
 	switch cfg.DataStreamType {
@@ -118,10 +126,12 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
 
+	pubsubBlacklist := host.NewPubsubBlacklist(blacklistPeers)
 	hostCfg := &host.Config{
 		DataStream:            ds,
 		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
-		DirectConnections:     cfg.DirectMultiaddrs(),
+		DirectConnections:     directConnections,
+		PubsubBlacklist:       pubsubBlacklist,
 		PeerFilter:            cfg.PeerFilter,
 		Tracer:                cfg.Tracer,
 		Meter:                 cfg.Meter,

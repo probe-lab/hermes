@@ -28,8 +28,9 @@ type Node struct {
 	cfg *NodeConfig
 
 	// The libp2p host, however, this is a custom Hermes wrapper host.
-	host            *host.Host
-	pubsubBlacklist pubsub.Blacklist
+	host              *host.Host
+	directConnections []peer.AddrInfo
+	pubsubBlacklist   pubsub.Blacklist
 
 	// The data stream to which we transmit data
 	ds host.DataStream
@@ -80,6 +81,14 @@ type Node struct {
 func NewNode(cfg *NodeConfig) (*Node, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("node config validation failed: %w", err)
+	}
+	directConnections, err := cfg.DirectMultiaddrs()
+	if err != nil {
+		return nil, fmt.Errorf("parse direct connections: %w", err)
+	}
+	blacklistPeers, err := cfg.BlacklistMultiaddrs()
+	if err != nil {
+		return nil, fmt.Errorf("parse GossipSub blacklisted peers: %w", err)
 	}
 
 	// configure the global variables for the network ForkVersions
@@ -140,13 +149,18 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("not recognised data-stream (%s)", cfg.DataStreamType)
 	}
 
+	// Create a new Blacklisting map
+	// This is to prevent the node from connecting at the GossipSub level withe trusted Prysm node
+	pubsubBlacklist := host.NewPubsubBlacklist(blacklistPeers)
 	hostCfg := &host.Config{
 		DataStream:            ds,
 		PeerscoreSnapshotFreq: cfg.Libp2pPeerscoreSnapshotFreq,
-		DirectConnections:     cfg.DirectMultiaddrs(),
+		DirectConnections:     directConnections,
+		PubsubBlacklist:       pubsubBlacklist,
 		Tracer:                cfg.Tracer,
 		Meter:                 cfg.Meter,
 		PeerFilter:            cfg.PeerFilter,
+		DialBackoffMax:        cfg.DialBackoffMax,
 	}
 
 	// initialize libp2p host
@@ -205,6 +219,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		AttestationSubnetConfig: attConfig,
 		SyncSubnetConfig:        syncConfig,
 		ColumnSubnetConfig:      columConfig,
+		// Only full validation consults the proposer schedule.
+		TrackProposerDuties: cfg.Validation.Mode == ValidationModeFull,
 	}
 	chain, err := NewChain(ctx, chainCfg)
 	if err != nil {
@@ -246,6 +262,8 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		Encoder:        cfg.GossipSubMessageEncoder,
 		SecondsPerSlot: time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second,
 		DataStream:     ds,
+		Validation:     cfg.Validation,
+		Meter:          cfg.Meter,
 	}
 
 	pubSub, err := NewPubSub(h, pubSubConfig)
@@ -253,24 +271,21 @@ func NewNode(cfg *NodeConfig) (*Node, error) {
 		return nil, fmt.Errorf("new PubSub service: %w", err)
 	}
 
-	// Create a new Blacklisting map
-	// This is to prevent the node from connecting at the GossipSub level withe trusted Prysm node
-	blacklistMap := pubsub.NewMapBlacklist()
-
 	// finally, initialize hermes node
 	n := &Node{
-		cfg:             cfg,
-		host:            h,
-		chain:           chain,
-		pubsubBlacklist: blacklistMap,
-		ds:              ds,
-		sup:             suture.NewSimple("eth"),
-		reqResp:         reqResp,
-		pubSub:          pubSub,
-		pryClient:       pryClient,
-		peerer:          NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
-		disc:            disc,
-		eventCallbacks:  []func(ctx context.Context, event *host.TraceEvent){},
+		cfg:               cfg,
+		host:              h,
+		directConnections: directConnections,
+		chain:             chain,
+		pubsubBlacklist:   pubsubBlacklist,
+		ds:                ds,
+		sup:               suture.NewSimple("eth"),
+		reqResp:           reqResp,
+		pubSub:            pubSub,
+		pryClient:         pryClient,
+		peerer:            NewPeerer(h, pryClient, cfg.LocalTrustedAddr),
+		disc:              disc,
+		eventCallbacks:    []func(ctx context.Context, event *host.TraceEvent){},
 	}
 
 	if ds.Type() == host.DataStreamTypeCallback {

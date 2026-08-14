@@ -34,6 +34,12 @@ func (k *KinesisOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message,
 		return nil, fmt.Errorf("decode gossip message: %w", err)
 	}
 
+	return k.RenderDecodedPayload(evt, msg, dst)
+}
+
+// RenderDecodedPayload renders a message whose SSZ payload the caller already
+// decoded, so the gossip validator and this renderer share a single decode.
+func (k *KinesisOutput) RenderDecodedPayload(evt *host.TraceEvent, msg *pubsub.Message, dst ssz.Unmarshaler) (*host.TraceEvent, error) {
 	var (
 		err     error
 		payload map[string]any

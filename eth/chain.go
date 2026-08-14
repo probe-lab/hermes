@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/OffchainLabs/prysm/v7/config/params"
@@ -62,6 +63,10 @@ type ChainConfig struct {
 	AttestationSubnetConfig *SubnetConfig
 	SyncSubnetConfig        *SubnetConfig
 	ColumnSubnetConfig      *SubnetConfig
+
+	// TrackProposerDuties keeps the proposer schedule cached for gossip
+	// validation. Off unless validation needs it.
+	TrackProposerDuties bool
 }
 
 type Chain struct {
@@ -70,6 +75,10 @@ type Chain struct {
 
 	Fork             chainFork
 	chainUpgradeSubs []chainUpgradeSubFn
+
+	// Proposer schedule for gossip validation, read on the message path.
+	duties         *proposerDutyCache
+	dutyRefreshing atomic.Bool
 
 	// TODO:
 	// - DataColumn Cache
@@ -89,6 +98,7 @@ func NewChain(ctx context.Context, cfg *ChainConfig) (*Chain, error) {
 		closeC:           make(chan struct{}),
 		statusHolder:     &StatusHolder{},
 		metadataHolder:   &MetadataHolder{},
+		duties:           newProposerDutyCache(),
 	}
 
 	err := chain.init(ctx)
@@ -144,6 +154,10 @@ func (c *Chain) epochUpdate(ctx context.Context) error {
 			"duration", time.Since(t),
 		)
 	}()
+	// Detached from ctx: on the construction path that deadline is the whole
+	// node's startup budget. See startProposerDutyRefresh.
+	c.startProposerDutyRefresh()
+
 	// check if new hardfork
 	slog.Info("Getting Prysm's chain head...")
 	chainHead, err := c.cfg.clClient.ChainHead(ctx)

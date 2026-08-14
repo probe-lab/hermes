@@ -119,12 +119,30 @@ type NodeConfig struct {
 
 	// DirectConnections ensurest that our host doesn't prune the connection from these nodes
 	DirectConnections []string
+
+	// Validation controls how much of a gossip message is checked before hermes
+	// forwards it. Off by default, which is upstream behaviour.
+	Validation ValidationConfig
+
+	// DialBackoffMax caps the per-peer backoff after refused dials. Zero disables it.
+	DialBackoffMax time.Duration
+	// BlacklistPeers contains multiaddresses of peers to blacklist from GossipSub.
+	BlacklistPeers []string
 }
 
 // Validate validates the [NodeConfig] [Node] configuration.
 func (n *NodeConfig) Validate() error {
 	if n.GenesisConfig == nil {
 		return fmt.Errorf("genesis config must not be nil")
+	}
+
+	if err := n.Validation.Validate(); err != nil {
+		return err
+	}
+
+	// Only zero disables the backoff; a negative value would disable it silently.
+	if n.DialBackoffMax < 0 {
+		return fmt.Errorf("dial backoff max must not be negative, use 0 to disable")
 	}
 
 	if n.NetworkConfig == nil {
@@ -231,11 +249,12 @@ func (n *NodeConfig) Validate() error {
 		}
 	}
 
-	for _, p := range n.DirectConnections {
-		_, err := peer.AddrInfoFromString(p)
-		if err != nil {
-			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
-		}
+	if _, err := host.ParsePeerAddrInfos(n.DirectConnections); err != nil {
+		return fmt.Errorf("parse direct connections: %w", err)
+	}
+
+	if _, err := host.ParsePeerAddrInfos(n.BlacklistPeers); err != nil {
+		return fmt.Errorf("parse GossipSub blacklisted peers: %w", err)
 	}
 
 	if n.Tracer == nil {
@@ -303,22 +322,14 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	return gcrypto.ToECDSA(data)
 }
 
-// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
-func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
-	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
-	for i, p := range n.DirectConnections {
-		add, err := peer.AddrInfoFromString(p)
-		if err != nil {
-			slog.Error(
-				"parsing multia-addrs for direct peer",
-				"peer", p,
-				"err", err.Error(),
-			)
-			continue
-		}
-		dirConnAddrs[i] = *add
-	}
-	return dirConnAddrs
+// DirectMultiaddrs returns address information for the configured direct peers.
+func (n *NodeConfig) DirectMultiaddrs() ([]peer.AddrInfo, error) {
+	return host.ParsePeerAddrInfos(n.DirectConnections)
+}
+
+// BlacklistMultiaddrs returns address information for GossipSub-blacklisted peers.
+func (n *NodeConfig) BlacklistMultiaddrs() ([]peer.AddrInfo, error) {
+	return host.ParsePeerAddrInfos(n.BlacklistPeers)
 }
 
 // libp2pOptions returns the options to configure the libp2p node. It retrieves

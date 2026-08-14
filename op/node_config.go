@@ -74,6 +74,8 @@ type NodeConfig struct {
 	Libp2pPeerscoreSnapshotFreq time.Duration
 	PubSubValidateQueueSize     int
 	DirectConnections           []string
+	// BlacklistPeers contains multiaddresses of peers to blacklist from GossipSub.
+	BlacklistPeers []string
 
 	// PeerFilter configuration for filtering peers (passed to host)
 	PeerFilter *host.FilterConfig
@@ -135,11 +137,12 @@ func (n *NodeConfig) Validate() error {
 		}
 	}
 
-	for _, p := range n.DirectConnections {
-		_, err := peer.AddrInfoFromString(p)
-		if err != nil {
-			return fmt.Errorf("parsing multia-addrs for direct peer: %s, err: %s", p, err.Error())
-		}
+	if _, err := host.ParsePeerAddrInfos(n.DirectConnections); err != nil {
+		return fmt.Errorf("parse direct connections: %w", err)
+	}
+
+	if _, err := host.ParsePeerAddrInfos(n.BlacklistPeers); err != nil {
+		return fmt.Errorf("parse GossipSub blacklisted peers: %w", err)
 	}
 
 	if n.Tracer == nil {
@@ -207,22 +210,14 @@ func (n *NodeConfig) ECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	return gcrypto.ToECDSA(data)
 }
 
-// DirectMultiaddrs returns the []peer.AddrInfo for the given direct connction peers
-func (n *NodeConfig) DirectMultiaddrs() []peer.AddrInfo {
-	dirConnAddrs := make([]peer.AddrInfo, len(n.DirectConnections))
-	for i, p := range n.DirectConnections {
-		add, err := peer.AddrInfoFromString(p)
-		if err != nil {
-			slog.Error(
-				"parsing multia-addrs for direct peer",
-				"peer", p,
-				"err", err.Error(),
-			)
-			continue
-		}
-		dirConnAddrs[i] = *add
-	}
-	return dirConnAddrs
+// DirectMultiaddrs returns address information for the configured direct peers.
+func (n *NodeConfig) DirectMultiaddrs() ([]peer.AddrInfo, error) {
+	return host.ParsePeerAddrInfos(n.DirectConnections)
+}
+
+// BlacklistMultiaddrs returns address information for GossipSub-blacklisted peers.
+func (n *NodeConfig) BlacklistMultiaddrs() ([]peer.AddrInfo, error) {
+	return host.ParsePeerAddrInfos(n.BlacklistPeers)
 }
 
 // libp2pOptions returns the options to configure the libp2p node. It retrieves

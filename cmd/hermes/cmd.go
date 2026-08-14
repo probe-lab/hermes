@@ -19,6 +19,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 
+	"github.com/probe-lab/hermes/eth"
 	"github.com/probe-lab/hermes/host"
 	"github.com/probe-lab/hermes/tele"
 )
@@ -67,6 +68,11 @@ var rootConfig = struct {
 	FilterMode                  string
 	FilterPatterns              []string
 	DirectConnections           []string
+	ValidationMode              string
+	ValidationFailOpen          bool
+	ValidationSlotWindow        uint64
+	DialBackoffMax              time.Duration
+	BlacklistPeers              []string
 
 	// unexported fields are derived from the configuration
 	awsConfig *aws.Config
@@ -113,6 +119,11 @@ var rootConfig = struct {
 	FilterMode:                  "denylist",
 	FilterPatterns:              []string{"^hermes*"}, // avoid connecting to other hermes instances by default
 	DirectConnections:           nil,
+	BlacklistPeers:              nil,
+	ValidationMode:              string(eth.ValidationModeOff), // upstream behaviour: observe, never withhold
+	ValidationFailOpen:          true,
+	ValidationSlotWindow:        4,
+	DialBackoffMax:              0, // 0 disables the backoff gater
 
 	// unexported fields are derived or initialized during startup
 	awsConfig:           nil,
@@ -374,6 +385,34 @@ var rootFlags = []cli.Flag{
 		Value:       rootConfig.FilterMode,
 		Destination: &rootConfig.FilterMode,
 	},
+	&cli.DurationFlag{
+		Name:        "libp2p.dial-backoff.max",
+		EnvVars:     []string{"HERMES_LIBP2P_DIAL_BACKOFF_MAX"},
+		Usage:       "Cap on the per-peer dial backoff after refused connections. 0 disables the backoff",
+		Value:       rootConfig.DialBackoffMax,
+		Destination: &rootConfig.DialBackoffMax,
+	},
+	&cli.StringFlag{
+		Name:        "validation.mode",
+		EnvVars:     []string{"HERMES_VALIDATION_MODE"},
+		Usage:       "Gossip validation depth: off, structural, or full. Anything but off stops hermes forwarding messages it can prove are invalid",
+		Value:       rootConfig.ValidationMode,
+		Destination: &rootConfig.ValidationMode,
+	},
+	&cli.BoolFlag{
+		Name:        "validation.fail-open",
+		EnvVars:     []string{"HERMES_VALIDATION_FAIL_OPEN"},
+		Usage:       "Forward structurally valid messages that could not be fully verified, e.g. when the proposer duty cache is cold",
+		Value:       rootConfig.ValidationFailOpen,
+		Destination: &rootConfig.ValidationFailOpen,
+	},
+	&cli.Uint64Flag{
+		Name:        "validation.slot-window",
+		EnvVars:     []string{"HERMES_VALIDATION_SLOT_WINDOW"},
+		Usage:       "How many slots either side of the current slot a block may claim before it is ignored",
+		Value:       rootConfig.ValidationSlotWindow,
+		Destination: &rootConfig.ValidationSlotWindow,
+	},
 	&cli.StringSliceFlag{
 		Name:    "libp2p.filter.patterns",
 		EnvVars: []string{"HERMES_LIBP2P_FILTER_PATTERNS"},
@@ -389,6 +428,15 @@ var rootFlags = []cli.Flag{
 		Usage:   "Multiaddresses of the peers that we want to keep as direct connections",
 		Action: func(c *cli.Context, v []string) error {
 			rootConfig.DirectConnections = v
+			return nil
+		},
+	},
+	&cli.StringSliceFlag{
+		Name:    "libp2p.blacklist-peers",
+		EnvVars: []string{"HERMES_LIBP2P_BLACKLIST_PEERS"},
+		Usage:   "Multiaddresses of peer IDs to blacklist from GossipSub",
+		Action: func(c *cli.Context, v []string) error {
+			rootConfig.BlacklistPeers = v
 			return nil
 		},
 	},

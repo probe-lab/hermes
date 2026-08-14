@@ -139,6 +139,7 @@ func cmdOpAction(c *cli.Context) error {
 			Patterns: rootConfig.FilterPatterns,
 		},
 		DirectConnections: rootConfig.DirectConnections,
+		BlacklistPeers:    rootConfig.BlacklistPeers,
 		Bootstrappers:     bootstrappers,
 		// Traces
 		DataStreamType: host.DataStreamtypeFromStr(rootConfig.DataStreamType),

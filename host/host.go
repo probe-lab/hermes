@@ -12,6 +12,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	connmgr "github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -33,6 +34,10 @@ type Config struct {
 	DirectConnections     []peer.AddrInfo
 	PubsubBlacklist       pubsub.Blacklist
 
+	// DialBackoffMax caps the per-peer backoff after a refused connection. Zero
+	// disables the backoff gater entirely.
+	DialBackoffMax time.Duration
+
 	// Telemetry accessors
 	Tracer trace.Tracer
 	Meter  metric.Meter
@@ -40,10 +45,11 @@ type Config struct {
 
 type Host struct {
 	host.Host
-	cfg   *Config
-	ps    *pubsub.PubSub
-	avlru *lru.Cache[string, string]
-	sk    *ScoreKeeper
+	cfg         *Config
+	ps          *pubsub.PubSub
+	avlru       *lru.Cache[string, string]
+	sk          *ScoreKeeper
+	dialBackoff *DialBackoff
 
 	meterSubmittedTraces metric.Int64Counter
 	meterMeshSize        metric.Int64Gauge
@@ -52,10 +58,30 @@ type Host struct {
 	meterAvgMeshAppScore metric.Float64Gauge
 }
 
+// DialBackoff returns the backoff tracker, or nil when disabled. Callers that
+// observe a refusal report it here.
+func (h *Host) DialBackoff() *DialBackoff {
+	return h.dialBackoff
+}
+
+// isDirectPeer reports whether p is one of the configured direct connections,
+// which are exempt from backoff.
+func (h *Host) isDirectPeer(p peer.ID) bool {
+	for _, direct := range h.cfg.DirectConnections {
+		if direct.ID == p {
+			return true
+		}
+	}
+	return false
+}
+
 func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
-	// Add peer filtering if configured
+	// The gater is needed if either the agent filter or the dial backoff is on.
+	filterEnabled := cfg.PeerFilter != nil && cfg.PeerFilter.Mode != FilterModeDisabled
+	backoffEnabled := cfg.DialBackoffMax > 0
+
 	var deferredGater *deferredGater
-	if cfg.PeerFilter != nil && cfg.PeerFilter.Mode != FilterModeDisabled {
+	if filterEnabled || backoffEnabled {
 		deferredGater = newDeferredGater()
 		opts = append(opts, libp2p.ConnectionGater(deferredGater))
 	}
@@ -77,18 +103,35 @@ func New(cfg *Config, opts ...libp2p.Option) (*Host, error) {
 		sk:    newScoreKeeper(cfg.PeerscoreSnapshotFreq),
 	}
 
-	// Set up peer filter if enabled
 	if deferredGater != nil {
-		peerFilter, err := NewPeerFilter(hermesHost, *cfg.PeerFilter, slog.Default())
-		if err != nil {
-			return nil, fmt.Errorf("failed to create peer filter: %w", err)
+		var gaters []connmgr.ConnectionGater
+
+		if filterEnabled {
+			peerFilter, err := NewPeerFilter(hermesHost, *cfg.PeerFilter, slog.Default())
+			if err != nil {
+				return nil, fmt.Errorf("failed to create peer filter: %w", err)
+			}
+			gaters = append(gaters, peerFilter)
+			slog.Info(
+				"Peer filtering enabled",
+				"mode", cfg.PeerFilter.Mode,
+				"patterns", cfg.PeerFilter.Patterns,
+			)
 		}
-		deferredGater.SetActual(peerFilter)
-		slog.Info(
-			"Peer filtering enabled",
-			"mode", cfg.PeerFilter.Mode,
-			"patterns", cfg.PeerFilter.Patterns,
-		)
+
+		if backoffEnabled {
+			// Direct peers are the local gateway and beacon node; losing those to a
+			// backoff would break the pipeline this node exists to serve.
+			backoff, err := NewDialBackoff(cfg.DialBackoffMax, hermesHost.isDirectPeer, cfg.Meter)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create dial backoff: %w", err)
+			}
+			hermesHost.dialBackoff = backoff
+			gaters = append(gaters, backoff)
+			slog.Info("Dial backoff enabled", "max", cfg.DialBackoffMax)
+		}
+
+		deferredGater.SetActual(newCompositeGater(gaters...))
 	}
 
 	// Check if there are any kind of direct connections enabled
