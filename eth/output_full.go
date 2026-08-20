@@ -132,6 +132,12 @@ func (t *FullOutput) RenderPayload(evt *host.TraceEvent, msg *pubsub.Message, ds
 		return nil, fmt.Errorf("decode gossip message: %w", err)
 	}
 
+	return t.RenderDecodedPayload(evt, msg, dst)
+}
+
+// RenderDecodedPayload renders a message whose SSZ payload the caller already
+// decoded, so the gossip validator and this renderer share a single decode.
+func (t *FullOutput) RenderDecodedPayload(evt *host.TraceEvent, msg *pubsub.Message, dst ssz.Unmarshaler) (*host.TraceEvent, error) {
 	var (
 		err     error
 		payload any

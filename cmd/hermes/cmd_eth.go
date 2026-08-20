@@ -32,6 +32,10 @@ var ethConfig = &struct {
 	ConfigURL               string
 	BootnodesURL            string
 	DepositContractBlockURL string
+	// Gossip message validation.
+	MsgValidationMode       string
+	MsgValidationFailOpen   bool
+	MsgValidationSlotWindow uint64
 	// Subnet configuration.
 	SubnetAttestationType      string
 	SubnetAttestationSubnets   []int64
@@ -65,6 +69,10 @@ var ethConfig = &struct {
 	ConfigURL:               "",
 	BootnodesURL:            "",
 	DepositContractBlockURL: "",
+	// Off by default, so hermes observes without ever withholding.
+	MsgValidationMode:       string(eth.MsgValidationModeOff),
+	MsgValidationFailOpen:   true,
+	MsgValidationSlotWindow: 4,
 	// Default subnet configuration values.
 	SubnetAttestationType:      "random",
 	SubnetAttestationSubnets:   []int64{},
@@ -336,6 +344,27 @@ var cmdEthFlags = []cli.Flag{
 		Value:       ethConfig.SubnetDataColumnsCount,
 		Destination: &ethConfig.SubnetDataColumnsCount,
 	},
+	&cli.StringFlag{
+		Name:        "validation.mode",
+		EnvVars:     []string{"HERMES_ETH_VALIDATION_MODE"},
+		Usage:       "Gossip validation depth: off, structural, or full. Anything but off stops hermes forwarding messages it can prove are invalid",
+		Value:       ethConfig.MsgValidationMode,
+		Destination: &ethConfig.MsgValidationMode,
+	},
+	&cli.BoolFlag{
+		Name:        "validation.fail-open",
+		EnvVars:     []string{"HERMES_ETH_VALIDATION_FAIL_OPEN"},
+		Usage:       "Forward structurally valid messages that could not be fully verified, e.g. when the proposer duty cache is cold",
+		Value:       ethConfig.MsgValidationFailOpen,
+		Destination: &ethConfig.MsgValidationFailOpen,
+	},
+	&cli.Uint64Flag{
+		Name:        "validation.slot-window",
+		EnvVars:     []string{"HERMES_ETH_VALIDATION_SLOT_WINDOW"},
+		Usage:       "How many slots either side of the current slot a block may claim before it is ignored. 0 means the default",
+		Value:       ethConfig.MsgValidationSlotWindow,
+		Destination: &ethConfig.MsgValidationSlotWindow,
+	},
 }
 
 func cmdEthAction(c *cli.Context) error {
@@ -423,6 +452,11 @@ func cmdEthAction(c *cli.Context) error {
 			Patterns: rootConfig.FilterPatterns,
 		},
 		DirectConnections: rootConfig.DirectConnections,
+		MsgValidation: eth.MsgValidationConfig{
+			Mode:       eth.MsgValidationMode(ethConfig.MsgValidationMode),
+			FailOpen:   ethConfig.MsgValidationFailOpen,
+			SlotWindow: ethConfig.MsgValidationSlotWindow,
+		},
 		// PubSub config
 		PubSubSubscriptionRequestLimit: 200, // Prysm: beacon-chain/p2p/pubsub_filter.go#L22
 		PubSubMaxOutputQueue:           600, // Prysm: beacon-chain/p2p/config.go#L10

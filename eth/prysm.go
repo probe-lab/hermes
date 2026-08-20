@@ -17,9 +17,11 @@ import (
 	"github.com/OffchainLabs/prysm/v7/api/server/structs"
 	"github.com/OffchainLabs/prysm/v7/config/params"
 	"github.com/OffchainLabs/prysm/v7/consensus-types/primitives"
+	"github.com/OffchainLabs/prysm/v7/crypto/bls"
 	"github.com/OffchainLabs/prysm/v7/network/httputil"
 	eth "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
 	"github.com/OffchainLabs/prysm/v7/time/slots"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"go.opentelemetry.io/otel"
@@ -279,6 +281,125 @@ func (p *PrysmClient) RemoveTrustedPeer(ctx context.Context, pid peer.ID) (err e
 	}
 
 	return nil
+}
+
+// ProposerDuty is one slot's entry in the proposer schedule. The public key is
+// deserialized here, at fetch time, so signature verification on the gossip
+// path never pays the subgroup check.
+type ProposerDuty struct {
+	Index     primitives.ValidatorIndex
+	PublicKey bls.PublicKey
+}
+
+// proposerDutiesPaths are tried in order. v2 only exists from Prysm v7.1.5, and
+// the beacon-API spec has no v2 variant at all, so v1 is kept as the fallback:
+// without it a beacon node older than v7.1.5, or a rollback to one, would leave
+// the duty cache permanently empty and silently disable proposer and signature
+// checking. Both routes return the same response shape.
+var proposerDutiesPaths = []string{
+	"/eth/v2/validator/duties/proposer/%d",
+	"/eth/v1/validator/duties/proposer/%d",
+}
+
+// ProposerDuties returns the proposer schedule for epoch, keyed by slot.
+func (p *PrysmClient) ProposerDuties(ctx context.Context, epoch primitives.Epoch) (duties map[primitives.Slot]ProposerDuty, err error) {
+	ctx, span := p.tracer.Start(ctx, "prysm_client.proposer_duties", trace.WithAttributes(attribute.Int64("epoch", int64(epoch))))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	var errs []error
+	for _, path := range proposerDutiesPaths {
+		duties, err = p.proposerDutiesFrom(ctx, fmt.Sprintf(path, epoch))
+		if err == nil {
+			return duties, nil
+		}
+		errs = append(errs, err)
+		// Only a missing route is worth retrying on the older path; anything else
+		// (auth, unavailable, transport) would fail identically.
+		if !errors.Is(err, errRouteNotFound) {
+			break
+		}
+	}
+
+	return nil, fmt.Errorf("proposer duties for epoch %d: %w", epoch, errors.Join(errs...))
+}
+
+// errRouteNotFound marks a beacon node that does not serve the requested path.
+var errRouteNotFound = errors.New("route not found")
+
+func (p *PrysmClient) proposerDutiesFrom(ctx context.Context, path string) (map[primitives.Slot]ProposerDuty, error) {
+	u := url.URL{
+		Scheme: p.scheme,
+		Host:   fmt.Sprintf("%s:%d", p.host, p.port),
+		Path:   path,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("new proposer duties request: %w", err)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proposer duties http get failed: %w", err)
+	}
+	defer logDeferErr(resp.Body.Close, "Failed closing body")
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return nil, fmt.Errorf("%s: %w", path, errRouteNotFound)
+	default:
+		return nil, parseErrorResponse(resp)
+	}
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed reading response body: %w", err)
+	}
+
+	dutiesResp := &structs.GetProposerDutiesResponse{}
+	if err := json.Unmarshal(respData, dutiesResp); err != nil {
+		return nil, fmt.Errorf("failed unmarshalling response data: %w", err)
+	}
+
+	duties := make(map[primitives.Slot]ProposerDuty, len(dutiesResp.Data))
+	for _, d := range dutiesResp.Data {
+		slot, err := strconv.ParseUint(d.Slot, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse duty slot %q: %w", d.Slot, err)
+		}
+
+		index, err := strconv.ParseUint(d.ValidatorIndex, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse duty validator index %q: %w", d.ValidatorIndex, err)
+		}
+
+		rawKey, err := hexutil.Decode(d.Pubkey)
+		if err != nil {
+			return nil, fmt.Errorf("decode duty pubkey %q: %w", d.Pubkey, err)
+		}
+
+		pubKey, err := bls.PublicKeyFromBytes(rawKey)
+		if err != nil {
+			return nil, fmt.Errorf("deserialize duty pubkey for slot %d: %w", slot, err)
+		}
+
+		duties[primitives.Slot(slot)] = ProposerDuty{
+			Index:     primitives.ValidatorIndex(index),
+			PublicKey: pubKey,
+		}
+	}
+
+	return duties, nil
 }
 
 //lint:ignore SA1019 gRPC API deprecated but still supported until v8 (2026)
