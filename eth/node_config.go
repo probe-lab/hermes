@@ -388,6 +388,8 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeVa
 		pubsub.WithValidateQueueSize(n.PubSubValidateQueueSize),
 		pubsub.WithPeerScore(n.peerScoringParams(activeValidators)),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
+		// seen_ttl of the consensus p2p spec: two epochs.
+		pubsub.WithSeenMessagesTTL(2 * n.oneEpochDuration()),
 	}
 	return psOpts
 }
