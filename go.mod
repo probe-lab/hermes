@@ -16,7 +16,7 @@ require (
 	github.com/ferranbt/fastssz v1.0.0
 	github.com/filecoin-project/go-f3 v0.8.4
 	github.com/filecoin-project/lotus v1.32.2
-	github.com/golang/snappy v0.0.5-0.20231225225746-43d5d4cd4e0e
+	github.com/golang/snappy v1.0.1-0.20260716114414-9ae09f520e93
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/iand/pontium v0.3.15
